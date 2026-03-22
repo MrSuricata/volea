@@ -887,9 +887,9 @@ function HomePage() {
             {[
               { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
               { src: '/products/14.png', name: 'Enzo Rameau', role: 'Jugador VOLEA' },
-              { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Equipo VOLEA' },
-              { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Equipo VOLEA' },
-              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Equipo VOLEA' },
+              { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
+              { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora VOLEA' },
+              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Fundadora VOLEA' },
             ].map((member, i) => (
               <Reveal key={i} delay={i * 120}>
                 <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-gray-200">
