@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VOLEA | La Primera Marca de Pickleball en Uruguay</title>
+    <meta name="description" content="VOLEA - Indumentaria y accesorios de pickleball. La primera marca de pickleball en Uruguay. Remeras, polos, shorts, gorros y más." />
+    <meta name="keywords" content="pickleball, uruguay, volea, indumentaria deportiva, remeras, polos, shorts, gorros, torneos pickleball" />
+    <meta property="og:title" content="VOLEA | Pickleball Uruguay" />
+    <meta property="og:description" content="La primera marca de pickleball en Uruguay. Indumentaria y accesorios de alto rendimiento." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#001F3F" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23ccff00' stroke='%23001F3F' stroke-width='3'/><circle cx='35' cy='35' r='6' fill='%23001F3F'/><circle cx='60' cy='30' r='6' fill='%23001F3F'/><circle cx='72' cy='50' r='6' fill='%23001F3F'/><circle cx='60' cy='70' r='6' fill='%23001F3F'/><circle cx='35' cy='65' r='6' fill='%23001F3F'/><circle cx='25' cy='50' r='6' fill='%23001F3F'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ['Lexend', 'sans-serif'],
+              body: ['Montserrat', 'sans-serif'],
+            },
+            colors: {
+              navy: {
+                50: '#f0f4ff',
+                100: '#e0e8ff',
+                200: '#b8c9ff',
+                300: '#7a9bff',
+                400: '#4a6fd4',
+                500: '#1a3a6b',
+                600: '#0d2b52',
+                700: '#001F3F',
+                800: '#001830',
+                900: '#001020',
+              },
+              lime: {
+                50: '#fdfff0',
+                100: '#f5ffe0',
+                200: '#e8ffb8',
+                300: '#d4ff70',
+                400: '#ccff00',
+                500: '#B8E934',
+                600: '#9acc00',
+                700: '#7aa300',
+                800: '#5c7a00',
+                900: '#3d5200',
+              },
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Montserrat', sans-serif; }
+      ::selection { background-color: #ccff00; color: #001F3F; }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #001F3F; }
+      ::-webkit-scrollbar-thumb { background: #ccff00; border-radius: 4px; }
+      .fade-in { animation: fadeIn 0.5s ease-in; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+      .slide-in-right { animation: slideInRight 0.3s ease-out; }
+      @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+      .slide-in-left { animation: slideInLeft 0.3s ease-out; }
+      @keyframes slideInLeft { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+      .hover-scale { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+      .hover-scale:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,31,63,0.15); }
+      .img-zoom { overflow: hidden; }
+      .img-zoom img { transition: transform 0.5s ease; }
+      .img-zoom:hover img { transform: scale(1.05); }
+
+      /* Scroll reveal */
+      .reveal { opacity: 0; transform: translateY(40px); transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+      .reveal.visible { opacity: 1; transform: translateY(0); }
+
+      /* Parallax background */
+      .parallax-bg { background-attachment: fixed; background-position: center; background-repeat: no-repeat; background-size: cover; }
+
+      /* Gradient overlays */
+      .gradient-overlay { position: relative; }
+      .gradient-overlay::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(0,31,63,0.9) 0%, rgba(0,31,63,0.4) 100%); }
+
+      /* Product card enhanced hover */
+      .product-card { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+      .product-card:hover { transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,31,63,0.2); }
+      .product-card .card-img { transition: transform 0.6s ease; }
+      .product-card:hover .card-img { transform: scale(1.08); }
+      .product-card .card-overlay { opacity: 0; transition: opacity 0.3s ease; }
+      .product-card:hover .card-overlay { opacity: 1; }
+
+      /* Stagger animation */
+      .stagger-1 { animation-delay: 0.1s; }
+      .stagger-2 { animation-delay: 0.2s; }
+      .stagger-3 { animation-delay: 0.3s; }
+      .stagger-4 { animation-delay: 0.4s; }
+
+      /* Pulse glow for CTA */
+      .pulse-glow { animation: pulseGlow 2s infinite; }
+      @keyframes pulseGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(204,255,0,0.4); } 50% { box-shadow: 0 0 20px 10px rgba(204,255,0,0.1); } }
+
+      /* Marquee for announcements */
+      .marquee { animation: marquee 30s linear infinite; }
+      @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+      /* Number counter animation */
+      .count-up { animation: countUp 1s ease-out forwards; }
+
+      /* Text gradient */
+      .text-gradient { background: linear-gradient(90deg, #ccff00, #B8E934, #ccff00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-size: 200% auto; animation: shimmer 3s linear infinite; }
+      @keyframes shimmer { to { background-position: 200% center; } }
+
+      /* Floating animation */
+      .float { animation: float 3s ease-in-out infinite; }
+      @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+
+      /* Hero text stagger entrance */
+      .hero-enter { opacity: 0; transform: translateY(30px); animation: heroEnter 0.8s ease-out forwards; }
+      @keyframes heroEnter { to { opacity: 1; transform: translateY(0); } }
+      .hero-enter-1 { animation-delay: 0.1s; }
+      .hero-enter-2 { animation-delay: 0.3s; }
+      .hero-enter-3 { animation-delay: 0.5s; }
+      .hero-enter-4 { animation-delay: 0.7s; }
+
+      /* Gallery hover */
+      .gallery-item { position: relative; overflow: hidden; }
+      .gallery-item img { transition: transform 0.6s ease; }
+      .gallery-item:hover img { transform: scale(1.1); }
+      .gallery-item .gallery-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,31,63,0.8) 0%, transparent 60%); opacity: 0; transition: opacity 0.3s ease; }
+      .gallery-item:hover .gallery-overlay { opacity: 1; }
+    </style>
+  </head>
+  <body class="bg-white text-navy-700 font-body">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
