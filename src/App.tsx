@@ -883,12 +883,13 @@ function HomePage() {
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
             {[
-              { src: '/products/lifestyle-sunset-front.jpg', name: 'Enzo', role: 'Embajador VOLEA' },
-              { src: '/products/14.png', name: 'Valentina', role: 'Embajadora VOLEA' },
-              { src: '/products/lifestyle-sunset-3.jpg', name: 'Martín', role: 'Embajador VOLEA' },
-              { src: '/products/lifestyle-sunset-4.jpg', name: 'Camila', role: 'Embajadora VOLEA' },
+              { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
+              { src: '/products/14.png', name: 'Enzo Rameau', role: 'Jugador VOLEA' },
+              { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Equipo VOLEA' },
+              { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Equipo VOLEA' },
+              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Equipo VOLEA' },
             ].map((member, i) => (
               <Reveal key={i} delay={i * 120}>
                 <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-gray-200">
