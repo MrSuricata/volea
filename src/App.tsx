@@ -15,6 +15,8 @@ import {
   INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
 } from './constants';
 import { StorageService } from './services/storageService';
+import { SupabaseService } from './services/supabaseService';
+import { isSupabaseConnected } from './services/supabaseClient';
 
 // ─── 1. Utility Functions ────────────────────────────────────────────────────
 
@@ -105,81 +107,132 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [clubs, _setClubs] = useState<Club[]>([]);
   const [announcements, _setAnnouncements] = useState<Announcement[]>([]);
   const [cart, _setCart] = useState<CartItem[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => {
+    return sessionStorage.getItem('volea_admin') === 'true';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const ver = StorageService.getVersion();
-    if (ver !== StorageService.currentVersion) {
-      StorageService.clearAll();
-      StorageService.setVersion();
-      StorageService.setProducts(INITIAL_PRODUCTS);
-      StorageService.setEvents(INITIAL_EVENTS);
-      StorageService.setCategories(INITIAL_CATEGORIES);
-      StorageService.setClubs(INITIAL_CLUBS);
-      StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
-      _setProducts(INITIAL_PRODUCTS);
-      _setEvents(INITIAL_EVENTS);
-      _setCategories(INITIAL_CATEGORIES);
-      _setClubs(INITIAL_CLUBS);
-      _setAnnouncements(INITIAL_ANNOUNCEMENTS);
-      _setOrders([]);
-      _setCart([]);
-    } else {
-      const p = StorageService.getProducts();
-      const e = StorageService.getEvents();
-      const c = StorageService.getCategories();
-      const o = StorageService.getOrders();
-      const ct = StorageService.getCart();
-      const cl = StorageService.getClubs();
-      const an = StorageService.getAnnouncements();
-      _setProducts(p.length ? p : INITIAL_PRODUCTS);
-      _setEvents(e.length ? e : INITIAL_EVENTS);
-      _setCategories(c.length ? c : INITIAL_CATEGORIES);
-      _setClubs(cl.length ? cl : INITIAL_CLUBS);
-      _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
-      _setOrders(o);
-      _setCart(ct);
-      if (!p.length) StorageService.setProducts(INITIAL_PRODUCTS);
-      if (!e.length) StorageService.setEvents(INITIAL_EVENTS);
-      if (!c.length) StorageService.setCategories(INITIAL_CATEGORIES);
-      if (!cl.length) StorageService.setClubs(INITIAL_CLUBS);
-      if (!an.length) StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
-    }
-    setLoaded(true);
+    const loadData = async () => {
+      let loadedProducts: Product[] = [];
+      if (isSupabaseConnected()) {
+        // Load from Supabase
+        const [p, e, o, c, cl, an] = await Promise.all([
+          SupabaseService.getProducts(),
+          SupabaseService.getEvents(),
+          SupabaseService.getOrders(),
+          SupabaseService.getCategories(),
+          SupabaseService.getClubs(),
+          SupabaseService.getAnnouncements(),
+        ]);
+        loadedProducts = p.length ? p : INITIAL_PRODUCTS;
+        _setProducts(loadedProducts);
+        _setEvents(e.length ? e : INITIAL_EVENTS);
+        _setOrders(o);
+        _setCategories(c.length ? c : INITIAL_CATEGORIES);
+        _setClubs(cl.length ? cl : INITIAL_CLUBS);
+        _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
+        // Seed initial data if empty
+        if (!p.length) SupabaseService.setProducts(INITIAL_PRODUCTS);
+        if (!e.length) SupabaseService.setEvents(INITIAL_EVENTS);
+        if (!c.length) SupabaseService.setCategories(INITIAL_CATEGORIES);
+        if (!cl.length) SupabaseService.setClubs(INITIAL_CLUBS);
+        if (!an.length) SupabaseService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
+      } else {
+        // Fallback to localStorage
+        const ver = StorageService.getVersion();
+        if (ver !== StorageService.currentVersion) {
+          StorageService.clearAll();
+          StorageService.setVersion();
+          StorageService.setProducts(INITIAL_PRODUCTS);
+          StorageService.setEvents(INITIAL_EVENTS);
+          StorageService.setCategories(INITIAL_CATEGORIES);
+          StorageService.setClubs(INITIAL_CLUBS);
+          StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
+          loadedProducts = INITIAL_PRODUCTS;
+          _setProducts(INITIAL_PRODUCTS);
+          _setEvents(INITIAL_EVENTS);
+          _setCategories(INITIAL_CATEGORIES);
+          _setClubs(INITIAL_CLUBS);
+          _setAnnouncements(INITIAL_ANNOUNCEMENTS);
+          _setOrders([]);
+        } else {
+          const p = StorageService.getProducts();
+          const e = StorageService.getEvents();
+          const c = StorageService.getCategories();
+          const o = StorageService.getOrders();
+          const cl = StorageService.getClubs();
+          const an = StorageService.getAnnouncements();
+          loadedProducts = p.length ? p : INITIAL_PRODUCTS;
+          _setProducts(loadedProducts);
+          _setEvents(e.length ? e : INITIAL_EVENTS);
+          _setCategories(c.length ? c : INITIAL_CATEGORIES);
+          _setClubs(cl.length ? cl : INITIAL_CLUBS);
+          _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
+          _setOrders(o);
+          if (!p.length) StorageService.setProducts(INITIAL_PRODUCTS);
+          if (!e.length) StorageService.setEvents(INITIAL_EVENTS);
+          if (!c.length) StorageService.setCategories(INITIAL_CATEGORIES);
+          if (!cl.length) StorageService.setClubs(INITIAL_CLUBS);
+          if (!an.length) StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
+        }
+      }
+      // Cart always from localStorage (per-browser, personal to each user)
+      // Refresh cart items with current product data to avoid stale prices
+      const savedCart = StorageService.getCart();
+      const refreshedCart = savedCart.map(item => {
+        const currentProduct = loadedProducts.find(p => p.id === item.product.id);
+        if (currentProduct) {
+          return { ...item, product: currentProduct };
+        }
+        return item;
+      }).filter(item => {
+        return loadedProducts.some(p => p.id === item.product.id);
+      });
+      _setCart(refreshedCart);
+      StorageService.setCart(refreshedCart);
+      setLoaded(true);
+    };
+    loadData();
   }, []);
 
   const setProducts = useCallback((p: Product[]) => {
     _setProducts(p);
     StorageService.setProducts(p);
+    if (isSupabaseConnected()) SupabaseService.setProducts(p);
   }, []);
 
   const setEvents = useCallback((e: Event[]) => {
     _setEvents(e);
     StorageService.setEvents(e);
+    if (isSupabaseConnected()) SupabaseService.setEvents(e);
   }, []);
 
   const setOrders = useCallback((o: Order[]) => {
     _setOrders(o);
     StorageService.setOrders(o);
+    if (isSupabaseConnected()) SupabaseService.setOrders(o);
   }, []);
 
   const setCategories = useCallback((c: Category[]) => {
     _setCategories(c);
     StorageService.setCategories(c);
+    if (isSupabaseConnected()) SupabaseService.setCategories(c);
   }, []);
 
   const setClubs = useCallback((c: Club[]) => {
     _setClubs(c);
     StorageService.setClubs(c);
+    if (isSupabaseConnected()) SupabaseService.setClubs(c);
   }, []);
 
   const setAnnouncements = useCallback((a: Announcement[]) => {
     _setAnnouncements(a);
     StorageService.setAnnouncements(a);
+    if (isSupabaseConnected()) SupabaseService.setAnnouncements(a);
   }, []);
 
   const setCart = useCallback((c: CartItem[]) => {
@@ -192,7 +245,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       const idx = prev.findIndex(
         ci => ci.product.id === item.product.id && ci.selectedSize === item.selectedSize && ci.selectedColor === item.selectedColor
       );
-      const availableStock = item.product.stockBySize[item.selectedSize] || 0;
+      const stockKey = item.selectedColor ? `${item.selectedSize}|${item.selectedColor}` : item.selectedSize;
+      const availableStock = item.product.stockBySize[stockKey] || 0;
       const currentQty = idx >= 0 ? prev[idx].quantity : 0;
       const newQty = Math.min(currentQty + item.quantity, availableStock);
       if (newQty <= 0) return prev;
@@ -221,7 +275,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     _setCart(prev => {
       const next = prev.map(ci => {
         if (ci.product.id === productId && ci.selectedSize === size && ci.selectedColor === color) {
-          const maxStock = ci.product.stockBySize[size] || 0;
+          const stockKey = color ? `${size}|${color}` : size;
+          const maxStock = ci.product.stockBySize[stockKey] || 0;
           return { ...ci, quantity: Math.max(1, Math.min(qty, maxStock)) };
         }
         return ci;
@@ -239,12 +294,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback((password: string) => {
     if (password === ADMIN_PASSWORD) {
       setIsAdmin(true);
+      sessionStorage.setItem('volea_admin', 'true');
       return true;
     }
     return false;
   }, []);
 
-  const logout = useCallback(() => setIsAdmin(false), []);
+  const logout = useCallback(() => {
+    setIsAdmin(false);
+    sessionStorage.removeItem('volea_admin');
+  }, []);
 
   if (!loaded) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-navy-700 gap-6">
@@ -550,7 +609,7 @@ function ProductCard({ product }: { product: Product }) {
 function HomePage() {
   const { products, events, categories, announcements } = useStore();
   const featured = products.filter(p => p.isFeatured).slice(0, 4);
-  const upcomingEvents = events.filter(e => e.status === 'upcoming');
+  const upcomingEvents = events.filter(e => new Date(e.date) >= new Date());
   const nextEvent = upcomingEvents.length > 0
     ? upcomingEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0]
     : null;
@@ -1111,13 +1170,22 @@ function ProductDetailPage() {
     );
   }
 
+  const getStock = (size: string, color?: string): number => {
+    if (color) return product.stockBySize[`${size}|${color}`] || 0;
+    if (product.colors.length === 0) return product.stockBySize[size] || 0;
+    return product.colors.reduce((sum, c) => sum + (product.stockBySize[`${size}|${c.name}`] || 0), 0);
+  };
+
+  const currentStock = selectedSize ? getStock(selectedSize, selectedColor || undefined) : 0;
+
   const images = product.images.length > 0 ? product.images : [FALLBACK_IMG];
   const related = products.filter(p => p.category === product.category && p.id !== product.id).slice(0, 4);
 
   const handleAdd = () => {
-    const availableStock = product.stockBySize[selectedSize] || 0;
+    const stockKey = selectedColor ? `${selectedSize}|${selectedColor}` : selectedSize;
+    const availableStock = product.stockBySize[stockKey] || 0;
     if (qty > availableStock) {
-      alert(`Solo hay ${availableStock} unidades disponibles en talle ${selectedSize}`);
+      alert(`Solo hay ${availableStock} unidades disponibles en talle ${selectedSize}${selectedColor ? ` color ${selectedColor}` : ''}`);
       return;
     }
     addToCart({ product, quantity: qty, selectedSize, selectedColor });
@@ -1216,13 +1284,13 @@ function ProductDetailPage() {
                 Talle
                 {selectedSize && (
                   <span className="ml-2 text-sm font-normal text-gray-500">
-                    ({(product.stockBySize[selectedSize] || 0)} disponibles)
+                    ({currentStock} disponibles{selectedColor ? ` en ${selectedColor}` : ''})
                   </span>
                 )}
               </label>
               <div className="flex flex-wrap gap-2">
                 {product.sizes.map(size => {
-                  const sizeStock = product.stockBySize[size] || 0;
+                  const sizeStock = getStock(size);
                   return (
                     <button
                       key={size}
@@ -1274,14 +1342,16 @@ function ProductDetailPage() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setQty(Math.max(1, qty - 1))}
-                className="w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-100 transition-colors"
+                disabled={qty <= 1}
+                className={`w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
               >
                 <Minus size={18} />
               </button>
               <span className="font-display font-bold text-lg w-10 text-center">{qty}</span>
               <button
-                onClick={() => setQty(qty + 1)}
-                className="w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-100 transition-colors"
+                onClick={() => setQty(Math.min(qty + 1, currentStock))}
+                disabled={qty >= currentStock}
+                className={`w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty >= currentStock ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
               >
                 <Plus size={18} />
               </button>
@@ -1290,9 +1360,9 @@ function ProductDetailPage() {
 
           {/* Stock */}
           <div className="mb-6">
-            {selectedSize && (product.stockBySize[selectedSize] || 0) > 0 ? (
+            {selectedSize && currentStock > 0 ? (
               <span className="flex items-center gap-2 text-green-600 text-sm font-semibold">
-                <Check size={16} /> En stock ({product.stockBySize[selectedSize]} disponibles en talle {selectedSize})
+                <Check size={16} /> En stock ({currentStock} disponibles en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
               </span>
             ) : getTotalStock(product) === 0 ? (
               <span className="flex items-center gap-2 text-red-500 text-sm font-semibold">
@@ -1300,7 +1370,7 @@ function ProductDetailPage() {
               </span>
             ) : (
               <span className="flex items-center gap-2 text-red-500 text-sm font-semibold">
-                <XCircle size={16} /> Sin stock en talle {selectedSize}
+                <XCircle size={16} /> Sin stock en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''}
               </span>
             )}
           </div>
@@ -1308,11 +1378,11 @@ function ProductDetailPage() {
           {/* Add to Cart */}
           <button
             onClick={handleAdd}
-            disabled={!selectedSize || (product.stockBySize[selectedSize] || 0) === 0}
+            disabled={!selectedSize || currentStock === 0}
             className={`w-full font-display font-bold py-4 rounded-lg text-lg transition-all flex items-center justify-center gap-2 ${
               added
                 ? 'bg-green-500 text-white'
-                : !selectedSize || (product.stockBySize[selectedSize] || 0) === 0
+                : !selectedSize || currentStock === 0
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-lime-400 hover:bg-lime-500 text-navy-700'
             }`}
@@ -1341,9 +1411,14 @@ function EventsPage() {
   const { events } = useStore();
   const [filter, setFilter] = useState<string>('all');
 
+  const isEventPast = (event: Event) => {
+    const eventDate = new Date(event.date);
+    return eventDate < new Date();
+  };
+
   const filtered = filter === 'all' ? events : events.filter(e => e.category === filter);
-  const upcoming = filtered.filter(e => e.status === 'upcoming').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const past = filtered.filter(e => e.status === 'past').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const upcoming = filtered.filter(e => !isEventPast(e)).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const past = filtered.filter(e => isEventPast(e)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const categoryLabel = (cat: string) => {
     if (cat === 'tournament') return 'Torneo';
@@ -1538,12 +1613,20 @@ function MapPage() {
     });
   }, [filteredClubs]);
 
-  const countryFlag = (country: string) => country === 'Uruguay' ? '🇺🇾' : '🇦🇷';
+  const countryFlag = (country: string) => {
+    switch(country) {
+      case 'Uruguay': return '🇺🇾';
+      case 'Argentina': return '🇦🇷';
+      case 'Chile': return '🇨🇱';
+      case 'Brasil': return '🇧🇷';
+      default: return '🌎';
+    }
+  };
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
       <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Clubes y Canchas</h1>
-      <p className="text-gray-500 mb-2">Encontrá dónde jugar pickleball en Uruguay y Argentina</p>
+      <p className="text-gray-500 mb-2">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
       {/* Country filter */}
@@ -1629,8 +1712,8 @@ function ContactPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const msg = `Hola! Soy ${form.name}.%0A%0A${form.message}%0A%0AEmail: ${form.email}%0ATel: ${form.phone}`;
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, '_blank');
+    const msg = `Hola! Soy ${form.name}.\n\n${form.message}\n\nEmail: ${form.email}\nTel: ${form.phone}`;
+    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
     setSent(true);
     setTimeout(() => setSent(false), 3000);
     setForm({ name: '', email: '', phone: '', message: '' });
@@ -1759,7 +1842,7 @@ function ContactPage() {
 // ─── 12. CheckoutPage ────────────────────────────────────────────────────────
 
 function CheckoutPage() {
-  const { cart, clearCart, orders, setOrders } = useStore();
+  const { cart, clearCart, orders, setOrders, products, setProducts } = useStore();
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<CustomerInfo>({
     name: '', phone: '', email: '', address: '', city: '', department: 'Montevideo', notes: ''
@@ -1811,6 +1894,21 @@ function CheckoutPage() {
     };
     setOrders([...orders, order]);
 
+    // Decrement stock for purchased items
+    const updatedProducts = products.map(p => {
+      const cartItem = cart.find(ci => ci.product.id === p.id);
+      if (!cartItem) return p;
+      const stockKey = cartItem.selectedColor ? `${cartItem.selectedSize}|${cartItem.selectedColor}` : cartItem.selectedSize;
+      return {
+        ...p,
+        stockBySize: {
+          ...p.stockBySize,
+          [stockKey]: Math.max(0, (p.stockBySize[stockKey] || 0) - cartItem.quantity)
+        }
+      };
+    });
+    setProducts(updatedProducts);
+
     // Build WhatsApp message
     const lines = [
       `🏓 *Nuevo Pedido VOLEA*`,
@@ -1826,9 +1924,10 @@ function CheckoutPage() {
       ...cart.map(i => `  • [${i.product.sku}] ${i.product.name} (${i.selectedSize}/${i.selectedColor}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
       ``,
       `💰 *Total: ${formatPrice(total)}*`,
-    ].filter(Boolean).join('%0A');
+    ].filter(Boolean).join('\n');
 
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines).replace(/%250A/g, '%0A')}`, '_blank');
+    const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines)}`;
+    window.open(whatsappUrl, '_blank');
     clearCart();
     setSuccess(true);
   };
@@ -2251,6 +2350,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteConfirm(null)}
                 onConfirm={() => {
+                  if (isSupabaseConnected()) SupabaseService.deleteProduct(deleteConfirm);
                   setProducts(products.filter(p => p.id !== deleteConfirm));
                   setDeleteConfirm(null);
                 }}
@@ -2347,6 +2447,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteEventConfirm(null)}
                 onConfirm={() => {
+                  if (isSupabaseConnected()) SupabaseService.deleteEvent(deleteEventConfirm);
                   setEvents(events.filter(e => e.id !== deleteEventConfirm));
                   setDeleteEventConfirm(null);
                 }}
@@ -2487,7 +2588,10 @@ function AdminPage() {
                   <div key={cat.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
                     <span className="font-display font-semibold text-navy-700">{cat.name}</span>
                     <button
-                      onClick={() => setCategories(categories.filter(c => c.id !== cat.id))}
+                      onClick={() => {
+                        if (isSupabaseConnected()) SupabaseService.deleteCategory(cat.id);
+                        setCategories(categories.filter(c => c.id !== cat.id));
+                      }}
                       className="text-gray-400 hover:text-red-500 transition-colors"
                     >
                       <X size={18} />
@@ -2528,7 +2632,7 @@ function AdminPage() {
                       <tr key={club.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm">{club.name}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{club.city}</td>
-                        <td className="px-4 py-3 text-sm">{club.country === 'Uruguay' ? '🇺🇾' : '🇦🇷'} {club.country}</td>
+                        <td className="px-4 py-3 text-sm">{club.country === 'Uruguay' ? '🇺🇾' : club.country === 'Argentina' ? '🇦🇷' : club.country === 'Chile' ? '🇨🇱' : club.country === 'Brasil' ? '🇧🇷' : '🌎'} {club.country}</td>
                         <td className="px-4 py-3 hidden sm:table-cell">
                           {club.hasPickleball && <Check size={16} className="text-green-600" />}
                         </td>
@@ -2577,6 +2681,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteClubConfirm(null)}
                 onConfirm={() => {
+                  if (isSupabaseConnected()) SupabaseService.deleteClub(deleteClubConfirm);
                   setClubs(clubs.filter(c => c.id !== deleteClubConfirm));
                   setDeleteClubConfirm(null);
                 }}
@@ -2676,6 +2781,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteAnnouncementConfirm(null)}
                 onConfirm={() => {
+                  if (isSupabaseConnected()) SupabaseService.deleteAnnouncement(deleteAnnouncementConfirm);
                   setAnnouncements(announcements.filter(a => a.id !== deleteAnnouncementConfirm));
                   setDeleteAnnouncementConfirm(null);
                 }}
@@ -2876,17 +2982,28 @@ function ProductModal({
                   onClick={() => {
                     if (form.sizes.includes(size)) {
                       const newStockBySize = { ...form.stockBySize };
-                      delete newStockBySize[size];
+                      // Remove all stock keys for this size (both SIZE and SIZE|COLOR)
+                      Object.keys(newStockBySize).forEach(key => {
+                        if (key === size || key.startsWith(`${size}|`)) {
+                          delete newStockBySize[key];
+                        }
+                      });
                       setForm({
                         ...form,
                         sizes: form.sizes.filter(s => s !== size),
                         stockBySize: newStockBySize,
                       });
                     } else {
+                      const newStockBySize = { ...form.stockBySize };
+                      if (form.colors.length > 0) {
+                        form.colors.forEach(c => { newStockBySize[`${size}|${c.name}`] = 0; });
+                      } else {
+                        newStockBySize[size] = 0;
+                      }
                       setForm({
                         ...form,
                         sizes: [...form.sizes, size],
-                        stockBySize: { ...form.stockBySize, [size]: 0 },
+                        stockBySize: newStockBySize,
                       });
                     }
                   }}
@@ -2902,27 +3019,73 @@ function ProductModal({
             </div>
           </div>
 
-          {/* Stock por talle */}
+          {/* Stock por talle y color */}
           {form.sizes.length > 0 && (
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-2">Stock por talle (Total: {getTotalStock(form)})</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {form.sizes.map(size => (
-                  <div key={size} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                    <span className="text-sm font-semibold text-navy-700 w-10">{size}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={form.stockBySize[size] || 0}
-                      onChange={e => setForm({
-                        ...form,
-                        stockBySize: { ...form.stockBySize, [size]: Math.max(0, Number(e.target.value)) }
-                      })}
-                      className="flex-1 px-2 py-1 rounded border border-gray-200 focus:border-lime-400 outline-none text-sm text-center"
-                    />
-                  </div>
-                ))}
-              </div>
+              <label className="block text-sm font-semibold text-navy-700 mb-2">
+                {form.colors.length > 0 ? 'Stock por Talle y Color' : 'Stock por Talle'} (Total: {getTotalStock(form)})
+              </label>
+              {form.colors.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className="text-left px-2 py-1 font-semibold text-navy-700">Talle</th>
+                        {form.colors.map(c => (
+                          <th key={c.name} className="px-2 py-1 font-semibold text-navy-700 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="w-3 h-3 rounded-full border border-gray-300 inline-block" style={{ backgroundColor: c.hex }} />
+                              {c.name}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.sizes.map(size => (
+                        <tr key={size} className="border-t border-gray-100">
+                          <td className="px-2 py-2 font-semibold text-navy-700">{size}</td>
+                          {form.colors.map(c => {
+                            const stockKey = `${size}|${c.name}`;
+                            return (
+                              <td key={c.name} className="px-2 py-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={form.stockBySize[stockKey] || 0}
+                                  onChange={e => setForm({
+                                    ...form,
+                                    stockBySize: { ...form.stockBySize, [stockKey]: Math.max(0, Number(e.target.value)) }
+                                  })}
+                                  className="w-full px-2 py-1 rounded border border-gray-200 focus:border-lime-400 outline-none text-sm text-center"
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {form.sizes.map(size => (
+                    <div key={size} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                      <span className="text-sm font-semibold text-navy-700 w-10">{size}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.stockBySize[size] || 0}
+                        onChange={e => setForm({
+                          ...form,
+                          stockBySize: { ...form.stockBySize, [size]: Math.max(0, Number(e.target.value)) }
+                        })}
+                        className="flex-1 px-2 py-1 rounded border border-gray-200 focus:border-lime-400 outline-none text-sm text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
