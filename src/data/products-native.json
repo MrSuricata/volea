@@ -1,0 +1,1325 @@
+{
+  "products": [
+    {
+      "id": "8433970118841",
+      "name": "VOLEA Classic",
+      "sku": "",
+      "description": "Remera de manga corta diseñada para deportistas. Confeccionada con tejidos transpirables que garantizan máxima comodidad durante el juego. Disponible en varios colores.",
+      "price": 780,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-negra/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-negra/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-negra/3.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-negra/4.png"
+      ],
+      "sizes": [
+        "S / Masculino",
+        "S / Femenino",
+        "L / Masculino",
+        "L / Femenino",
+        "M / Masculino",
+        "M / Femenino",
+        "XL / Masculino",
+        "XL / Femenino",
+        "2XL / Masculino",
+        "2XL / Femenino",
+        "3XL / Masculino",
+        "3XL / Femenino",
+        "XS / Masculino",
+        "XS / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Azul marino",
+          "hex": "#0F1F4B"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        },
+        {
+          "name": "Fucsia",
+          "hex": "#D946EF"
+        }
+      ],
+      "stock_by_size": {
+        "S / Masculino|Negro": 1,
+        "S / Femenino|Negro": 0,
+        "L / Masculino|Negro": 2,
+        "L / Femenino|Negro": 2,
+        "M / Masculino|Negro": 1,
+        "M / Femenino|Negro": 2,
+        "XL / Masculino|Negro": 2,
+        "XL / Femenino|Negro": 2,
+        "2XL / Masculino|Negro": 2,
+        "2XL / Femenino|Negro": 2,
+        "3XL / Masculino|Negro": 0,
+        "3XL / Femenino|Negro": 0,
+        "XS / Masculino|Negro": 3,
+        "XS / Femenino|Negro": 0,
+        "S / Masculino|Azul marino": 0,
+        "S / Femenino|Azul marino": 0,
+        "L / Masculino|Azul marino": 0,
+        "L / Femenino|Azul marino": 0,
+        "M / Masculino|Azul marino": 0,
+        "M / Femenino|Azul marino": 0,
+        "XL / Masculino|Azul marino": 0,
+        "XL / Femenino|Azul marino": 0,
+        "2XL / Masculino|Azul marino": 0,
+        "2XL / Femenino|Azul marino": 1,
+        "3XL / Masculino|Azul marino": 0,
+        "3XL / Femenino|Azul marino": 0,
+        "XS / Masculino|Azul marino": 0,
+        "XS / Femenino|Azul marino": 0,
+        "S / Masculino|Blanco": 0,
+        "S / Femenino|Blanco": 0,
+        "L / Masculino|Blanco": 1,
+        "L / Femenino|Blanco": 1,
+        "M / Masculino|Blanco": 1,
+        "M / Femenino|Blanco": 0,
+        "XL / Masculino|Blanco": 0,
+        "XL / Femenino|Blanco": 2,
+        "2XL / Masculino|Blanco": 1,
+        "2XL / Femenino|Blanco": 0,
+        "3XL / Masculino|Blanco": 0,
+        "3XL / Femenino|Blanco": 0,
+        "XS / Masculino|Blanco": 0,
+        "XS / Femenino|Blanco": 0,
+        "S / Masculino|Fucsia": 0,
+        "S / Femenino|Fucsia": 3,
+        "L / Masculino|Fucsia": 0,
+        "L / Femenino|Fucsia": 5,
+        "M / Masculino|Fucsia": 0,
+        "M / Femenino|Fucsia": 5,
+        "XL / Masculino|Fucsia": 0,
+        "XL / Femenino|Fucsia": 5,
+        "2XL / Masculino|Fucsia": 0,
+        "2XL / Femenino|Fucsia": 6,
+        "3XL / Masculino|Fucsia": 0,
+        "3XL / Femenino|Fucsia": 0,
+        "XS / Masculino|Fucsia": 0,
+        "XS / Femenino|Fucsia": 0
+      },
+      "is_featured": true,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 0
+    },
+    {
+      "id": "8437756428473",
+      "name": "VOLEA Classic Mujer",
+      "sku": "",
+      "description": "Remera de manga corta diseñada para deportistas. Confeccionada con tejidos transpirables que garantizan máxima comodidad durante el juego. Disponible en varios colores.",
+      "price": 780,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-mujer/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-mujer/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-classic-mujer/3.png"
+      ],
+      "sizes": [
+        "2XL / Femenino",
+        "S / Femenino",
+        "M / Femenino",
+        "L / Femenino",
+        "XL / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Fucsia",
+          "hex": "#D946EF"
+        },
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Verde",
+          "hex": "#16A34A"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "2XL / Femenino|Fucsia": 3,
+        "S / Femenino|Fucsia": 1,
+        "M / Femenino|Fucsia": 2,
+        "L / Femenino|Fucsia": 2,
+        "XL / Femenino|Fucsia": 5,
+        "2XL / Femenino|Negro": 2,
+        "S / Femenino|Negro": 0,
+        "M / Femenino|Negro": 2,
+        "L / Femenino|Negro": 2,
+        "XL / Femenino|Negro": 2,
+        "2XL / Femenino|Verde": 0,
+        "S / Femenino|Verde": 0,
+        "M / Femenino|Verde": 0,
+        "L / Femenino|Verde": 0,
+        "XL / Femenino|Verde": 0,
+        "2XL / Femenino|Blanco": 0,
+        "S / Femenino|Blanco": 0,
+        "M / Femenino|Blanco": 0,
+        "L / Femenino|Blanco": 2,
+        "XL / Femenino|Blanco": 2
+      },
+      "is_featured": true,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 1
+    },
+    {
+      "id": "8460407996601",
+      "name": "VOLEA Polo",
+      "sku": "",
+      "description": "La Remera Polo VOLEA combina estilo, comodidad y rendimiento dentro y fuera de la cancha. Diseñada para quienes viven el deporte con actitud, es una prenda versátil que se adapta tanto al juego como al día a día. Disponible en negro, azul y blanco, su diseño limpio y moderno la convierte en un básico imprescindible de la colección VOLEA.",
+      "price": 1050,
+      "original_price": null,
+      "category": "polos",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-polo-mujer/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-polo-mujer/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-polo-mujer/3.jpg"
+      ],
+      "sizes": [
+        "M / Femenino",
+        "M / Masculino",
+        "XL / Femenino",
+        "XL / Masculino",
+        "L / Femenino",
+        "L / Masculino",
+        "2XL / Femenino",
+        "2XL / Masculino",
+        "3XL / Femenino",
+        "3XL / Masculino"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Azul marino",
+          "hex": "#0F1F4B"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "M / Femenino|Negro": 0,
+        "M / Masculino|Negro": 0,
+        "XL / Femenino|Negro": 0,
+        "XL / Masculino|Negro": 6,
+        "L / Femenino|Negro": 0,
+        "L / Masculino|Negro": 0,
+        "2XL / Femenino|Negro": 0,
+        "2XL / Masculino|Negro": 3,
+        "3XL / Femenino|Negro": 0,
+        "3XL / Masculino|Negro": 0,
+        "M / Femenino|Azul marino": 0,
+        "M / Masculino|Azul marino": 1,
+        "XL / Femenino|Azul marino": 0,
+        "XL / Masculino|Azul marino": 1,
+        "L / Femenino|Azul marino": 0,
+        "L / Masculino|Azul marino": 0,
+        "2XL / Femenino|Azul marino": 0,
+        "2XL / Masculino|Azul marino": 0,
+        "3XL / Femenino|Azul marino": 0,
+        "3XL / Masculino|Azul marino": 0,
+        "M / Femenino|Blanco": 0,
+        "M / Masculino|Blanco": 0,
+        "XL / Femenino|Blanco": 2,
+        "XL / Masculino|Blanco": 1,
+        "L / Femenino|Blanco": 2,
+        "L / Masculino|Blanco": 0,
+        "2XL / Femenino|Blanco": 1,
+        "2XL / Masculino|Blanco": 3,
+        "3XL / Femenino|Blanco": 0,
+        "3XL / Masculino|Blanco": 0
+      },
+      "is_featured": true,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 2
+    },
+    {
+      "id": "8437575680185",
+      "name": "Gorro VOLEA",
+      "sku": "",
+      "description": "Gorro VOLEA diseñado para estilo y comodidad en cualquier ocasión. Ideal para completar tu look urbano o deportivo, con un diseño minimalista que representa la esencia de la marca.",
+      "price": 300,
+      "original_price": null,
+      "category": "accesorios",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/gorro-volea/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/gorro-volea/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/gorro-volea/3.png"
+      ],
+      "sizes": [
+        "Único"
+      ],
+      "colors": [
+        {
+          "name": "Azul",
+          "hex": "#1E40AF"
+        },
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "Único|Azul": 5,
+        "Único|Negro": 4,
+        "Único|Blanco": 10
+      },
+      "is_featured": true,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 3
+    },
+    {
+      "id": "8437576990905",
+      "name": "Musculosa Urban",
+      "sku": "",
+      "description": "Pensada para el uso diario, combinando comodidad, estilo y versatilidad en una prenda esencial. Confeccionada en algodón suave de alta calidad, ofrece una sensación liviana y fresca ideal para cualquier momento del día.",
+      "price": 670,
+      "original_price": null,
+      "category": "musculosas",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/musculosa-mujer/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/musculosa-mujer/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/musculosa-mujer/3.png"
+      ],
+      "sizes": [
+        "M / Femenino",
+        "L / Femenino",
+        "XL / Femenino",
+        "S / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Marrón",
+          "hex": "#78350F"
+        },
+        {
+          "name": "Beige",
+          "hex": "#E8D5B7"
+        },
+        {
+          "name": "Gris",
+          "hex": "#9CA3AF"
+        }
+      ],
+      "stock_by_size": {
+        "M / Femenino|Negro": 1,
+        "L / Femenino|Negro": 2,
+        "XL / Femenino|Negro": 0,
+        "S / Femenino|Negro": 0,
+        "M / Femenino|Marrón": 0,
+        "L / Femenino|Marrón": 2,
+        "XL / Femenino|Marrón": 2,
+        "S / Femenino|Marrón": 2,
+        "M / Femenino|Beige": 0,
+        "L / Femenino|Beige": 0,
+        "XL / Femenino|Beige": 3,
+        "S / Femenino|Beige": 3,
+        "M / Femenino|Gris": 2,
+        "L / Femenino|Gris": 2,
+        "XL / Femenino|Gris": 0,
+        "S / Femenino|Gris": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 4
+    },
+    {
+      "id": "8464664363193",
+      "name": "VOLEA By Racket Point",
+      "sku": "",
+      "description": "Remera polo blanca VOLEA by Racket Point, una colaboración que nace desde la cancha y se lleva a todos lados.",
+      "price": 1000,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-by-racket-point2/1.jpg"
+      ],
+      "sizes": [
+        "M / Femenino",
+        "M / Masculino",
+        "XL / Femenino",
+        "XL / Masculino",
+        "2XL / Femenino",
+        "2XL / Masculino",
+        "3XL / Femenino",
+        "3XL / Masculino"
+      ],
+      "colors": [
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "M / Femenino|Blanco": 2,
+        "M / Masculino|Blanco": 2,
+        "XL / Femenino|Blanco": 2,
+        "XL / Masculino|Blanco": 2,
+        "2XL / Femenino|Blanco": 2,
+        "2XL / Masculino|Blanco": 2,
+        "3XL / Femenino|Blanco": 2,
+        "3XL / Masculino|Blanco": 2
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 5
+    },
+    {
+      "id": "8443117994169",
+      "name": "VOLEA Air",
+      "sku": "",
+      "description": "Versión más liviana y fresca de la línea, diseñada para ofrecer máxima comodidad en movimiento. Confeccionada con un tejido técnico ultraliviano, es más ligera que la línea Classic y permite una sensación de libertad total durante el uso.",
+      "price": 780,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-air/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-air/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-air/3.png"
+      ],
+      "sizes": [
+        "M / Unisex",
+        "L / Unisex",
+        "XL / Unisex",
+        "2XL / Unisex",
+        "S / Unisex",
+        "XS / Unisex"
+      ],
+      "colors": [
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#E91E8C"
+        },
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "M / Unisex|Blanco": 0,
+        "L / Unisex|Blanco": 0,
+        "XL / Unisex|Blanco": 0,
+        "2XL / Unisex|Blanco": 0,
+        "S / Unisex|Blanco": 0,
+        "XS / Unisex|Blanco": 0,
+        "M / Unisex|Rosa": 1,
+        "L / Unisex|Rosa": 4,
+        "XL / Unisex|Rosa": 2,
+        "2XL / Unisex|Rosa": 2,
+        "S / Unisex|Rosa": 1,
+        "XS / Unisex|Rosa": 2,
+        "M / Unisex|Negro": 0,
+        "L / Unisex|Negro": 0,
+        "XL / Unisex|Negro": 0,
+        "2XL / Unisex|Negro": 0,
+        "S / Unisex|Negro": 0,
+        "XS / Unisex|Negro": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 6
+    },
+    {
+      "id": "8443106459833",
+      "name": "Remera Thunder",
+      "sku": "",
+      "description": "Diseñada para quienes buscan un nivel superior de comodidad, ajuste y rendimiento en una prenda de uso diario o deportivo. Confeccionada en un tejido de alta elasticidad, se adapta al cuerpo de forma natural, brindando libertad total de movimiento sin perder su forma.",
+      "price": 880,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/remera-rally/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/remera-rally/2.jpg"
+      ],
+      "sizes": [
+        "M / Unisex",
+        "L / Unisex",
+        "XL / Unisex",
+        "2XL / Unisex"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "M / Unisex|Negro": 2,
+        "L / Unisex|Negro": 2,
+        "XL / Unisex|Negro": 2,
+        "2XL / Unisex|Negro": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 7
+    },
+    {
+      "id": "8443123630265",
+      "name": "Volea Cross Dress",
+      "sku": "",
+      "description": "Combina diseño, rendimiento y comodidad en una prenda pensada para destacar en la cancha. Su diseño con espalda cruzada aporta un estilo moderno y mayor libertad de movimiento.",
+      "price": 1150,
+      "original_price": null,
+      "category": "vestidos",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/volea-x-dress/1.png"
+      ],
+      "sizes": [
+        "S / Femenino",
+        "M / Femenino",
+        "L / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "S / Femenino|Negro": 2,
+        "M / Femenino|Negro": 2,
+        "L / Femenino|Negro": 2
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 8
+    },
+    {
+      "id": "8436646084793",
+      "name": "Set Motion",
+      "sku": "",
+      "description": "El top de corte atlético ofrece libertad total de movimiento para golpes y desplazamientos rápidos, mientras que la pollera con short integrado brinda seguridad, soporte y comodidad durante todo el partido.",
+      "price": 1450,
+      "original_price": null,
+      "category": "sets",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/pollera-short-y-top/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/pollera-short-y-top/2.png"
+      ],
+      "sizes": [
+        "L",
+        "M",
+        "S"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Vino tinto",
+          "hex": "#722F37"
+        }
+      ],
+      "stock_by_size": {
+        "L|Negro": 2,
+        "M|Negro": 0,
+        "S|Negro": 1,
+        "L|Vino tinto": 2,
+        "M|Vino tinto": 0,
+        "S|Vino tinto": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 9
+    },
+    {
+      "id": "8464615276729",
+      "name": "Vincha VOLEA",
+      "sku": "",
+      "description": "Vincha VOLEA diseñada para rendir dentro y fuera de la cancha. Confeccionada con material elástico y cómodo, se adapta perfecto a tu cabeza sin apretar, manteniendo el pelo en su lugar durante todo el juego. Ligera, respirable y con un ajuste firme, es el complemento ideal para entrenar o completar tu look urbano con identidad VOLEA.",
+      "price": 150,
+      "original_price": null,
+      "category": "accesorios",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/sin-titulo-6abr_19-41/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/sin-titulo-6abr_19-41/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/sin-titulo-6abr_19-41/3.jpg"
+      ],
+      "sizes": [
+        "Único"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "Único|Negro": 4,
+        "Único|Blanco": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 10
+    },
+    {
+      "id": "8436645331129",
+      "name": "Vestido Court",
+      "sku": "",
+      "description": "El Vestido Court fue diseñado para jugadoras que buscan rendimiento, comodidad y estilo en la cancha. Confeccionado en tela técnica Dry Fit de alta respirabilidad, ayuda a mantener el cuerpo fresco y seco durante los partidos más intensos. Su diseño sin mangas y con cierre frontal tipo polo brinda máxima libertad de movimiento para golpes, desplazamientos rápidos y cambios de dirección. La falda con caída natural aporta comodidad y un look deportivo elegante, mientras que los detalles en contraste en cuello y bordes le dan un estilo moderno y distintivo. *El vestido no incluye short interior.",
+      "price": 1450,
+      "original_price": null,
+      "category": "vestidos",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/vestido/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/vestido/2.png"
+      ],
+      "sizes": [
+        "L",
+        "M"
+      ],
+      "colors": [
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "L|Blanco": 1,
+        "M|Blanco": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 11
+    },
+    {
+      "id": "8432391422137",
+      "name": "VOLEA Shadow",
+      "sku": "",
+      "description": "Comodidad y estilo en cada movimiento. VOLEA Shadow combina diseño moderno y materiales de alta calidad para acompañarte todo el día. Minimalista, versátil y auténtica: la elección perfecta para tu look casual o deportivo.",
+      "price": 880,
+      "original_price": null,
+      "category": "remeras",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/sin-nombre-11mar_21-27/1.png"
+      ],
+      "sizes": [
+        "Mediana"
+      ],
+      "colors": [
+        {
+          "name": "Único",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "Mediana|Único": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 12
+    },
+    {
+      "id": "8543061049529",
+      "name": "Polo Conmemorativa URU-ARG CRP",
+      "sku": "",
+      "description": "Usa esta polo conmemorativa del encuentro Copa Río de la Plata Uruguay - Argentina",
+      "price": 800,
+      "original_price": null,
+      "category": "polos",
+      "images": [],
+      "sizes": [
+        "S / Unisex",
+        "M / Unisex",
+        "XL / Unisex",
+        "XXXL / Unisex",
+        "L / Unisex"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "S / Unisex|Negro": 5,
+        "M / Unisex|Negro": 7,
+        "XL / Unisex|Negro": 1,
+        "XXXL / Unisex|Negro": 2,
+        "L / Unisex|Negro": 3
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 13
+    },
+    {
+      "id": "8507284521145",
+      "name": "Short mujer con detalle líneas blancas",
+      "sku": "",
+      "description": "Short de mujer confeccionado para acompañarte dentro y fuera de la cancha. Cómodo, liviano y con un calce que se adapta al movimiento. Diseño versátil, ideal para entrenar, jugar o usar en el día a día.",
+      "price": 890,
+      "original_price": null,
+      "category": "shorts",
+      "images": [],
+      "sizes": [
+        "S / Femenino",
+        "M / Femenino",
+        "L / Femenino",
+        "XL / Femenino",
+        "2XL / Femenino",
+        "XS / Femenino",
+        "3XL / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Rojo",
+          "hex": "#DC2626"
+        },
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "S / Femenino|Rojo": 1,
+        "M / Femenino|Rojo": 2,
+        "L / Femenino|Rojo": 2,
+        "XL / Femenino|Rojo": 0,
+        "2XL / Femenino|Rojo": 0,
+        "XS / Femenino|Rojo": 1,
+        "3XL / Femenino|Rojo": 0,
+        "S / Femenino|Negro": 0,
+        "M / Femenino|Negro": 2,
+        "L / Femenino|Negro": 1,
+        "XL / Femenino|Negro": 2,
+        "2XL / Femenino|Negro": 2,
+        "XS / Femenino|Negro": 1,
+        "3XL / Femenino|Negro": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 14
+    },
+    {
+      "id": "8543055249593",
+      "name": "Camiseta Uruguay CRP",
+      "sku": "",
+      "description": "Reviví la experiencia Copa Río de la Plata con la camiseta del equipo uruguayo",
+      "price": 600,
+      "original_price": null,
+      "category": "remeras",
+      "images": [],
+      "sizes": [
+        "XS",
+        "S",
+        "M",
+        "L",
+        "XL",
+        "XXL"
+      ],
+      "colors": [
+        {
+          "name": "Celeste",
+          "hex": "#7DD3FC"
+        }
+      ],
+      "stock_by_size": {
+        "XS|Celeste": 3,
+        "S|Celeste": 2,
+        "M|Celeste": 1,
+        "L|Celeste": 1,
+        "XL|Celeste": 3,
+        "XXL|Celeste": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 15
+    },
+    {
+      "id": "8507295432889",
+      "name": "Buzo evolución",
+      "sku": "",
+      "description": "Nuestro canguro más representativo. Un diseño que muestra la evolución del hombre y la mujer hasta llegar a lo que realmente somos: jugadores de VOLEA. Cómodo, abrigado y pensado para usar dentro y fuera de la cancha. Un buzo con identidad, para quienes viven este deporte como parte de su evolución. • Interior suave y abrigado• Calce cómodo• Capucha y bolsillo canguro Evolucionamos distinto. Jugamos distinto.",
+      "price": 890,
+      "original_price": null,
+      "category": "buzos",
+      "images": [],
+      "sizes": [
+        "S / Masculino",
+        "S / Femenino",
+        "L / Masculino",
+        "L / Femenino",
+        "XL / Masculino",
+        "XL / Femenino",
+        "2XL / Masculino",
+        "2XL / Femenino",
+        "M / Masculino",
+        "M / Femenino",
+        "XS / Masculino",
+        "XS / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Salmón",
+          "hex": "#FA8072"
+        },
+        {
+          "name": "Beige",
+          "hex": "#E8D5B7"
+        }
+      ],
+      "stock_by_size": {
+        "S / Masculino|Salmón": 0,
+        "S / Femenino|Salmón": 2,
+        "L / Masculino|Salmón": 0,
+        "L / Femenino|Salmón": 0,
+        "XL / Masculino|Salmón": 0,
+        "XL / Femenino|Salmón": 2,
+        "2XL / Masculino|Salmón": 0,
+        "2XL / Femenino|Salmón": 0,
+        "M / Masculino|Salmón": 0,
+        "M / Femenino|Salmón": 1,
+        "XS / Masculino|Salmón": 0,
+        "XS / Femenino|Salmón": 1,
+        "S / Masculino|Beige": 0,
+        "S / Femenino|Beige": 0,
+        "L / Masculino|Beige": 2,
+        "L / Femenino|Beige": 0,
+        "XL / Masculino|Beige": 0,
+        "XL / Femenino|Beige": 0,
+        "2XL / Masculino|Beige": 0,
+        "2XL / Femenino|Beige": 0,
+        "M / Masculino|Beige": 1,
+        "M / Femenino|Beige": 0,
+        "XS / Masculino|Beige": 0,
+        "XS / Femenino|Beige": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 16
+    },
+    {
+      "id": "8543082086585",
+      "name": "Musculosa Dryfit",
+      "sku": "",
+      "description": "",
+      "price": 800,
+      "original_price": null,
+      "category": "musculosas",
+      "images": [],
+      "sizes": [
+        "M",
+        "L",
+        "XL",
+        "S"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "M|Negro": 2,
+        "L|Negro": 2,
+        "XL|Negro": 3,
+        "S|Negro": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 17
+    },
+    {
+      "id": "8543056789689",
+      "name": "Polo Uruguay CRP",
+      "sku": "",
+      "description": "Reviví la experiencia Copa Río de la Plata con la POLO que vistió el equipo uruguayo.",
+      "price": 800,
+      "original_price": null,
+      "category": "polos",
+      "images": [],
+      "sizes": [
+        "S / Masculino",
+        "S / Femenino",
+        "M / Masculino",
+        "M / Femenino",
+        "3XL / Masculino",
+        "3XL / Femenino",
+        "L / Masculino",
+        "L / Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "S / Masculino|Blanco": 2,
+        "S / Femenino|Blanco": 0,
+        "M / Masculino|Blanco": 1,
+        "M / Femenino|Blanco": 0,
+        "3XL / Masculino|Blanco": 1,
+        "3XL / Femenino|Blanco": 0,
+        "L / Masculino|Blanco": 0,
+        "L / Femenino|Blanco": 2
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 18
+    },
+    {
+      "id": "8543088148665",
+      "name": "Polo PREMIUM",
+      "sku": "",
+      "description": "",
+      "price": 1250,
+      "original_price": null,
+      "category": "polos",
+      "images": [],
+      "sizes": [
+        "M",
+        "2XL"
+      ],
+      "colors": [
+        {
+          "name": "Rojo",
+          "hex": "#DC2626"
+        },
+        {
+          "name": "Azul",
+          "hex": "#1E40AF"
+        },
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Gris",
+          "hex": "#9CA3AF"
+        },
+        {
+          "name": "Azul marino",
+          "hex": "#0F1F4B"
+        }
+      ],
+      "stock_by_size": {
+        "M|Rojo": 0,
+        "2XL|Rojo": 1,
+        "M|Azul": 0,
+        "2XL|Azul": 1,
+        "M|Negro": 0,
+        "2XL|Negro": 1,
+        "M|Gris": 1,
+        "2XL|Gris": 1,
+        "M|Azul marino": 0,
+        "2XL|Azul marino": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 19
+    },
+    {
+      "id": "8543088771257",
+      "name": "Falda con calza corta",
+      "sku": "",
+      "description": "",
+      "price": 1050,
+      "original_price": null,
+      "category": "faldas",
+      "images": [],
+      "sizes": [
+        "M",
+        "S"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#E91E8C"
+        },
+        {
+          "name": "Púrpura",
+          "hex": "#7C3AED"
+        },
+        {
+          "name": "Blanco",
+          "hex": "#FFFFFF"
+        }
+      ],
+      "stock_by_size": {
+        "M|Negro": 1,
+        "M|Rosa": 1,
+        "M|Púrpura": 0,
+        "M|Blanco": 0,
+        "S|Negro": 2,
+        "S|Rosa": 0,
+        "S|Púrpura": 1,
+        "S|Blanco": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 20
+    },
+    {
+      "id": "8543110889657",
+      "name": "Short mujer algodón",
+      "sku": "",
+      "description": "",
+      "price": 950,
+      "original_price": null,
+      "category": "shorts",
+      "images": [],
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "S|Negro": 2,
+        "M|Negro": 2,
+        "L|Negro": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 21
+    },
+    {
+      "id": "8543084380345",
+      "name": "Pantalón VOLEA",
+      "sku": "",
+      "description": "",
+      "price": 850,
+      "original_price": null,
+      "category": "pantalones",
+      "images": [],
+      "sizes": [
+        "L",
+        "S",
+        "XL",
+        "2XL"
+      ],
+      "colors": [
+        {
+          "name": "Azul marino",
+          "hex": "#0F1F4B"
+        }
+      ],
+      "stock_by_size": {
+        "L|Azul marino": 1,
+        "S|Azul marino": 1,
+        "XL|Azul marino": 1,
+        "2XL|Azul marino": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 22
+    },
+    {
+      "id": "8507313160377",
+      "name": "Musculosa espalda abierta",
+      "sku": "",
+      "description": "Diseñada para moverte con libertad. Liviana, fresca y con espalda abierta para un look deportivo más moderno y cómodo. El logo VOLEA en vertical le da el toque distintivo que la hace única dentro y fuera de la cancha. • Tela liviana y respirable• Espalda abierta• Calce cómodo y deportivo• Logo VOLEA en vertical Hecha para entrenar, competir y destacar.",
+      "price": 670,
+      "original_price": null,
+      "category": "musculosas",
+      "images": [],
+      "sizes": [
+        "Femenino"
+      ],
+      "colors": [
+        {
+          "name": "Celeste",
+          "hex": "#7DD3FC"
+        }
+      ],
+      "stock_by_size": {
+        "Femenino|Celeste": 3
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 23
+    },
+    {
+      "id": "8543088869561",
+      "name": "Conjunto camperita deportiva y calza larga Dry Fit",
+      "sku": "",
+      "description": "",
+      "price": 1390,
+      "original_price": null,
+      "category": "sets",
+      "images": [],
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "S|Negro": 1,
+        "M|Negro": 1,
+        "L|Negro": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 24
+    },
+    {
+      "id": "8543089066169",
+      "name": "Conjunto Top + Calza larga dry fit",
+      "sku": "",
+      "description": "",
+      "price": 1280,
+      "original_price": null,
+      "category": "sets",
+      "images": [],
+      "sizes": [
+        "M",
+        "L"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "M|Negro": 1,
+        "L|Negro": 2
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 25
+    },
+    {
+      "id": "8543095062713",
+      "name": "Top Motion",
+      "sku": "",
+      "description": "",
+      "price": 600,
+      "original_price": null,
+      "category": "musculosas",
+      "images": [],
+      "sizes": [
+        "L"
+      ],
+      "colors": [
+        {
+          "name": "Negro",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "L|Negro": 2
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 26
+    },
+    {
+      "id": "8543090376889",
+      "name": "Falda Motion",
+      "sku": "",
+      "description": "",
+      "price": 900,
+      "original_price": null,
+      "category": "faldas",
+      "images": [],
+      "sizes": [
+        "L"
+      ],
+      "colors": [
+        {
+          "name": "Único",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "L|Único": 1
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 27
+    },
+    {
+      "id": "8436646707385",
+      "name": "Vestido Elite",
+      "sku": "",
+      "description": "Vestido de alto rendimiento diseñado para jugadoras que buscan una combinación perfecta entre desempeño y elegancia. Confeccionado en tela técnica Dry Fit premium, ofrece máxima respirabilidad y secado rápido para mantenerte fresca y cómoda durante todo el partido.",
+      "price": 1750,
+      "original_price": null,
+      "category": "vestidos",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/vestido-volea/1.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/vestido-volea/2.png",
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/vestido-volea/3.png"
+      ],
+      "sizes": [
+        "Único"
+      ],
+      "colors": [
+        {
+          "name": "Único",
+          "hex": "#1a1a1a"
+        }
+      ],
+      "stock_by_size": {
+        "Único|Único": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 28
+    },
+    {
+      "id": "8436665188537",
+      "name": "Short Rally",
+      "sku": "",
+      "description": "Diseñado para ofrecer comodidad, libertad de movimiento y rendimiento durante cada partido. Confeccionado en tela Dry Fit liviana, ayuda a mantener el cuerpo fresco y seco",
+      "price": 750,
+      "original_price": null,
+      "category": "shorts",
+      "images": [
+        "https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/product-images/short/1.png"
+      ],
+      "sizes": [
+        "M / Masculino"
+      ],
+      "colors": [
+        {
+          "name": "Gris",
+          "hex": "#9CA3AF"
+        },
+        {
+          "name": "Azul",
+          "hex": "#1E40AF"
+        }
+      ],
+      "stock_by_size": {
+        "M / Masculino|Gris": 0,
+        "M / Masculino|Azul": 0
+      },
+      "is_featured": false,
+      "is_offer": false,
+      "active": true,
+      "sort_order": 29
+    }
+  ],
+  "categories": [
+    {
+      "id": "remeras",
+      "name": "Remeras",
+      "sort_order": 1
+    },
+    {
+      "id": "polos",
+      "name": "Polos",
+      "sort_order": 2
+    },
+    {
+      "id": "musculosas",
+      "name": "Musculosas",
+      "sort_order": 3
+    },
+    {
+      "id": "vestidos",
+      "name": "Vestidos",
+      "sort_order": 4
+    },
+    {
+      "id": "shorts",
+      "name": "Shorts",
+      "sort_order": 5
+    },
+    {
+      "id": "faldas",
+      "name": "Faldas",
+      "sort_order": 6
+    },
+    {
+      "id": "pantalones",
+      "name": "Pantalones",
+      "sort_order": 7
+    },
+    {
+      "id": "sets",
+      "name": "Conjuntos",
+      "sort_order": 8
+    },
+    {
+      "id": "buzos",
+      "name": "Buzos",
+      "sort_order": 9
+    },
+    {
+      "id": "accesorios",
+      "name": "Accesorios",
+      "sort_order": 10
+    }
+  ]
+}

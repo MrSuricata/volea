@@ -10,18 +10,41 @@ export interface Product {
   description: string;
   price: number;
   originalPrice?: number;
-  category: string;
+  category: string; // id de categoría (ej: 'remeras')
   images: string[];
   sizes: string[];
   colors: ProductColor[];
-  stockBySize: Record<string, number>;
+  stockBySize: Record<string, number>; // clave "talle|color"
   isFeatured: boolean;
   isOffer: boolean;
+  active?: boolean; // false = oculto en la tienda
+  sortOrder?: number;
   createdAt: string;
-  // Shopify integration (optional for backward compat with seeded products)
+  // Legacy Shopify (solo para compat con snapshots viejos)
   shopifyGid?: string;
   shopifyHandle?: string;
-  variantMap?: Record<string, string>; // "${size}|${color}" → variantId
+  variantMap?: Record<string, string>;
+}
+
+export interface Post {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  coverUrl: string;
+  published: boolean;
+  publishedAt?: string;
+  createdAt: string;
+}
+
+export interface StandingEntry {
+  id: string;
+  position: number;
+  playerName: string;
+  points: number;
+  category: string;
+  notes: string;
 }
 
 export interface CartItem {

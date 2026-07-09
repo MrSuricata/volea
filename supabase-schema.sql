@@ -102,8 +102,11 @@ ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
--- admins: lectura pública (el login pre-chequea el email), sin escritura via API
-CREATE POLICY "admins_public_read" ON admins FOR SELECT USING (true);
+-- admins: SIN lectura pública (migración lock_down_admins_table, 2026-07-09).
+-- El pre-check del login usa la RPC booleana is_admin_email(p_email) y cada
+-- admin autenticado puede leer solo su propia fila:
+--   CREATE POLICY "admins_self_read" ON admins FOR SELECT TO authenticated
+--     USING (lower(email) = lower(coalesce((auth.jwt() ->> 'email')::text, '')));
 
 -- events / clubs: lectura pública, escritura solo admins
 CREATE POLICY "events_public_read" ON events FOR SELECT USING (true);
@@ -126,3 +129,24 @@ INSERT INTO admins (email, name, role) VALUES
   ('bridvanovich@twf.uy', 'Brian Ridvanovich', 'owner'),
   ('somosvolea@gmail.com', 'VOLEA Team', 'admin')
 ON CONFLICT (email) DO NOTHING;
+
+-- ============================================
+-- v4 (2026-07-09): Migración a e-commerce NATIVO
+-- ============================================
+-- Shopify quedó fuera del flujo. Supabase es la fuente de verdad de TODO:
+--
+-- CREATE TABLE products (id TEXT PK, name, sku, description, price INTEGER,
+--   original_price INTEGER, category TEXT (id de categoría), images JSONB,
+--   sizes JSONB, colors JSONB [{name,hex}], stock_by_size JSONB ("talle|color": qty),
+--   is_featured BOOL, is_offer BOOL, active BOOL, sort_order INT, timestamps);
+-- CREATE TABLE categories (id TEXT PK, name TEXT, sort_order INT);
+-- CREATE TABLE posts (id TEXT PK, title, slug UNIQUE, excerpt, content,
+--   cover_url, published BOOL, published_at, timestamps);  -- Blog
+-- CREATE TABLE standings (id TEXT PK, position INT, player_name, points NUMERIC,
+--   category TEXT, notes, timestamps);  -- Clasificación al Mundial
+--
+-- RLS: lectura pública (products solo active=true para anon; posts solo published);
+-- escritura solo is_admin(). Storage: bucket público product-images, escritura
+-- solo admins autenticados.
+-- El DDL completo está aplicado como migración "native_ecommerce_schema" en el
+-- proyecto volea-web (ver Dashboard > Database > Migrations).

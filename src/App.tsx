@@ -7,10 +7,10 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation
+  Globe, Navigation, Newspaper
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE, ADMIN_PASSWORD,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -25,16 +25,13 @@ import {
   signOut as authSignOut,
   type AdminUser,
 } from './services/authService';
-import {
-  getProductsAsInternal,
-  getCategoriesAsInternal,
-  buildCartPermalink,
-  getVariantIdForSelection,
-  computeStockMetrics,
-  buildAdminProductUrl,
-  buildAdminInventoryUrl,
-  SHOPIFY_DOMAIN,
-} from './services/shopifyService';
+// Snapshot legacy de Shopify: solo como fallback si Supabase está caído.
+import { getProductsAsInternal, getCategoriesAsInternal } from './services/shopifyService';
+import { BlogListPage, BlogPostPage } from './components/BlogPages';
+import { StandingsPage } from './components/StandingsPage';
+import { AdminBlogTab } from './components/AdminBlogTab';
+import { AdminStandingsTab } from './components/AdminStandingsTab';
+import { ProductEditor } from './components/ProductEditor';
 
 // ─── 1. Utility Functions ────────────────────────────────────────────────────
 
@@ -42,6 +39,10 @@ const formatPrice = (price: number): string => `$ ${price.toLocaleString('es-UY'
 
 const getTotalStock = (product: Product): number =>
   Object.values(product.stockBySize).reduce((sum, qty) => sum + qty, 0);
+
+// Los productos guardan el id de categoría (ej: 'remeras'); esto resuelve el nombre visible.
+const categoryLabel = (categories: Category[], id: string): string =>
+  categories.find(c => c.id === id)?.name || id;
 
 const FALLBACK_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%23001F3F'/%3E%3Ccircle cx='200' cy='180' r='60' fill='none' stroke='%23ccff00' stroke-width='3'/%3E%3Ccircle cx='175' cy='160' r='8' fill='%23ccff00'/%3E%3Ccircle cx='210' cy='155' r='8' fill='%23ccff00'/%3E%3Ccircle cx='230' cy='180' r='8' fill='%23ccff00'/%3E%3Ccircle cx='210' cy='205' r='8' fill='%23ccff00'/%3E%3Ccircle cx='175' cy='200' r='8' fill='%23ccff00'/%3E%3Ccircle cx='160' cy='180' r='8' fill='%23ccff00'/%3E%3Ctext x='200' y='280' text-anchor='middle' fill='%23ccff00' font-family='sans-serif' font-weight='700' font-size='28'%3EVOLEA%3C/text%3E%3C/svg%3E";
 
@@ -176,11 +177,19 @@ function useParallax(distance = 80) {
 interface StoreContextType {
   products: Product[];
   setProducts: (p: Product[]) => void;
+  saveProduct: (p: Product) => void;
+  removeProduct: (id: string) => void;
   events: Event[];
   setEvents: (e: Event[]) => void;
   orders: Order[];
   setOrders: (o: Order[]) => void;
   addOrder: (o: Order) => void;
+  posts: Post[];
+  savePost: (p: Post) => void;
+  removePost: (id: string) => void;
+  standings: StandingEntry[];
+  saveStanding: (s: StandingEntry) => void;
+  removeStanding: (id: string) => void;
   categories: Category[];
   setCategories: (c: Category[]) => void;
   clubs: Club[];
@@ -220,6 +229,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [categories, _setCategories] = useState<Category[]>([]);
   const [clubs, _setClubs] = useState<Club[]>([]);
   const [announcements, _setAnnouncements] = useState<Announcement[]>([]);
+  const [posts, _setPosts] = useState<Post[]>([]);
+  const [standings, _setStandings] = useState<StandingEntry[]>([]);
   const [cart, _setCart] = useState<CartItem[]>([]);
   const [isAdmin, setIsAdmin] = useState(() => {
     return sessionStorage.getItem('volea_admin') === 'true';
@@ -232,15 +243,21 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       await supabaseReady;
       const admin = await getCurrentAdmin();
-      if (mounted && admin) {
+      if (!mounted) return;
+      if (admin) {
         setCurrentAdmin(admin);
         setIsAdmin(true);
+      } else if (isSupabaseConnected()) {
+        // Supabase sano pero sin sesión real: el flag legacy de password no vale.
+        sessionStorage.removeItem('volea_admin');
+        setIsAdmin(false);
       }
     })();
     const unsub = onAuthStateChange((admin) => {
       if (!mounted) return;
       setCurrentAdmin(admin);
       if (admin) setIsAdmin(true);
+      else if (isSupabaseConnected()) setIsAdmin(false); // sesión expirada/revocada
     });
     return () => { mounted = false; unsub(); };
   }, []);
@@ -251,30 +268,37 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const loadData = async () => {
-      // Products & categories come from Shopify (source of truth, synced at build time)
-      const shopifyProducts = getProductsAsInternal();
-      const shopifyCategories = getCategoriesAsInternal();
-      _setProducts(shopifyProducts);
-      _setCategories(shopifyCategories);
-
-      // Wait for Supabase health probe (max 2.5s); falls back to localStorage on failure.
+      // Wait for Supabase health probe (max 2.5s); falls back on failure.
       await supabaseReady;
 
-      // Events, clubs, announcements, orders: Supabase if connected, else localStorage
+      // Supabase es la fuente de verdad de todo. Fallback: snapshot legacy para
+      // productos/categorías y localStorage para el resto.
+      let loadedProducts: Product[];
       if (isSupabaseConnected()) {
-        const [e, o, cl, an] = await Promise.all([
+        const [p, c, e, o, cl, an, po, st] = await Promise.all([
+          SupabaseService.getProducts(),
+          SupabaseService.getCategories(),
           SupabaseService.getEvents(),
           SupabaseService.getOrders(),
           SupabaseService.getClubs(),
           SupabaseService.getAnnouncements(),
+          SupabaseService.getPosts(),
+          SupabaseService.getStandings(),
         ]);
+        // null = fetch falló → snapshot legacy; [] = catálogo vacío a propósito.
+        loadedProducts = p ?? getProductsAsInternal();
+        _setProducts(loadedProducts);
+        _setCategories(c ?? getCategoriesAsInternal());
         _setEvents(e.length ? e : INITIAL_EVENTS);
         _setOrders(o);
         _setClubs(cl.length ? cl : INITIAL_CLUBS);
         _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
-        // Note: anon users can't write to events/clubs/announcements (RLS).
-        // Seeds are only persisted when an admin signs in — see seedSupabaseIfEmpty.
+        _setPosts(po);
+        _setStandings(st);
       } else {
+        loadedProducts = getProductsAsInternal();
+        _setProducts(loadedProducts);
+        _setCategories(getCategoriesAsInternal());
         const ver = StorageService.getVersion();
         if (ver !== StorageService.currentVersion) {
           StorageService.clearAll();
@@ -301,18 +325,22 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Cart: refresh items with current product data to avoid stale prices/stock
+      // Cart: refresh items with current product data to avoid stale prices/stock.
+      // Revalida la combinación talle|color y ajusta cantidades al stock actual.
       const savedCart = StorageService.getCart();
       const refreshedCart: CartItem[] = [];
       for (const item of savedCart) {
-        const currentProduct = shopifyProducts.find((p) => p.id === item.product.id);
-        if (!currentProduct) continue;
-        const variantId =
-          item.variantId ||
-          getVariantIdForSelection(currentProduct, item.selectedSize, item.selectedColor);
-        const refreshed: CartItem = { ...item, product: currentProduct };
-        if (variantId) refreshed.variantId = variantId;
-        refreshedCart.push(refreshed);
+        const currentProduct = loadedProducts.find((p) => p.id === item.product.id);
+        if (!currentProduct || currentProduct.active === false) continue;
+        const key = item.selectedColor ? `${item.selectedSize}|${item.selectedColor}` : item.selectedSize;
+        const available = currentProduct.stockBySize[key] || 0;
+        if (available <= 0) continue;
+        refreshedCart.push({
+          ...item,
+          product: currentProduct,
+          quantity: Math.min(item.quantity, available),
+          variantId: undefined, // legacy Shopify — ya no aplica
+        });
       }
       _setCart(refreshedCart);
       StorageService.setCart(refreshedCart);
@@ -327,6 +355,57 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     if (isSupabaseConnected()) SupabaseService.setProducts(p);
   }, []);
 
+  // Aviso genérico cuando la nube rechaza una escritura (sesión vencida, RLS).
+  const warnCloudFail = (ok: boolean) => {
+    if (!ok) toast.error('No se pudo guardar en la nube — cerrá sesión y volvé a entrar al panel.');
+  };
+
+  const saveProduct = useCallback((p: Product) => {
+    _setProducts(prev => {
+      const idx = prev.findIndex(x => x.id === p.id);
+      const next = idx >= 0 ? prev.map(x => (x.id === p.id ? p : x)) : [...prev, p];
+      StorageService.setProducts(next);
+      return next;
+    });
+    if (isSupabaseConnected()) SupabaseService.upsertProduct(p).then(warnCloudFail);
+  }, []);
+
+  const removeProduct = useCallback((id: string) => {
+    _setProducts(prev => {
+      const next = prev.filter(x => x.id !== id);
+      StorageService.setProducts(next);
+      return next;
+    });
+    if (isSupabaseConnected()) SupabaseService.deleteProduct(id).then(warnCloudFail);
+  }, []);
+
+  const savePost = useCallback((p: Post) => {
+    _setPosts(prev => {
+      const idx = prev.findIndex(x => x.id === p.id);
+      return idx >= 0 ? prev.map(x => (x.id === p.id ? p : x)) : [p, ...prev];
+    });
+    if (isSupabaseConnected()) SupabaseService.upsertPost(p).then(warnCloudFail);
+  }, []);
+
+  const removePost = useCallback((id: string) => {
+    _setPosts(prev => prev.filter(x => x.id !== id));
+    if (isSupabaseConnected()) SupabaseService.deletePost(id).then(warnCloudFail);
+  }, []);
+
+  const saveStanding = useCallback((s: StandingEntry) => {
+    _setStandings(prev => {
+      const idx = prev.findIndex(x => x.id === s.id);
+      const next = idx >= 0 ? prev.map(x => (x.id === s.id ? s : x)) : [...prev, s];
+      return next.sort((a, b) => a.category.localeCompare(b.category) || a.position - b.position);
+    });
+    if (isSupabaseConnected()) SupabaseService.upsertStanding(s).then(warnCloudFail);
+  }, []);
+
+  const removeStanding = useCallback((id: string) => {
+    _setStandings(prev => prev.filter(x => x.id !== id));
+    if (isSupabaseConnected()) SupabaseService.deleteStanding(id).then(warnCloudFail);
+  }, []);
+
   const setEvents = useCallback((e: Event[]) => {
     _setEvents(e);
     StorageService.setEvents(e);
@@ -336,7 +415,11 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const setOrders = useCallback((o: Order[]) => {
     _setOrders(o);
     StorageService.setOrders(o);
-    if (isSupabaseConnected()) SupabaseService.setOrders(o);
+    if (isSupabaseConnected()) {
+      SupabaseService.setOrders(o).then(ok => {
+        if (!ok) toast.error('No se pudo guardar el cambio en la nube — cerrá sesión y volvé a entrar al panel.');
+      });
+    }
   }, []);
 
   // Alta de pedido desde el checkout (anónimo): insert plano, no upsert.
@@ -382,21 +465,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       const currentQty = idx >= 0 ? prev[idx].quantity : 0;
       const newQty = Math.min(currentQty + item.quantity, availableStock);
       if (newQty <= 0) {
-        toast.error('Sin stock para esta combinación');
+        toast.error('No queda stock de esa combinación de talle y color');
         return prev;
       }
-
-      // Auto-resolve Shopify variant id from the product's variantMap
-      const variantId =
-        item.variantId ||
-        getVariantIdForSelection(item.product, item.selectedSize, item.selectedColor);
 
       let next: CartItem[];
       if (idx >= 0) {
         next = [...prev];
-        next[idx] = { ...next[idx], quantity: newQty, variantId: next[idx].variantId || variantId };
+        next[idx] = { ...next[idx], quantity: newQty };
       } else {
-        next = [...prev, { ...item, variantId, quantity: Math.min(item.quantity, availableStock) }];
+        next = [...prev, { ...item, quantity: Math.min(item.quantity, availableStock) }];
       }
       StorageService.setCart(next);
       toast.success(`Agregado al carrito — ${item.product.name}`);
@@ -468,7 +546,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StoreContext.Provider value={{
-      products, setProducts, events, setEvents, orders, setOrders, addOrder,
+      products, setProducts, saveProduct, removeProduct, events, setEvents, orders, setOrders, addOrder,
+      posts, savePost, removePost, standings, saveStanding, removeStanding,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
       cart, addToCart, removeFromCart,
       updateCartQuantity, clearCart, isAdmin, currentAdmin, login, sendLoginLink, logout,
@@ -509,6 +588,8 @@ function Navbar() {
   const navLinks = [
     { to: '/', label: 'Inicio' },
     { to: '/tienda', label: 'Tienda' },
+    { to: '/blog', label: 'Blog' },
+    { to: '/clasificacion', label: 'Clasificación' },
     { to: '/eventos', label: 'Eventos' },
     { to: '/mapa', label: 'Mapa' },
     { to: '/contacto', label: 'Contacto' },
@@ -523,7 +604,7 @@ function Navbar() {
         </Link>
 
         {/* Desktop nav */}
-        <div className="hidden md:flex items-center gap-8">
+        <div className="hidden md:flex items-center gap-5 lg:gap-7">
           {navLinks.map(link => (
             <NavLink
               key={link.to}
@@ -613,7 +694,7 @@ function CartDrawer() {
       <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl slide-in-right flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 className="font-display text-xl font-bold text-navy-700">Tu Carrito</h2>
+          <h2 className="font-display text-xl font-bold text-navy-700">Tu carrito</h2>
           <button onClick={() => setCartOpen(false)} className="text-navy-700 hover:text-red-500 transition-colors">
             <X size={24} />
           </button>
@@ -685,31 +766,16 @@ function CartDrawer() {
               <span className="font-display font-semibold text-lg">Total</span>
               <span className="font-display font-bold text-xl text-navy-700">{formatPrice(total)}</span>
             </div>
-            <button
-              onClick={() => {
-                const lines = cart
-                  .filter((i) => i.variantId)
-                  .map((i) => ({ variantId: i.variantId!, quantity: i.quantity }));
-                if (lines.length !== cart.length) {
-                  toast.error('No se pudo armar el checkout. Probá refrescar la página.');
-                  return;
-                }
-                toast.success('Redirigiendo al pago seguro...');
-                setTimeout(() => {
-                  window.location.href = buildCartPermalink(lines);
-                }, 400);
-              }}
-              className="w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 pulse-glow"
-            >
-              <Zap size={18} /> Pagar ahora
-            </button>
             <Link
               to="/checkout"
               onClick={() => setCartOpen(false)}
-              className="block w-full text-center bg-white hover:bg-gray-50 border border-gray-300 text-navy-700 font-display font-semibold py-2.5 rounded-lg transition-colors text-sm"
+              className="w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 pulse-glow"
             >
-              Ver opciones (Pago o WhatsApp)
+              <MessageCircle size={18} /> Finalizar pedido
             </Link>
+            <p className="text-xs text-gray-400 text-center">
+              Coordinamos la entrega y el pago por WhatsApp.
+            </p>
           </div>
         )}
       </div>
@@ -720,6 +786,7 @@ function CartDrawer() {
 // ─── Helper: ProductCard ─────────────────────────────────────────────────────
 
 function ProductCard({ product }: { product: Product }) {
+  const { categories } = useStore();
   const totalStock = getTotalStock(product);
   const isNew = (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
   return (
@@ -734,7 +801,7 @@ function ProductCard({ product }: { product: Product }) {
         {/* Hover overlay */}
         <div className="card-overlay absolute inset-0 bg-navy-700/60 flex items-center justify-center z-10">
           <span className="bg-lime-400 text-navy-700 font-display font-bold text-sm px-6 py-2 rounded-full flex items-center gap-2">
-            <Eye size={16} /> Ver Producto
+            <Eye size={16} /> Ver producto
           </span>
         </div>
         {/* Badges */}
@@ -751,7 +818,7 @@ function ProductCard({ product }: { product: Product }) {
             <span className="bg-lime-400 text-navy-700 text-xs font-bold px-2 py-1 rounded-full">NUEVO</span>
           )}
         </div>
-        <span className="absolute top-3 right-3 bg-navy-700/80 text-white text-xs px-2 py-1 rounded-full z-10">{product.category}</span>
+        <span className="absolute top-3 right-3 bg-navy-700/80 text-white text-xs px-2 py-1 rounded-full z-10">{categoryLabel(categories, product.category)}</span>
       </div>
       <div className="p-4">
         <h3 className="font-display font-semibold text-navy-700 group-hover:text-lime-600 transition-colors line-clamp-2">{product.name}</h3>
@@ -763,7 +830,7 @@ function ProductCard({ product }: { product: Product }) {
         </div>
         <div className="mt-3 flex items-center justify-between">
           <span className="text-lime-600 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
-            Ver Producto <ArrowRight size={14} />
+            Ver producto <ArrowRight size={14} />
           </span>
         </div>
       </div>
@@ -774,36 +841,41 @@ function ProductCard({ product }: { product: Product }) {
 // ─── 7. HomePage ─────────────────────────────────────────────────────────────
 
 function HomePage() {
-  const { products, events, categories, announcements } = useStore();
-  const featured = products.filter(p => p.isFeatured).slice(0, 4);
+  const { products, categories, posts, standings, announcements } = useStore();
   const heroBgY = useParallax(120);
   const heroTextY = useParallax(-40);
+
   usePageMeta({
-    title: 'VOLEA | La Primera Marca de Pickleball en Uruguay',
-    description: 'Indumentaria y accesorios de pickleball de alto rendimiento. Remeras, polos, vestidos, shorts, gorros y más. Diseñado en Uruguay.',
+    title: 'VOLEA | La primera marca de pickleball de Uruguay',
+    description: 'Indumentaria de pickleball diseñada en Uruguay. Remeras técnicas, polos, vestidos, shorts y gorros. Armá tu pedido y coordinamos la entrega por WhatsApp.',
     image: window.location.origin + '/logo.png',
   });
-  const upcomingEvents = events.filter(e => new Date(e.date) >= new Date());
-  const nextEvent = upcomingEvents.length > 0
-    ? upcomingEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0]
-    : null;
+
+  const featured = products.filter(p => p.isFeatured && p.active !== false).slice(0, 4);
+
+  const publishedPosts = posts
+    .filter(p => p.published)
+    .sort((a, b) => new Date(b.publishedAt || b.createdAt).getTime() - new Date(a.publishedAt || a.createdAt).getTime())
+    .slice(0, 3);
+
+  const topStandings = [...standings].sort((a, b) => a.position - b.position).slice(0, 3);
 
   const activeAnnouncements = announcements.filter(a => a.active);
 
   const categoryIcons: Record<string, React.ReactNode> = {
-    'Remeras': <Tag size={28} />,
-    'Polos': <Star size={28} />,
-    'Shorts': <Zap size={28} />,
-    'Vestidos': <Heart size={28} />,
-    'Gorros': <Shield size={28} />,
-    'Accesorios': <Package size={28} />,
+    'Remeras': <Zap size={26} />,
+    'Polos': <Star size={26} />,
+    'Shorts': <Check size={26} />,
+    'Vestidos': <Heart size={26} />,
+    'Gorros': <Shield size={26} />,
+    'Accesorios': <Package size={26} />,
   };
 
-  const announcementColors: Record<string, { bg: string; border: string; text: string; badge: string }> = {
-    info: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', badge: 'bg-blue-500' },
-    promo: { bg: 'bg-lime-50', border: 'border-lime-300', text: 'text-lime-700', badge: 'bg-lime-500' },
-    event: { bg: 'bg-navy-50', border: 'border-navy-200', text: 'text-navy-700', badge: 'bg-navy-700' },
-    important: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', badge: 'bg-red-500' },
+  const announcementColors: Record<string, string> = {
+    info: 'bg-navy-500',
+    promo: 'bg-lime-600',
+    event: 'bg-navy-700 border border-lime-400/40',
+    important: 'bg-red-500',
   };
 
   const announcementTypeLabels: Record<string, string> = {
@@ -813,11 +885,35 @@ function HomePage() {
     important: 'Importante',
   };
 
+  const formatPostDate = (post: Post) =>
+    new Date(post.publishedAt || post.createdAt).toLocaleDateString('es-UY', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+
+  const steps = [
+    {
+      icon: <ShoppingCart size={26} />,
+      title: 'Elegí tus productos',
+      desc: 'Recorré la colección, elegí talle y color, y agregá todo al carrito.',
+    },
+    {
+      icon: <Package size={26} />,
+      title: 'Enviá tu pedido',
+      desc: 'Completá tus datos y mandanos el pedido directo desde la web.',
+    },
+    {
+      icon: <MessageCircle size={26} />,
+      title: 'Coordinamos por WhatsApp',
+      desc: 'Te escribimos para coordinar la entrega y el pago, simple y sin vueltas.',
+    },
+  ];
+
   return (
     <div className="fade-in">
-      {/* Hero */}
+      {/* ── 1. Hero ─────────────────────────────────────────────────────── */}
       <section className="relative min-h-screen flex items-center overflow-hidden">
-        {/* Parallax background image */}
         <motion.div
           aria-hidden
           className="absolute inset-0 -top-20 -bottom-20"
@@ -828,41 +924,40 @@ function HomePage() {
             backgroundPosition: 'center',
           }}
         />
-        {/* Dark gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-navy-900/95 via-navy-700/85 to-navy-700/70" />
-        {/* Subtle pattern */}
-        <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+        <div className="absolute inset-0 bg-gradient-to-br from-navy-900/95 via-navy-800/85 to-navy-700/70" />
+        <div
+          className="absolute inset-0 opacity-5"
+          style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }}
+        />
 
-        <motion.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-20 w-full">
+        <motion.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-24 w-full">
           <div className="max-w-3xl">
             <p className="hero-enter hero-enter-1 opacity-0 text-lime-400 font-display font-bold text-sm md:text-base uppercase tracking-[0.3em] mb-6">
-              La primera marca de Uruguay
+              La primera marca de pickleball de Uruguay
             </p>
             <h1 className="hero-enter hero-enter-2 opacity-0 font-display text-5xl md:text-6xl lg:text-7xl font-black leading-[1.05] mb-6 text-white">
-              INDUMENTARIA DE{' '}
-              <span className="text-gradient">PICKLEBALL</span>{' '}
-              DE ALTO RENDIMIENTO
+              EL <span className="text-gradient">PICKLEBALL</span> URUGUAYO YA TIENE SU MARCA
             </h1>
             <p className="hero-enter hero-enter-3 opacity-0 text-lg md:text-xl text-gray-300 mb-10 font-body max-w-xl leading-relaxed">
-              Diseñada para jugadores que buscan comodidad, estilo y máximo rendimiento dentro y fuera de la cancha.
+              Indumentaria técnica pensada acá, para los que juegan acá. Evolucionamos distinto. Jugamos distinto.
             </p>
             <div className="hero-enter hero-enter-4 opacity-0 flex flex-col sm:flex-row gap-4">
               <Link
                 to="/tienda"
                 className="pulse-glow inline-flex items-center justify-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-4 px-10 rounded-lg text-lg transition-colors"
               >
-                Ver Colección <ArrowRight size={20} />
+                Ver la colección <ArrowRight size={20} />
               </Link>
               <Link
-                to="/eventos"
+                to="/clasificacion"
                 className="inline-flex items-center justify-center gap-2 border-2 border-white/30 hover:border-lime-400 text-white hover:text-lime-400 font-display font-bold py-4 px-10 rounded-lg text-lg transition-colors"
               >
-                Próximos Eventos
+                <Trophy size={20} /> Camino al Mundial
               </Link>
             </div>
           </div>
 
-          {/* Stats bar */}
+          {/* Mini-stats */}
           <div className="mt-16 grid grid-cols-3 gap-6 max-w-lg">
             {[
               { num: '10+', label: 'Clubes' },
@@ -879,25 +974,58 @@ function HomePage() {
 
         {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
-          <span className="text-xs font-body tracking-widest uppercase">Scroll</span>
+          <span className="text-xs font-body tracking-widest uppercase">Deslizá</span>
           <div className="w-5 h-8 border-2 border-white/30 rounded-full flex justify-center pt-1">
             <div className="w-1 h-2 bg-lime-400 rounded-full animate-bounce" />
           </div>
         </div>
       </section>
 
-      {/* Featured Products */}
+      {/* ── 2. Cómo comprar ─────────────────────────────────────────────── */}
+      <section className="bg-navy-700 py-16">
+        <div className="max-w-7xl mx-auto px-4">
+          <Reveal>
+            <div className="text-center mb-10">
+              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Así de simple</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">Cómo comprar en VOLEA</h2>
+            </div>
+          </Reveal>
+          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {steps.map((step, i) => (
+              <StaggerItem key={i}>
+                <div className="relative bg-navy-800/60 border border-navy-600 rounded-2xl p-8 h-full">
+                  <span className="absolute top-6 right-6 font-display font-black text-5xl text-navy-600 select-none">
+                    {i + 1}
+                  </span>
+                  <div className="w-12 h-12 bg-lime-400 rounded-xl flex items-center justify-center text-navy-700 mb-5">
+                    {step.icon}
+                  </div>
+                  <h3 className="font-display font-bold text-white text-lg mb-2">{step.title}</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">{step.desc}</p>
+                </div>
+              </StaggerItem>
+            ))}
+          </StaggerGrid>
+          <Reveal delay={150}>
+            <p className="text-center text-gray-400 text-sm mt-8">
+              Sin pago online: coordinamos entrega y pago por WhatsApp, con transferencia o efectivo.
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ── 3. Destacados ───────────────────────────────────────────────── */}
       <section className="py-20 bg-gradient-to-b from-white to-gray-50">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
             <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Lo más vendido</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Productos Destacados</h2>
+              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">La selección de la casa</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Destacados de la colección</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
           <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {featured.map((p) => (
+            {featured.map(p => (
               <StaggerItem key={p.id}>
                 <ProductCard product={p} />
               </StaggerItem>
@@ -909,34 +1037,35 @@ function HomePage() {
                 to="/tienda"
                 className="inline-flex items-center gap-2 border-2 border-navy-700 text-navy-700 hover:bg-navy-700 hover:text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
               >
-                Ver Toda la Colección <ArrowRight size={18} />
+                Ver toda la colección <ArrowRight size={18} />
               </Link>
             </div>
           </Reveal>
         </div>
       </section>
 
-      {/* Categories */}
+      {/* ── 4. Categorías ───────────────────────────────────────────────── */}
       <section className="bg-gray-50 py-20">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
             <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Explorá</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Categorías</h2>
+              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Encontrá lo tuyo</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Explorá por categoría</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {categories.sort((a, b) => a.sortOrder - b.sortOrder).map((cat, i) => (
+            {[...categories].sort((a, b) => a.sortOrder - b.sortOrder).map((cat, i) => (
               <Reveal key={cat.id} delay={i * 80}>
                 <Link
-                  to={`/tienda?category=${encodeURIComponent(cat.name)}`}
+                  to={`/tienda?category=${encodeURIComponent(cat.id)}`}
                   className="hover-scale flex flex-col items-center justify-center bg-white rounded-xl p-6 shadow-md border border-gray-100 hover:border-lime-400 hover:shadow-lg transition-all group"
                 >
                   <div className="text-navy-700 group-hover:text-lime-500 transition-colors mb-3">
-                    {categoryIcons[cat.name] || <Tag size={28} />}
+                    {categoryIcons[cat.name] || <Package size={26} />}
                   </div>
-                  <span className="font-display font-semibold text-navy-700 text-sm">{cat.name}</span>
+                  <span className="font-display font-semibold text-navy-700 text-sm text-center">{cat.name}</span>
+                  <ChevronRight size={14} className="text-gray-300 group-hover:text-lime-500 transition-colors mt-2" />
                 </Link>
               </Reveal>
             ))}
@@ -944,46 +1073,198 @@ function HomePage() {
         </div>
       </section>
 
-      {/* Galería en Acción */}
+      {/* ── 5. Últimas del blog ─────────────────────────────────────────── */}
+      {publishedPosts.length > 0 && (
+        <section className="py-20 bg-white">
+          <div className="max-w-7xl mx-auto px-4">
+            <Reveal>
+              <div className="text-center mb-12">
+                <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Historias del deporte</span>
+                <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Últimas del blog</h2>
+                <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
+              </div>
+            </Reveal>
+            <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {publishedPosts.map(post => (
+                <StaggerItem key={post.slug}>
+                  <Link
+                    to={`/blog/${post.slug}`}
+                    className="hover-scale block bg-white rounded-2xl overflow-hidden shadow-md border border-gray-100 hover:border-lime-400 transition-all h-full"
+                  >
+                    <div className="img-zoom h-48">
+                      {post.coverUrl ? (
+                        <img
+                          src={post.coverUrl}
+                          alt={post.title}
+                          className="w-full h-full object-cover"
+                          onError={handleImgError}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-navy-700 to-navy-900 flex items-center justify-center">
+                          <Newspaper size={36} className="text-lime-400" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-6">
+                      <p className="flex items-center gap-2 text-gray-400 text-xs font-body uppercase tracking-wide mb-3">
+                        <Calendar size={14} /> {formatPostDate(post)}
+                      </p>
+                      <h3 className="font-display font-bold text-navy-700 text-lg leading-snug mb-2">{post.title}</h3>
+                      <p className="text-gray-500 text-sm leading-relaxed line-clamp-3">{post.excerpt}</p>
+                      <span className="inline-flex items-center gap-1 text-lime-600 font-display font-bold text-sm mt-4">
+                        Leer más <ChevronRight size={16} />
+                      </span>
+                    </div>
+                  </Link>
+                </StaggerItem>
+              ))}
+            </StaggerGrid>
+            <Reveal>
+              <div className="text-center mt-10">
+                <Link
+                  to="/blog"
+                  className="inline-flex items-center gap-2 border-2 border-navy-700 text-navy-700 hover:bg-navy-700 hover:text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
+                >
+                  Ver el blog <ArrowRight size={18} />
+                </Link>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      )}
+
+      {/* ── 6. Camino al Mundial ────────────────────────────────────────── */}
+      <section className="relative py-20 bg-navy-700 overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-5"
+          style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }}
+        />
+        <div className="relative z-10 max-w-7xl mx-auto px-4">
+          <Reveal>
+            <div className="text-center mb-12">
+              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Clasificación</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">Camino al Mundial</h2>
+              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
+            </div>
+          </Reveal>
+          {topStandings.length > 0 ? (
+            <>
+              <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                {topStandings.map(entry => (
+                  <StaggerItem key={`${entry.category}-${entry.position}-${entry.playerName}`}>
+                    <div
+                      className={`rounded-2xl p-8 text-center h-full ${
+                        entry.position === 1
+                          ? 'bg-lime-400 text-navy-700'
+                          : 'bg-navy-800/60 border border-navy-600 text-white'
+                      }`}
+                    >
+                      <div
+                        className={`w-14 h-14 mx-auto rounded-full flex items-center justify-center font-display font-black text-2xl mb-4 ${
+                          entry.position === 1 ? 'bg-navy-700 text-lime-400' : 'bg-lime-400 text-navy-700'
+                        }`}
+                      >
+                        {entry.position}
+                      </div>
+                      <h3 className="font-display font-bold text-lg">{entry.playerName}</h3>
+                      <p className={`text-sm mt-1 ${entry.position === 1 ? 'text-navy-600' : 'text-gray-400'}`}>
+                        {entry.category}
+                      </p>
+                      <p className={`font-display font-black text-3xl mt-4 ${entry.position === 1 ? 'text-navy-700' : 'text-lime-400'}`}>
+                        {entry.points}
+                        <span className="text-sm font-bold ml-1">pts</span>
+                      </p>
+                    </div>
+                  </StaggerItem>
+                ))}
+              </StaggerGrid>
+              <Reveal>
+                <div className="text-center mt-10">
+                  <Link
+                    to="/clasificacion"
+                    className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
+                  >
+                    Ver la tabla completa <ArrowRight size={18} />
+                  </Link>
+                </div>
+              </Reveal>
+            </>
+          ) : (
+            <Reveal>
+              <div className="max-w-3xl mx-auto bg-navy-800/60 border border-navy-600 rounded-2xl p-10 text-center">
+                <div className="w-16 h-16 mx-auto bg-lime-400 rounded-2xl flex items-center justify-center text-navy-700 mb-6">
+                  <Trophy size={30} />
+                </div>
+                <h3 className="font-display font-bold text-white text-2xl mb-3">La carrera está por empezar</h3>
+                <p className="text-gray-400 leading-relaxed mb-8 max-w-xl mx-auto">
+                  Seguimos punto a punto a los jugadores uruguayos que sueñan con representarnos en el Mundial de pickleball. Muy pronto vas a poder ver la tabla acá.
+                </p>
+                <Link
+                  to="/clasificacion"
+                  className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
+                >
+                  Conocé la clasificación <ArrowRight size={18} />
+                </Link>
+              </div>
+            </Reveal>
+          )}
+        </div>
+      </section>
+
+      {/* ── 7. VOLEA en acción ──────────────────────────────────────────── */}
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
             <div className="text-center mb-12">
               <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Comunidad</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">VOLEA en Acción</h2>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">VOLEA en acción</h2>
+              <p className="text-gray-500 mt-4 max-w-xl mx-auto">
+                Atardeceres, canchas y buena compañía: así se vive el pickleball con VOLEA puesta.
+              </p>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
             {[
-              { src: '/products/1.png', span: 'md:row-span-2', height: 'h-64 md:h-full' },
-              { src: '/products/mockup-vestido-blanco.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/9.png', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/mockup-short-negro.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/lifestyle-sunset-front.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/mockup-vestido-negro.jpg', span: 'md:col-span-1', height: 'h-48 md:h-64' },
+              { src: '/products/lifestyle-sunset-front.jpg', span: 'md:row-span-2', height: 'h-64 md:h-full' },
+              { src: '/products/lifestyle-sunset-2.jpg', span: '', height: 'h-48 md:h-64' },
+              { src: '/products/lifestyle-sunset-3.jpg', span: '', height: 'h-48 md:h-64' },
+              { src: '/products/lifestyle-sunset-4.jpg', span: '', height: 'h-48 md:h-64' },
+              { src: '/products/lifestyle-sunset-back.jpg', span: '', height: 'h-48 md:h-64' },
             ].map((photo, i) => (
               <Reveal key={i} delay={i * 80}>
                 <div className={`gallery-item rounded-xl overflow-hidden ${photo.span} ${photo.height}`}>
                   <img
                     src={photo.src}
-                    alt="VOLEA en acción"
+                    alt="Jugadores con indumentaria VOLEA en la cancha"
                     className="w-full h-full object-cover"
                     onError={handleImgError}
                   />
                   <div className="gallery-overlay flex items-end p-4">
                     <span className="text-white font-display font-bold text-sm flex items-center gap-1">
-                      <Instagram size={14} /> @volea.uy
+                      <Instagram size={14} /> @{INSTAGRAM_HANDLE}
                     </span>
                   </div>
                 </div>
               </Reveal>
             ))}
           </div>
+          <Reveal>
+            <div className="text-center mt-10">
+              <a
+                href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-display font-bold py-3 px-8 rounded-lg transition-transform hover:scale-105"
+              >
+                <Instagram size={20} /> Seguinos en @{INSTAGRAM_HANDLE}
+              </a>
+            </div>
+          </Reveal>
         </div>
       </section>
 
-      {/* Brand Section */}
+      {/* ── 8. Nuestra esencia + Equipo ─────────────────────────────────── */}
       <section
         className="relative py-24 overflow-hidden"
         style={{
@@ -1000,10 +1281,10 @@ function HomePage() {
               <div>
                 <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Nuestra esencia</span>
                 <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2 mb-6">
-                  Diseñado para el <span className="text-gradient">Pickleball</span>
+                  Hecha para el <span className="text-gradient">pickleball</span>, hecha en Uruguay
                 </h2>
                 <p className="text-gray-300 mb-10 leading-relaxed text-lg">
-                  VOLEA es la primera marca de indumentaria de pickleball en Uruguay. Cada prenda está diseñada pensando en las necesidades del jugador: comodidad, rendimiento y estilo dentro y fuera de la cancha.
+                  VOLEA nació en la cancha, entre partidos y mates. Somos la primera marca de indumentaria de pickleball de Uruguay, y cada prenda está pensada para lo que el juego exige: comodidad, rendimiento y un estilo que te acompaña también fuera de la cancha.
                 </p>
                 <div className="space-y-5">
                   {[
@@ -1030,7 +1311,7 @@ function HomePage() {
               <div className="relative flex justify-center">
                 <img
                   src="/products/7.png"
-                  alt="VOLEA Brand"
+                  alt="Indumentaria VOLEA"
                   className="w-full max-w-md rounded-2xl shadow-2xl"
                   onError={handleImgError}
                 />
@@ -1040,93 +1321,24 @@ function HomePage() {
               </div>
             </Reveal>
           </div>
-        </div>
-      </section>
 
-      {/* Upcoming Event */}
-      {nextEvent && (
-        <section className="bg-navy-700 py-20">
-          <div className="max-w-7xl mx-auto px-4">
-            <div className="text-center mb-12">
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-white">Próximo Evento</h2>
-              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-            </div>
-            <div className="bg-navy-800 rounded-2xl overflow-hidden shadow-2xl max-w-3xl mx-auto">
-              <div className="grid md:grid-cols-2">
-                <img
-                  src={nextEvent.imageUrl || FALLBACK_IMG}
-                  alt={nextEvent.name}
-                  className="w-full h-64 md:h-full object-cover"
-                  onError={handleImgError}
-                />
-                <div className="p-8 text-white">
-                  <span className="inline-block bg-lime-400 text-navy-700 text-xs font-bold px-3 py-1 rounded-full mb-4 uppercase">
-                    {nextEvent.category === 'tournament' ? 'Torneo' : nextEvent.category === 'clinic' ? 'Clínica' : 'Social'}
-                  </span>
-                  <h3 className="font-display text-2xl font-bold mb-3">{nextEvent.name}</h3>
-                  <div className="space-y-2 text-gray-300 mb-4">
-                    <p className="flex items-center gap-2"><Calendar size={16} /> {new Date(nextEvent.date).toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })} - {nextEvent.time}hs</p>
-                    <p className="flex items-center gap-2"><MapPin size={16} /> {nextEvent.location}, {nextEvent.city}</p>
-                    {nextEvent.maxParticipants && (
-                      <p className="flex items-center gap-2"><Users size={16} /> Máx. {nextEvent.maxParticipants} participantes</p>
-                    )}
-                  </div>
-                  <p className="text-gray-400 text-sm mb-6 line-clamp-3">{nextEvent.description}</p>
-                  <Link
-                    to="/eventos"
-                    className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-2 px-6 rounded-lg transition-colors text-sm"
-                  >
-                    Ver Eventos <ArrowRight size={16} />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Announcements Marquee */}
-      {activeAnnouncements.length > 0 && (
-        <section className="py-4 bg-navy-700 overflow-hidden">
-          <div className="relative">
-            <div className="marquee flex whitespace-nowrap">
-              {[...activeAnnouncements, ...activeAnnouncements].map((ann, idx) => {
-                const colors = announcementColors[ann.type] || announcementColors.info;
-                return (
-                  <div key={`${ann.id}-${idx}`} className="inline-flex items-center gap-3 mx-8 flex-shrink-0">
-                    <span className={`${colors.badge} text-white text-xs font-bold px-2 py-1 rounded-full`}>
-                      {announcementTypeLabels[ann.type]}
-                    </span>
-                    <span className="font-display font-bold text-white text-sm">{ann.title}</span>
-                    <span className="text-gray-400 text-sm hidden md:inline">—</span>
-                    <span className="text-gray-300 text-sm hidden md:inline max-w-xs truncate">{ann.content}</span>
-                    <span className="text-lime-400 text-lg">•</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Nuestro Equipo */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4">
+          {/* Equipo */}
           <Reveal>
-            <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Embajadores</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">El Equipo VOLEA</h2>
+            <div className="text-center mt-24 mb-12">
+              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Las caras de la marca</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">El equipo VOLEA</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-4xl mx-auto">
+          <StaggerGrid className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 max-w-5xl mx-auto">
             {[
               { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
               { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
               { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora VOLEA' },
+              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Fundadora VOLEA' },
             ].map((member, i) => (
-              <Reveal key={i} delay={i * 120}>
-                <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-gray-200">
+              <StaggerItem key={i}>
+                <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-navy-800">
                   <img
                     src={member.src}
                     alt={member.name}
@@ -1136,88 +1348,36 @@ function HomePage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-4">
                     <div className="w-8 h-1 bg-lime-400 mb-2" />
-                    <h3 className="font-display font-bold text-white text-lg">{member.name}</h3>
+                    <h3 className="font-display font-bold text-white text-base md:text-lg">{member.name}</h3>
                     <p className="text-gray-300 text-sm">{member.role}</p>
                   </div>
                 </div>
-              </Reveal>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
         </div>
       </section>
 
-      {/* CTA */}
-      <Reveal>
-        <section className="py-20 bg-white">
-          <div className="max-w-7xl mx-auto px-4 text-center">
-            <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-4">Seguinos en Instagram</h2>
-            <p className="text-gray-500 mb-8 text-lg">Enterate de las últimas novedades, productos y eventos</p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <a
-                href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-display font-bold py-3 px-8 rounded-lg transition-transform hover:scale-105"
-              >
-                <Instagram size={20} /> @{INSTAGRAM_HANDLE}
-              </a>
-              <a
-                href={`https://wa.me/${WHATSAPP_NUMBER}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
-              >
-                <MessageCircle size={20} /> WhatsApp
-              </a>
+      {/* ── 9. Ticker de anuncios ───────────────────────────────────────── */}
+      {activeAnnouncements.length > 0 && (
+        <section className="py-4 bg-navy-800 overflow-hidden border-t border-navy-600">
+          <div className="relative">
+            <div className="marquee flex whitespace-nowrap">
+              {[...activeAnnouncements, ...activeAnnouncements].map((ann, idx) => (
+                <div key={`${ann.title}-${idx}`} className="inline-flex items-center gap-3 mx-8 flex-shrink-0">
+                  <span className={`${announcementColors[ann.type] || announcementColors.info} text-white text-xs font-bold px-2 py-1 rounded-full`}>
+                    {announcementTypeLabels[ann.type] || 'Información'}
+                  </span>
+                  <span className="font-display font-bold text-white text-sm">{ann.title}</span>
+                  <span className="text-gray-400 text-sm hidden md:inline">—</span>
+                  <span className="text-gray-300 text-sm hidden md:inline max-w-xs truncate">{ann.content}</span>
+                  <span className="text-lime-400 text-lg">•</span>
+                </div>
+              ))}
             </div>
           </div>
         </section>
-      </Reveal>
-
-      {/* Newsletter */}
-      <section className="py-16 bg-navy-700">
-        <div className="max-w-3xl mx-auto px-4 text-center">
-          <Reveal>
-            <div className="bg-navy-800/50 backdrop-blur rounded-2xl p-8 md:p-12 border border-navy-600">
-              <Mail className="mx-auto text-lime-400 mb-4" size={36} />
-              <h2 className="font-display text-2xl md:text-3xl font-bold text-white mb-3">
-                Suscribite y recibí ofertas exclusivas
-              </h2>
-              <p className="text-gray-400 mb-8 max-w-md mx-auto">
-                Sé el primero en enterarte de nuevos lanzamientos, promos y eventos de pickleball.
-              </p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const form = e.target as HTMLFormElement;
-                  const input = form.querySelector('input') as HTMLInputElement;
-                  if (input.value) {
-                    input.value = '';
-                    const btn = form.querySelector('button') as HTMLButtonElement;
-                    btn.textContent = '¡Suscrito!';
-                    btn.classList.add('bg-green-500');
-                    setTimeout(() => { btn.textContent = 'Suscribirse'; btn.classList.remove('bg-green-500'); }, 2500);
-                  }
-                }}
-                className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto"
-              >
-                <input
-                  type="email"
-                  required
-                  placeholder="Tu email"
-                  className="flex-1 px-4 py-3 rounded-lg bg-navy-600 border border-navy-500 text-white placeholder-gray-400 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors font-body"
-                />
-                <button
-                  type="submit"
-                  className="pulse-glow bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors whitespace-nowrap"
-                >
-                  Suscribirse
-                </button>
-              </form>
-            </div>
-          </Reveal>
-        </div>
-      </section>
+      )}
     </div>
   );
 }
@@ -1229,7 +1389,7 @@ function ShopPage() {
   const [searchParams] = useSearchParams();
   const [sort, setSort] = useState('recent');
   usePageMeta({
-    title: 'Tienda — Indumentaria de Pickleball | VOLEA',
+    title: 'Tienda — Indumentaria de pickleball | VOLEA',
     description: 'Comprá la nueva colección VOLEA: remeras técnicas, polos, vestidos court, shorts y accesorios. Envíos a todo Uruguay.',
   });
 
@@ -1239,6 +1399,7 @@ function ShopPage() {
   }, [searchParams, setSelectedCategory]);
 
   let filtered = products.filter(p => {
+    if (p.active === false) return false; // ocultos: solo visibles en el admin
     const matchesSearch = !searchQuery ||
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1252,7 +1413,7 @@ function ShopPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Nuestra Colección</h1>
+      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Nuestra colección</h1>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
       {/* Filters */}
@@ -1291,9 +1452,9 @@ function ShopPage() {
         {categories.sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
           <button
             key={cat.id}
-            onClick={() => setSelectedCategory(selectedCategory === cat.name ? '' : cat.name)}
+            onClick={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
             className={`px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
-              selectedCategory === cat.name ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
+              selectedCategory === cat.id ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
             {cat.name}
@@ -1305,7 +1466,7 @@ function ShopPage() {
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
           <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
-          <p className="font-display text-lg">No se encontraron productos</p>
+          <p className="font-display text-lg">No encontramos productos con esa búsqueda. Probá otra categoría.</p>
         </div>
       ) : (
         <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1324,7 +1485,7 @@ function ShopPage() {
 
 function ProductDetailPage() {
   const { id } = useParams();
-  const { products, addToCart, setCartOpen } = useStore();
+  const { products, categories, addToCart, setCartOpen } = useStore();
   const navigate = useNavigate();
   const product = products.find(p => p.id === id);
   usePageMeta({
@@ -1448,7 +1609,7 @@ function ProductDetailPage() {
         {/* Info */}
         <div>
           <div className="flex items-center gap-3 mb-3">
-            <span className="inline-block bg-navy-700/10 text-navy-700 text-xs font-bold px-3 py-1 rounded-full">{product.category}</span>
+            <span className="inline-block bg-navy-700/10 text-navy-700 text-xs font-bold px-3 py-1 rounded-full">{categoryLabel(categories, product.category)}</span>
             <span className="text-xs text-gray-400 font-mono">SKU: {product.sku}</span>
           </div>
           <h1 className="font-display text-3xl font-bold text-navy-700 mb-3">{product.name}</h1>
@@ -1575,7 +1736,7 @@ function ProductDetailPage() {
                   : 'bg-lime-400 hover:bg-lime-500 text-navy-700'
             }`}
           >
-            {added ? <><Check size={20} /> Agregado</> : <><ShoppingCart size={20} /> Agregar al Carrito</>}
+            {added ? <><Check size={20} /> Agregado</> : <><ShoppingCart size={20} /> Agregar al carrito</>}
           </button>
         </div>
       </div>
@@ -1583,7 +1744,7 @@ function ProductDetailPage() {
       {/* Related */}
       {related.length > 0 && (
         <section className="mt-20">
-          <h2 className="font-display text-2xl font-bold text-navy-700 mb-6">Productos Relacionados</h2>
+          <h2 className="font-display text-2xl font-bold text-navy-700 mb-6">También te puede interesar</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {related.map(p => <ProductCard key={p.id} product={p} />)}
           </div>
@@ -1598,6 +1759,10 @@ function ProductDetailPage() {
 function EventsPage() {
   const { events } = useStore();
   const [filter, setFilter] = useState<string>('all');
+  usePageMeta({
+    title: 'Eventos y torneos de pickleball',
+    description: 'Torneos, clínicas y encuentros de pickleball en Uruguay. Mirá el calendario y sumate al próximo evento VOLEA.',
+  });
 
   const isEventPast = (event: Event) => {
     const eventDate = new Date(event.date);
@@ -1616,7 +1781,7 @@ function EventsPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Eventos y Torneos</h1>
+      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Eventos y torneos</h1>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
       {/* Filters */}
@@ -1728,7 +1893,7 @@ function EventsPage() {
       {filtered.length === 0 && (
         <div className="text-center py-20 text-gray-400">
           <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4" />
-          <p className="font-display text-lg">No hay eventos para mostrar</p>
+          <p className="font-display text-lg">Por ahora no hay eventos agendados</p>
         </div>
       )}
     </div>
@@ -1741,6 +1906,10 @@ declare const L: any;
 
 function MapPage() {
   const { clubs } = useStore();
+  usePageMeta({
+    title: 'Clubes y canchas de pickleball',
+    description: 'Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil. Mapa de clubes y canchas actualizado.',
+  });
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const [countryFilter, setCountryFilter] = useState<string>('all');
@@ -1813,7 +1982,7 @@ function MapPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Clubes y Canchas</h1>
+      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Clubes y canchas</h1>
       <p className="text-gray-500 mb-2">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
@@ -1895,6 +2064,10 @@ function MapPage() {
 // ─── 11. ContactPage ─────────────────────────────────────────────────────────
 
 function ContactPage() {
+  usePageMeta({
+    title: 'Contacto',
+    description: 'Escribinos por WhatsApp, Instagram o email. VOLEA, indumentaria de pickleball desde Montevideo, Uruguay.',
+  });
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' });
   const [sent, setSent] = useState(false);
 
@@ -1916,7 +2089,7 @@ function ContactPage() {
         {/* Contact Info */}
         <div className="space-y-6">
           <p className="text-gray-600 text-lg mb-8">
-            ¿Tenés alguna consulta? No dudes en contactarnos por cualquiera de estos medios.
+            ¿Tenés alguna consulta? Escribinos por el medio que te quede más cómodo.
           </p>
           <a
             href={`https://wa.me/${WHATSAPP_NUMBER}`}
@@ -1971,7 +2144,7 @@ function ContactPage() {
           <h2 className="font-display text-xl font-bold text-navy-700 mb-6">Enviar mensaje</h2>
           {sent && (
             <div className="bg-green-50 text-green-700 border border-green-200 rounded-lg p-3 mb-4 flex items-center gap-2">
-              <Check size={18} /> Mensaje enviado por WhatsApp
+              <Check size={18} /> Abrimos WhatsApp con tu mensaje listo para enviar
             </div>
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -2031,6 +2204,10 @@ function ContactPage() {
 
 function CheckoutPage() {
   const { cart, clearCart, addOrder } = useStore();
+  usePageMeta({
+    title: 'Finalizar pedido',
+    description: 'Completá tus datos y enviá tu pedido: te contactamos por WhatsApp para coordinar la entrega y el pago.',
+  });
   const [customer, setCustomer] = useState<CustomerInfo>({
     name: '', phone: '', email: '', address: '', city: '', department: 'Montevideo', notes: ''
   });
@@ -2038,17 +2215,13 @@ function CheckoutPage() {
 
   const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
 
-  // All items must have a Shopify variantId for the real checkout to work
-  const cartItemsWithVariants = cart.filter((i) => i.variantId);
-  const allItemsHaveVariants = cart.length > 0 && cartItemsWithVariants.length === cart.length;
-
   if (cart.length === 0 && !success) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
         <ShoppingCart size={64} strokeWidth={1} className="mx-auto text-gray-300 mb-4" />
         <h1 className="font-display text-2xl font-bold text-navy-700 mb-4">Tu carrito está vacío</h1>
         <Link to="/tienda" className="text-lime-500 hover:text-lime-600 font-semibold inline-flex items-center gap-1">
-          Ir a la tienda <ArrowRight size={16} />
+          Descubrí la colección <ArrowRight size={16} />
         </Link>
       </div>
     );
@@ -2060,38 +2233,32 @@ function CheckoutPage() {
         <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <Check size={40} className="text-green-500" />
         </div>
-        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Mensaje enviado!</h1>
+        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Pedido enviado!</h1>
         <p className="text-gray-500 mb-8 max-w-md mx-auto">
-          Te contactaremos por WhatsApp para coordinar tu pedido.
-          ¿Preferís pagar online? Volvé al carrito y elegí "Pagar ahora".
+          Recibimos tu pedido y te vamos a escribir por WhatsApp para coordinar
+          la entrega y el pago. ¡Gracias por elegir VOLEA!
         </p>
         <Link
           to="/"
           className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
         >
-          Volver al Inicio
+          Volver al inicio
         </Link>
       </div>
     );
   }
 
-  const payWithShopify = () => {
-    if (!allItemsHaveVariants) {
-      toast.error('No se pudo armar el checkout — probá recargar la página o consultar por WhatsApp.');
-      return;
-    }
-    const url = buildCartPermalink(
-      cart.map((i) => ({ variantId: i.variantId!, quantity: i.quantity }))
-    );
-    toast.success('Redirigiendo al pago seguro de Shopify...');
-    // Small delay so the toast renders
-    setTimeout(() => {
-      window.location.href = url;
-    }, 400);
-  };
-
   const handleSubmitWhatsApp = (e: React.FormEvent) => {
     e.preventDefault();
+    // Última validación de stock antes de registrar el pedido
+    const shortItem = cart.find(i => {
+      const key = i.selectedColor ? `${i.selectedSize}|${i.selectedColor}` : i.selectedSize;
+      return (i.product.stockBySize[key] || 0) < i.quantity;
+    });
+    if (shortItem) {
+      toast.error(`No queda stock suficiente de ${shortItem.product.name} — ajustá la cantidad en el carrito.`);
+      return;
+    }
     const orderId = `VO-${Date.now().toString(36).toUpperCase()}`;
     const order: Order = {
       id: orderId,
@@ -2105,7 +2272,7 @@ function CheckoutPage() {
 
     // Build WhatsApp message
     const lines = [
-      `🏓 *Consulta VOLEA*`,
+      `🏓 *Nuevo pedido VOLEA*`,
       `📌 Ref: ${orderId}`,
       ``,
       `👤 *Cliente:* ${customer.name}`,
@@ -2115,11 +2282,11 @@ function CheckoutPage() {
       customer.notes ? `📝 *Notas:* ${customer.notes}` : '',
       ``,
       `🛍 *Productos:*`,
-      ...cart.map(i => `  • ${i.product.name} (${i.selectedSize}/${i.selectedColor}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
+      ...cart.map(i => `  • ${i.product.name} (${[i.selectedSize, i.selectedColor].filter(Boolean).join('/') || 'Único'}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
       ``,
       `💰 *Total: ${formatPrice(total)}*`,
       ``,
-      `_Quiero coordinar este pedido._`,
+      `_¡Hola! Quiero coordinar la entrega y el pago de este pedido._`,
     ].filter(Boolean).join('\n');
 
     const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines)}`;
@@ -2130,13 +2297,13 @@ function CheckoutPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Finalizar Compra</h1>
+      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Finalizar pedido</h1>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
       <div className="grid lg:grid-cols-2 gap-12">
         {/* Order Summary */}
         <div className="order-2 lg:order-1">
-          <h2 className="font-display text-xl font-bold text-navy-700 mb-4">Resumen del Pedido</h2>
+          <h2 className="font-display text-xl font-bold text-navy-700 mb-4">Resumen del pedido</h2>
           <div className="bg-gray-50 rounded-xl p-6 space-y-4">
             {cart.map((item, idx) => (
               <div key={idx} className="flex gap-3">
@@ -2148,7 +2315,7 @@ function CheckoutPage() {
                 />
                 <div className="flex-1 min-w-0">
                   <h3 className="font-display font-semibold text-sm text-navy-700 truncate">{item.product.name}</h3>
-                  <p className="text-xs text-gray-500">{item.selectedSize} | {item.selectedColor} | x{item.quantity}</p>
+                  <p className="text-xs text-gray-500">{[item.selectedSize, item.selectedColor, `x${item.quantity}`].filter(Boolean).join(' | ')}</p>
                 </div>
                 <span className="font-display font-bold text-navy-700 text-sm whitespace-nowrap">
                   {formatPrice(item.product.price * item.quantity)}
@@ -2161,35 +2328,24 @@ function CheckoutPage() {
             </div>
           </div>
 
-          {/* Primary CTA: Shopify Checkout */}
+          {/* Cómo funciona */}
           <div className="mt-6 bg-gradient-to-br from-navy-700 to-navy-900 rounded-xl p-6 text-white">
             <div className="flex items-center gap-2 mb-2">
-              <Shield size={18} className="text-lime-400" />
-              <h3 className="font-display font-bold text-lg">Pago seguro online</h3>
+              <MessageCircle size={18} className="text-lime-400" />
+              <h3 className="font-display font-bold text-lg">Compra coordinada por WhatsApp</h3>
             </div>
-            <p className="text-sm text-gray-300 mb-4">
-              Tarjeta, transferencia o efectivo. Procesado por Shopify, encriptado de punta a punta.
+            <p className="text-sm text-gray-300">
+              Completá tus datos y tu pedido nos llega al instante. Te escribimos
+              por WhatsApp para coordinar la entrega y el pago (transferencia,
+              efectivo o el medio que te quede más cómodo).
             </p>
-            <button
-              type="button"
-              onClick={payWithShopify}
-              disabled={!allItemsHaveVariants}
-              className="w-full bg-lime-400 hover:bg-lime-500 disabled:bg-gray-400 disabled:cursor-not-allowed text-navy-700 font-display font-bold py-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-lg pulse-glow"
-            >
-              <Zap size={20} /> Pagar ahora — {formatPrice(total)}
-            </button>
-            {!allItemsHaveVariants && (
-              <p className="text-xs text-yellow-300 mt-2 text-center">
-                Algunos productos no se pueden pagar online. Usá WhatsApp para coordinar.
-              </p>
-            )}
           </div>
         </div>
 
         {/* Customer Form for WhatsApp */}
         <div className="order-1 lg:order-2">
-          <h2 className="font-display text-xl font-bold text-navy-700 mb-2">¿Preferís consultar antes?</h2>
-          <p className="text-sm text-gray-500 mb-4">Dejá tus datos y te contactamos por WhatsApp.</p>
+          <h2 className="font-display text-xl font-bold text-navy-700 mb-2">Completá tus datos</h2>
+          <p className="text-sm text-gray-500 mb-4">Con esto armamos tu pedido y te contactamos por WhatsApp.</p>
           <form onSubmit={handleSubmitWhatsApp} className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
@@ -2265,14 +2421,14 @@ function CheckoutPage() {
                 value={customer.notes}
                 onChange={e => setCustomer({ ...customer, notes: e.target.value })}
                 className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors resize-none"
-                placeholder="Instrucciones especiales, horario de entrega, etc."
+                placeholder="Horario de entrega, punto de encuentro u otra aclaración"
               />
             </div>
             <button
               type="submit"
-              className="w-full bg-white hover:bg-gray-50 border-2 border-navy-700 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+              className="pulse-glow w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              <MessageCircle size={20} /> Coordinar por WhatsApp
+              <MessageCircle size={20} /> Enviar pedido por WhatsApp
             </button>
           </form>
         </div>
@@ -2285,7 +2441,7 @@ function CheckoutPage() {
 
 type StockFilter = 'all' | 'low' | 'out';
 
-function StockDashboard({ products }: { products: Product[] }) {
+function StockDashboard({ products, onEdit }: { products: Product[]; onEdit: (p: Product) => void }) {
   const [filter, setFilter] = useState<StockFilter>('all');
   const [search, setSearch] = useState('');
   const threshold = 3;
@@ -2294,7 +2450,7 @@ function StockDashboard({ products }: { products: Product[] }) {
   const enriched = products.map((p) => {
     const variants = Object.entries(p.stockBySize).map(([key, qty]) => {
       const [size, color] = key.split('|');
-      return { key, size, color: color || 'Único', qty, variantId: p.variantMap?.[key] };
+      return { key, size, color: color || 'Único', qty };
     });
     const lowVariants = variants.filter((v) => v.qty > 0 && v.qty <= threshold);
     const outVariants = variants.filter((v) => v.qty <= 0);
@@ -2324,14 +2480,6 @@ function StockDashboard({ products }: { products: Product[] }) {
     <div className="fade-in">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Stock &amp; Alertas</h1>
-        <a
-          href={buildAdminInventoryUrl()}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-navy-700 hover:bg-navy-800 text-white font-display font-bold py-2 px-4 rounded-lg flex items-center gap-2 text-sm transition-colors"
-        >
-          <ExternalLink size={16} /> Inventario en Shopify
-        </a>
       </div>
 
       {/* Stat cards */}
@@ -2392,6 +2540,7 @@ function StockDashboard({ products }: { products: Product[] }) {
               outVariants={outVariants}
               totalUnits={totalUnits}
               threshold={threshold}
+              onEdit={() => onEdit(product)}
             />
           ))}
         </div>
@@ -2415,7 +2564,6 @@ interface StockVariantInfo {
   size: string;
   color: string;
   qty: number;
-  variantId: string | undefined;
 }
 
 function StockProductRow({
@@ -2425,6 +2573,7 @@ function StockProductRow({
   outVariants,
   totalUnits,
   threshold,
+  onEdit,
 }: {
   product: Product;
   variants: StockVariantInfo[];
@@ -2432,6 +2581,7 @@ function StockProductRow({
   outVariants: StockVariantInfo[];
   totalUnits: number;
   threshold: number;
+  onEdit: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasAlert = lowVariants.length > 0 || outVariants.length > 0;
@@ -2469,17 +2619,13 @@ function StockProductRow({
         >
           <ChevronDown size={20} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </button>
-        {product.shopifyGid && (
-          <a
-            href={buildAdminProductUrl(product.shopifyGid)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-navy-700 hover:text-lime-500 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-            title="Editar en Shopify"
-          >
-            Editar <ExternalLink size={12} />
-          </a>
-        )}
+        <button
+          onClick={onEdit}
+          className="text-xs text-navy-700 hover:text-lime-500 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+          title="Editar producto y stock"
+        >
+          Editar <Edit size={12} />
+        </button>
       </div>
 
       {expanded && (
@@ -2536,9 +2682,10 @@ function StockProductRow({
 function AdminPage() {
   const store = useStore();
   const {
-    isAdmin, currentAdmin, login, sendLoginLink, logout, products, setProducts, events, setEvents,
+    isAdmin, currentAdmin, login, sendLoginLink, logout, products, saveProduct, removeProduct, events, setEvents,
     orders, setOrders, categories, setCategories, clubs, setClubs,
-    announcements, setAnnouncements
+    announcements, setAnnouncements, posts, savePost, removePost,
+    standings, saveStanding, removeStanding
   } = store;
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -2588,7 +2735,7 @@ function AdminPage() {
             <h1 className="font-display text-2xl font-bold text-navy-700">Panel de Administración</h1>
             <p className="text-gray-500 text-sm mt-1">
               {useSupabaseAuth && !showPasswordFallback
-                ? 'Te mandamos un link mágico a tu email'
+                ? 'Ingresá tu email y te mandamos un link de acceso'
                 : 'Ingresá la contraseña para acceder'}
             </p>
           </div>
@@ -2604,9 +2751,9 @@ function AdminPage() {
               <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Mail size={28} className="text-green-600" />
               </div>
-              <p className="text-navy-700 font-display font-semibold mb-2">¡Mail enviado!</p>
+              <p className="text-navy-700 font-display font-semibold mb-2">¡Email enviado!</p>
               <p className="text-sm text-gray-500 mb-4">
-                Revisá <strong>{email}</strong> y hacé click en el link para entrar.
+                Revisá <strong>{email}</strong> y hacé clic en el link para entrar.
               </p>
               <button
                 onClick={() => { setMagicLinkSent(false); setEmail(''); }}
@@ -2643,7 +2790,7 @@ function AdminPage() {
                 disabled={sendingMagicLink}
                 className="w-full bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
-                {sendingMagicLink ? 'Enviando...' : (<><Mail size={18} /> Recibir link mágico</>)}
+                {sendingMagicLink ? 'Enviando...' : (<><Mail size={18} /> Recibir link de acceso</>)}
               </button>
             </form>
           ) : (
@@ -2685,15 +2832,28 @@ function AdminPage() {
     { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={18} /> },
     { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={18} /> },
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
-    { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
+    { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
+    { id: 'standings', label: 'Clasificación', icon: <Trophy size={18} /> },
+    { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
     { id: 'categories', label: 'Categorías', icon: <Tag size={18} /> },
     { id: 'clubs', label: 'Clubes', icon: <Map size={18} /> },
     { id: 'announcements', label: 'Anuncios', icon: <Megaphone size={18} /> },
   ];
 
-  // Stock metrics (read from Shopify catalog snapshot)
-  const stockMetrics = computeStockMetrics(3);
+  // Stock metrics (nativo: calculado desde los productos de Supabase)
+  const stockMetrics = (() => {
+    let totalUnits = 0, variantCount = 0, outOfStockVariants = 0, lowStockVariants = 0;
+    for (const p of products) {
+      for (const qty of Object.values(p.stockBySize)) {
+        variantCount++;
+        totalUnits += Math.max(0, qty);
+        if (qty <= 0) outOfStockVariants++;
+        else if (qty <= 3) lowStockVariants++;
+      }
+    }
+    return { totalUnits, variantCount, outOfStockVariants, lowStockVariants };
+  })();
 
   return (
     <div className="flex min-h-[calc(100vh-120px)]">
@@ -2778,7 +2938,7 @@ function AdminPage() {
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Productos Shopify', value: products.length, icon: <Package size={24} />, color: 'bg-blue-50 text-blue-600' },
+                { label: 'Productos', value: products.length, icon: <Package size={24} />, color: 'bg-blue-50 text-blue-600' },
                 { label: 'Unidades en Stock', value: stockMetrics.totalUnits, icon: <BarChart3 size={24} />, color: 'bg-green-50 text-green-600' },
                 { label: 'Pedidos Pendientes', value: pendingOrders, icon: <Store size={24} />, color: 'bg-yellow-50 text-yellow-600' },
                 { label: 'Variantes sin Stock', value: stockMetrics.outOfStockVariants, icon: <AlertCircle size={24} />, color: 'bg-red-50 text-red-600' },
@@ -2819,7 +2979,7 @@ function AdminPage() {
 
         {/* Stock & Alertas Tab */}
         {activeTab === 'stock' && (
-          <StockDashboard products={products} />
+          <StockDashboard products={products} onEdit={(p) => { setEditingProduct(p); setProductModal(true); }} />
         )}
 
         {/* Products Tab */}
@@ -2827,20 +2987,12 @@ function AdminPage() {
           <div className="fade-in">
             <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
               <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Productos</h1>
-              <a
-                href={`https://admin.shopify.com/store/volea-6996/products`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={() => { setEditingProduct(null); setProductModal(true); }}
                 className="bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-2 px-6 rounded-lg transition-colors flex items-center gap-2"
               >
-                <ExternalLink size={18} /> Gestionar en Shopify
-              </a>
-            </div>
-            <div className="mb-4 bg-blue-50 border-l-4 border-blue-500 px-4 py-3 rounded-r-lg flex items-start gap-3 text-sm text-blue-900">
-              <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
-              <div>
-                <strong>Los productos vienen de Shopify ({SHOPIFY_DOMAIN}).</strong> Para crear, editar precios o cambiar stock, hacelo en el admin de Shopify y la web se sincroniza en el próximo build. La gestión local de productos quedó deshabilitada para evitar inconsistencias.
-              </div>
+                <Plus size={18} /> Nuevo producto
+              </button>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
@@ -2854,8 +3006,8 @@ function AdminPage() {
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Precio</th>
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden sm:table-cell">Stock</th>
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden lg:table-cell">Dest.</th>
-                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden lg:table-cell">Oferta</th>
-                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Shopify</th>
+                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden lg:table-cell">Estado</th>
+                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2866,7 +3018,7 @@ function AdminPage() {
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono hidden sm:table-cell">{p.sku}</td>
                         <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm">{p.name}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{p.category}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{categoryLabel(categories, p.category)}</td>
                         <td className="px-4 py-3 font-display font-bold text-navy-700 text-sm">{formatPrice(p.price)}</td>
                         <td className="px-4 py-3 text-sm hidden sm:table-cell">
                           <span className={`font-semibold ${getTotalStock(p) === 0 ? 'text-red-500' : 'text-green-600'}`}>{getTotalStock(p)}</span>
@@ -2875,22 +3027,28 @@ function AdminPage() {
                           {p.isFeatured && <Star size={16} className="text-yellow-500 fill-yellow-500" />}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell">
-                          {p.isOffer && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-full">OFERTA</span>}
+                          <div className="flex items-center gap-1">
+                            {p.isOffer && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-full">OFERTA</span>}
+                            {p.active === false && <span className="bg-gray-100 text-gray-500 text-xs font-bold px-2 py-1 rounded-full">OCULTO</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
-                          {p.shopifyGid ? (
-                            <a
-                              href={buildAdminProductUrl(p.shopifyGid)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-navy-700 hover:text-lime-500 transition-colors inline-flex"
-                              title="Editar en Shopify"
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => { setEditingProduct(p); setProductModal(true); }}
+                              className="text-navy-700 hover:text-lime-500 transition-colors"
+                              title="Editar"
                             >
-                              <ExternalLink size={16} />
-                            </a>
-                          ) : (
-                            <span className="text-gray-300">—</span>
-                          )}
+                              <Edit size={16} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm(p.id)}
+                              className="text-gray-400 hover:text-red-500 transition-colors"
+                              title="Eliminar"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -3332,6 +3490,57 @@ function AdminPage() {
             )}
           </div>
         )}
+
+        {/* Blog Tab */}
+        {activeTab === 'blog' && (
+          <div className="fade-in">
+            <AdminBlogTab
+              posts={posts}
+              onSave={savePost}
+              onDelete={removePost}
+              uploadImage={(f) => SupabaseService.uploadImage(f, 'blog')}
+            />
+          </div>
+        )}
+
+        {/* Standings Tab */}
+        {activeTab === 'standings' && (
+          <div className="fade-in">
+            <AdminStandingsTab
+              standings={standings}
+              onSave={saveStanding}
+              onDelete={removeStanding}
+            />
+          </div>
+        )}
+
+        {/* Product editor global: se abre desde Productos y desde Stock & Alertas */}
+        {productModal && (
+          <ProductEditor
+            product={editingProduct}
+            categories={categories}
+            uploadImage={(f) => SupabaseService.uploadImage(f, 'products')}
+            onClose={() => { setProductModal(false); setEditingProduct(null); }}
+            onSave={(p) => {
+              saveProduct(p);
+              setProductModal(false);
+              setEditingProduct(null);
+            }}
+          />
+        )}
+
+        {deleteConfirm && (
+          <ConfirmDialog
+            title="¿Eliminar producto?"
+            message="Se borra de la tienda y del catálogo. Esta acción no se puede deshacer."
+            onCancel={() => setDeleteConfirm(null)}
+            onConfirm={() => {
+              removeProduct(deleteConfirm);
+              setDeleteConfirm(null);
+              toast.success('Producto eliminado');
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -3387,372 +3596,6 @@ function ConfirmDialog({ title, message, onCancel, onConfirm }: {
             Eliminar
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── ProductModal ────────────────────────────────────────────────────────────
-
-function ProductModal({
-  product, categories, onClose, onSave
-}: {
-  product: Product | null;
-  categories: Category[];
-  onClose: () => void;
-  onSave: (p: Product) => void;
-}) {
-  const [form, setForm] = useState<Product>(
-    product || {
-      id: `prod-${Date.now()}`,
-      name: '',
-      sku: '',
-      description: '',
-      price: 0,
-      originalPrice: undefined,
-      category: categories[0]?.name || '',
-      images: [''],
-      sizes: [],
-      colors: [],
-      stockBySize: {},
-      isFeatured: false,
-      isOffer: false,
-      createdAt: new Date().toISOString().split('T')[0],
-    }
-  );
-  const [newColorName, setNewColorName] = useState('');
-  const [newColorHex, setNewColorHex] = useState('#000000');
-  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Único'];
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanedImages = form.images.filter(img => img.trim() !== '');
-    onSave({ ...form, images: cleanedImages });
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="font-display text-xl font-bold text-navy-700">
-            {product ? 'Editar Producto' : 'Nuevo Producto'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-navy-700 transition-colors">
-            <X size={24} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre *</label>
-              <input
-                type="text"
-                required
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">SKU *</label>
-              <input
-                type="text"
-                required
-                placeholder="VOL-REM-001"
-                value={form.sku}
-                onChange={e => setForm({ ...form, sku: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors font-mono text-sm"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Descripción</label>
-            <textarea
-              rows={3}
-              value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Precio *</label>
-              <input
-                type="number"
-                required
-                min={0}
-                value={form.price}
-                onChange={e => setForm({ ...form, price: Number(e.target.value) })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Precio Original (oferta)</label>
-              <input
-                type="number"
-                min={0}
-                value={form.originalPrice || ''}
-                onChange={e => setForm({ ...form, originalPrice: e.target.value ? Number(e.target.value) : undefined })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Categoría</label>
-              <select
-                value={form.category}
-                onChange={e => setForm({ ...form, category: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-              >
-                {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Stock total: {getTotalStock(form)}</label>
-            </div>
-          </div>
-
-          {/* Sizes */}
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-2">Talles</label>
-            <div className="flex flex-wrap gap-2">
-              {allSizes.map(size => (
-                <button
-                  key={size}
-                  type="button"
-                  onClick={() => {
-                    if (form.sizes.includes(size)) {
-                      const newStockBySize = { ...form.stockBySize };
-                      // Remove all stock keys for this size (both SIZE and SIZE|COLOR)
-                      Object.keys(newStockBySize).forEach(key => {
-                        if (key === size || key.startsWith(`${size}|`)) {
-                          delete newStockBySize[key];
-                        }
-                      });
-                      setForm({
-                        ...form,
-                        sizes: form.sizes.filter(s => s !== size),
-                        stockBySize: newStockBySize,
-                      });
-                    } else {
-                      const newStockBySize = { ...form.stockBySize };
-                      if (form.colors.length > 0) {
-                        form.colors.forEach(c => { newStockBySize[`${size}|${c.name}`] = 0; });
-                      } else {
-                        newStockBySize[size] = 0;
-                      }
-                      setForm({
-                        ...form,
-                        sizes: [...form.sizes, size],
-                        stockBySize: newStockBySize,
-                      });
-                    }
-                  }}
-                  className={`px-3 py-1 rounded-lg text-sm font-semibold border transition-colors ${
-                    form.sizes.includes(size)
-                      ? 'border-lime-400 bg-lime-400 text-navy-700'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-400'
-                  }`}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Stock por talle y color */}
-          {form.sizes.length > 0 && (
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-2">
-                {form.colors.length > 0 ? 'Stock por Talle y Color' : 'Stock por Talle'} (Total: {getTotalStock(form)})
-              </label>
-              {form.colors.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className="text-left px-2 py-1 font-semibold text-navy-700">Talle</th>
-                        {form.colors.map(c => (
-                          <th key={c.name} className="px-2 py-1 font-semibold text-navy-700 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <span className="w-3 h-3 rounded-full border border-gray-300 inline-block" style={{ backgroundColor: c.hex }} />
-                              {c.name}
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {form.sizes.map(size => (
-                        <tr key={size} className="border-t border-gray-100">
-                          <td className="px-2 py-2 font-semibold text-navy-700">{size}</td>
-                          {form.colors.map(c => {
-                            const stockKey = `${size}|${c.name}`;
-                            return (
-                              <td key={c.name} className="px-2 py-2">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={form.stockBySize[stockKey] || 0}
-                                  onChange={e => setForm({
-                                    ...form,
-                                    stockBySize: { ...form.stockBySize, [stockKey]: Math.max(0, Number(e.target.value)) }
-                                  })}
-                                  className="w-full px-2 py-1 rounded border border-gray-200 focus:border-lime-400 outline-none text-sm text-center"
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {form.sizes.map(size => (
-                    <div key={size} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                      <span className="text-sm font-semibold text-navy-700 w-10">{size}</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={form.stockBySize[size] || 0}
-                        onChange={e => setForm({
-                          ...form,
-                          stockBySize: { ...form.stockBySize, [size]: Math.max(0, Number(e.target.value)) }
-                        })}
-                        className="flex-1 px-2 py-1 rounded border border-gray-200 focus:border-lime-400 outline-none text-sm text-center"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Colors */}
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-2">Colores</label>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {form.colors.map((c, i) => (
-                <div key={i} className="flex items-center gap-1 bg-gray-100 rounded-full px-3 py-1">
-                  <span className="w-4 h-4 rounded-full border border-gray-300" style={{ backgroundColor: c.hex }} />
-                  <span className="text-xs font-semibold">{c.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, colors: form.colors.filter((_, idx) => idx !== i) })}
-                    className="text-gray-400 hover:text-red-500 ml-1"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Nombre color"
-                value={newColorName}
-                onChange={e => setNewColorName(e.target.value)}
-                className="flex-1 px-3 py-1 rounded-lg border border-gray-200 focus:border-lime-400 outline-none text-sm"
-              />
-              <input
-                type="color"
-                value={newColorHex}
-                onChange={e => setNewColorHex(e.target.value)}
-                className="w-10 h-8 rounded border border-gray-200 cursor-pointer"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (newColorName.trim()) {
-                    setForm({ ...form, colors: [...form.colors, { name: newColorName.trim(), hex: newColorHex }] });
-                    setNewColorName('');
-                    setNewColorHex('#000000');
-                  }
-                }}
-                className="bg-navy-700 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-navy-800 transition-colors"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* Images */}
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-2">Imágenes (rutas)</label>
-            {form.images.map((img, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  placeholder="/products/imagen.png"
-                  value={img}
-                  onChange={e => {
-                    const newImgs = [...form.images];
-                    newImgs[i] = e.target.value;
-                    setForm({ ...form, images: newImgs });
-                  }}
-                  className="flex-1 px-3 py-1 rounded-lg border border-gray-200 focus:border-lime-400 outline-none text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, images: form.images.filter((_, idx) => idx !== i) })}
-                  className="text-gray-400 hover:text-red-500"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, images: [...form.images, ''] })}
-              className="text-lime-600 font-semibold text-sm flex items-center gap-1 hover:text-lime-700"
-            >
-              <Plus size={14} /> Agregar imagen
-            </button>
-          </div>
-
-          {/* Toggles */}
-          <div className="flex gap-6">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.isFeatured}
-                onChange={e => setForm({ ...form, isFeatured: e.target.checked })}
-                className="w-4 h-4 text-lime-400 border-gray-300 rounded focus:ring-lime-400"
-              />
-              <span className="text-sm font-semibold text-navy-700">Destacado</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.isOffer}
-                onChange={e => setForm({ ...form, isOffer: e.target.checked })}
-                className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-400"
-              />
-              <span className="text-sm font-semibold text-navy-700">Oferta</span>
-            </label>
-          </div>
-
-          {/* Submit */}
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Save size={18} /> Guardar
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );
@@ -4223,15 +4066,19 @@ function AnnouncementModal({
 // ─── 14. NotFoundPage ────────────────────────────────────────────────────────
 
 function NotFoundPage() {
+  usePageMeta({
+    title: 'Página no encontrada',
+    description: 'La página que buscás no existe. Volvé al inicio para seguir navegando la tienda VOLEA.',
+  });
   return (
     <div className="fade-in min-h-[60vh] flex flex-col items-center justify-center px-4">
       <h1 className="font-display text-8xl font-black text-navy-700 mb-4">404</h1>
-      <p className="font-display text-xl text-gray-500 mb-8">Página no encontrada</p>
+      <p className="font-display text-xl text-gray-500 mb-8">Esta página se fue afuera de la cancha</p>
       <Link
         to="/"
         className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
       >
-        <Home size={18} /> Volver al Inicio
+        <Home size={18} /> Volver al inicio
       </Link>
     </div>
   );
@@ -4283,7 +4130,7 @@ function Footer() {
               e.currentTarget.parentElement?.appendChild(span);
             }} />
             <p className="text-gray-400 text-sm mt-4 leading-relaxed">
-              La primera marca de indumentaria de pickleball en Uruguay. Diseño, calidad y pasión por el deporte.
+              La primera marca de indumentaria de pickleball de Uruguay. Evolucionamos distinto. Jugamos distinto.
             </p>
           </div>
 
@@ -4314,7 +4161,7 @@ function Footer() {
               {categories.sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
                 <li key={cat.id}>
                   <Link
-                    to={`/tienda?category=${encodeURIComponent(cat.name)}`}
+                    to={`/tienda?category=${encodeURIComponent(cat.id)}`}
                     className="text-gray-400 hover:text-lime-400 transition-colors text-sm"
                   >
                     {cat.name}
@@ -4358,7 +4205,7 @@ function Footer() {
         {/* Bottom */}
         <div className="border-t border-navy-600 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-gray-500 text-sm">
-            &copy; 2026 VOLEA. La primera marca de Pickleball en Uruguay.
+            &copy; 2026 VOLEA. La primera marca de pickleball de Uruguay.
           </p>
           <div className="flex items-center gap-4">
             <a
@@ -4386,6 +4233,35 @@ function Footer() {
 
 // ─── 17. Main App Component ──────────────────────────────────────────────────
 
+// Wrappers: conectan las páginas nuevas (componentes puros) con el store.
+function BlogListRoute() {
+  const { posts } = useStore();
+  usePageMeta({
+    title: 'Blog',
+    description: 'Novedades del pickleball en Uruguay, la comunidad y todo lo que pasa en VOLEA.',
+  });
+  return <BlogListPage posts={posts} />;
+}
+function BlogPostRoute() {
+  const { posts } = useStore();
+  const { slug } = useParams<{ slug: string }>();
+  const post = posts.find(p => p.published && p.slug === slug);
+  usePageMeta({
+    title: post ? post.title : 'Publicación no encontrada',
+    description: post?.excerpt,
+    image: post?.coverUrl,
+  });
+  return <BlogPostPage posts={posts} />;
+}
+function StandingsRoute() {
+  const { standings } = useStore();
+  usePageMeta({
+    title: 'Clasificación — Camino al Mundial',
+    description: 'Ranking de jugadores de pickleball rumbo al Mundial, actualizado por el equipo VOLEA después de cada torneo.',
+  });
+  return <StandingsPage standings={standings} />;
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
   // Sin AnimatePresence: con framer-motion 12 + React 19, mode="wait" deja la
@@ -4396,6 +4272,9 @@ function AnimatedRoutes() {
       <Route path="/" element={<PageTransition><HomePage /></PageTransition>} />
       <Route path="/tienda" element={<PageTransition><ShopPage /></PageTransition>} />
       <Route path="/producto/:id" element={<PageTransition><ProductDetailPage /></PageTransition>} />
+      <Route path="/blog" element={<PageTransition><BlogListRoute /></PageTransition>} />
+      <Route path="/blog/:slug" element={<PageTransition><BlogPostRoute /></PageTransition>} />
+      <Route path="/clasificacion" element={<PageTransition><StandingsRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
       <Route path="/mapa" element={<PageTransition><MapPage /></PageTransition>} />
       <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />

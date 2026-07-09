@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
-import type { Product, Event, Order, Category, Club, Announcement } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry } from '../types';
 
 function orderToRow(o: Order) {
   return {
@@ -18,21 +18,209 @@ function orderToRow(o: Order) {
   };
 }
 
+function productToRow(p: Product) {
+  return {
+    id: p.id,
+    name: p.name,
+    sku: p.sku || '',
+    description: p.description || '',
+    price: Math.round(p.price) || 0,
+    original_price: p.originalPrice ? Math.round(p.originalPrice) : null,
+    category: p.category,
+    images: p.images || [],
+    sizes: p.sizes || [],
+    colors: p.colors || [],
+    stock_by_size: p.stockBySize || {},
+    is_featured: p.isFeatured || false,
+    is_offer: p.isOffer || false,
+    active: p.active !== false,
+    sort_order: p.sortOrder ?? 0,
+  };
+}
+
+function rowToProduct(row: any): Product {
+  return {
+    id: row.id,
+    name: row.name,
+    sku: row.sku || '',
+    description: row.description || '',
+    price: Number(row.price) || 0,
+    originalPrice: row.original_price ? Number(row.original_price) : undefined,
+    category: row.category,
+    images: row.images || [],
+    sizes: row.sizes || [],
+    colors: row.colors || [],
+    stockBySize: row.stock_by_size || {},
+    isFeatured: row.is_featured || false,
+    isOffer: row.is_offer || false,
+    active: row.active !== false,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at?.split('T')[0] || '',
+  };
+}
+
 export const SupabaseService = {
   isConnected: isSupabaseConnected,
 
-  // ── Products / Categories ──
-  // Shopify es la fuente de verdad (snapshot en src/data/shopify-catalog.json).
-  // La base volea-web no tiene tablas products/categories: estas operaciones son no-op.
-  async getProducts(): Promise<Product[]> {
-    return [];
+  // ── Products (Supabase es la fuente de verdad desde la migración nativa) ──
+  // null = fetch falló (usar fallback); [] = catálogo legítimamente vacío.
+  async getProducts(): Promise<Product[] | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (error) { console.error('Error fetching products:', error); return null; }
+    return (data || []).map(rowToProduct);
   },
 
-  async setProducts(_products: Product[]): Promise<void> {},
+  // Las escrituras admin devuelven false si la nube las rechazó (RLS/sesión vencida),
+  // para que la UI avise en vez de fingir éxito.
+  async setProducts(products: Product[]): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    let ok = true;
+    for (const p of products) {
+      const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
+      if (error) { console.error('Error upserting product:', error); ok = false; }
+    }
+    return ok;
+  },
 
-  async upsertProduct(_p: Product): Promise<void> {},
+  async upsertProduct(p: Product): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
+    if (error) { console.error('Error upserting product:', error); return false; }
+    return true;
+  },
 
-  async deleteProduct(_id: string): Promise<void> {},
+  async deleteProduct(id: string): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) { console.error('Error deleting product:', error); return false; }
+    return true;
+  },
+
+  // ── Categories ──
+  async getCategories(): Promise<Category[] | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    const { data, error } = await supabase.from('categories').select('*').order('sort_order', { ascending: true });
+    if (error) { console.error('Error fetching categories:', error); return null; }
+    return (data || []).map(row => ({ id: row.id, name: row.name, sortOrder: row.sort_order || 0 }));
+  },
+
+  async setCategories(categories: Category[]): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    let ok = true;
+    for (const c of categories) {
+      const { error } = await supabase.from('categories').upsert(
+        { id: c.id, name: c.name, sort_order: c.sortOrder },
+        { onConflict: 'id' }
+      );
+      if (error) { console.error('Error upserting category:', error); ok = false; }
+    }
+    return ok;
+  },
+
+  async deleteCategory(id: string): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) { console.error('Error deleting category:', error); return false; }
+    return true;
+  },
+
+  // ── Posts (blog) ──
+  async getPosts(): Promise<Post[]> {
+    if (!supabase || !isSupabaseConnected()) return [];
+    const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
+    if (error) { console.error('Error fetching posts:', error); return []; }
+    return (data || []).map(row => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      excerpt: row.excerpt || '',
+      content: row.content || '',
+      coverUrl: row.cover_url || '',
+      published: row.published || false,
+      publishedAt: row.published_at || undefined,
+      createdAt: row.created_at?.split('T')[0] || '',
+    }));
+  },
+
+  async upsertPost(p: Post): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('posts').upsert({
+      id: p.id,
+      title: p.title,
+      slug: p.slug,
+      excerpt: p.excerpt || '',
+      content: p.content || '',
+      cover_url: p.coverUrl || '',
+      published: p.published,
+      published_at: p.published ? (p.publishedAt || new Date().toISOString()) : null,
+    }, { onConflict: 'id' });
+    if (error) { console.error('Error upserting post:', error); return false; }
+    return true;
+  },
+
+  async deletePost(id: string): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('posts').delete().eq('id', id);
+    if (error) { console.error('Error deleting post:', error); return false; }
+    return true;
+  },
+
+  // ── Standings (clasificación al Mundial) ──
+  async getStandings(): Promise<StandingEntry[]> {
+    if (!supabase || !isSupabaseConnected()) return [];
+    const { data, error } = await supabase.from('standings').select('*')
+      .order('category', { ascending: true })
+      .order('position', { ascending: true });
+    if (error) { console.error('Error fetching standings:', error); return []; }
+    return (data || []).map(row => ({
+      id: row.id,
+      position: row.position || 0,
+      playerName: row.player_name,
+      points: Number(row.points) || 0,
+      category: row.category || 'General',
+      notes: row.notes || '',
+    }));
+  },
+
+  async upsertStanding(s: StandingEntry): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('standings').upsert({
+      id: s.id,
+      position: s.position,
+      player_name: s.playerName,
+      points: s.points,
+      category: s.category || 'General',
+      notes: s.notes || '',
+    }, { onConflict: 'id' });
+    if (error) { console.error('Error upserting standing:', error); return false; }
+    return true;
+  },
+
+  async deleteStanding(id: string): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    const { error } = await supabase.from('standings').delete().eq('id', id);
+    if (error) { console.error('Error deleting standing:', error); return false; }
+    return true;
+  },
+
+  // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──
+  async uploadImage(file: File, folder = 'uploads'): Promise<string | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from('product-images').upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    });
+    if (error) { console.error('Error uploading image:', error); return null; }
+    const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+    return data.publicUrl;
+  },
 
   // ── Events ──
   async getEvents(): Promise<Event[]> {
@@ -107,23 +295,15 @@ export const SupabaseService = {
   },
 
   // Solo admins autenticados (magic link) pueden actualizar pedidos existentes.
-  async setOrders(orders: Order[]): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+  async setOrders(orders: Order[]): Promise<boolean> {
+    if (!supabase || !isSupabaseConnected()) return true;
+    let ok = true;
     for (const o of orders) {
       const { error } = await supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' });
-      if (error) console.error('Error upserting order:', error);
+      if (error) { console.error('Error upserting order:', error); ok = false; }
     }
+    return ok;
   },
-
-  // ── Categories ──
-  // No-op: las categorías se derivan del catálogo de Shopify en build time.
-  async getCategories(): Promise<Category[]> {
-    return [];
-  },
-
-  async deleteCategory(_id: string): Promise<void> {},
-
-  async setCategories(_categories: Category[]): Promise<void> {},
 
   // ── Clubs ──
   async getClubs(): Promise<Club[]> {

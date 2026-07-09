@@ -1,14 +1,15 @@
 # VOLEA — Deploy & Sync Guide
 
-Stack: React 19 + Vite + Tailwind + Supabase (opcional) + Shopify (headless).
+Stack: React 19 + Vite + Tailwind + Supabase (nativo, sin Shopify).
 
 ---
 
-## Arquitectura
+## Arquitectura (v2 nativa — julio 2026)
 
-- **Productos, stock y checkout**: Shopify Admin (`volea-6996.myshopify.com`) es la fuente de verdad.
-- **Web**: consume un snapshot del catálogo (`src/data/shopify-catalog.json`) generado al sincronizar. El botón "Pagar ahora" redirige al checkout real de Shopify vía cart permalinks.
-- **Eventos, clubes, anuncios, pedidos consulta**: Supabase (si está conectado) con fallback automático a localStorage.
+- **TODO vive en Supabase** (`volea-web`): productos, stock, fotos (Storage), categorías, pedidos, blog, clasificación, eventos, clubes, anuncios.
+- **Ventas**: el cliente arma el carrito y envía el pedido → queda en la tabla `orders` y se abre WhatsApp con el detalle. El pago y la entrega se coordinan por WhatsApp (transferencia/efectivo).
+- **Gestión**: todo desde `/#/admin` — crear/editar productos con fotos, talles, colores y stock por talle×color; pedidos con estados; blog; clasificación al Mundial.
+- **Shopify**: quedó FUERA del flujo. `src/data/shopify-catalog.json` sobrevive solo como fallback de emergencia si Supabase está caído (catálogo de solo lectura congelado a julio 2026).
 
 ---
 
@@ -20,23 +21,21 @@ npm run dev
 # http://localhost:3001
 ```
 
-Si no querés tocar nada, la app arranca con el catálogo de Shopify ya sincronizado y `localStorage` para el resto.
+La app carga todo desde Supabase (productos, blog, clasificación, pedidos). Sin Supabase cae al snapshot legacy + localStorage.
 
 ---
 
-## 2. Sincronizar catálogo desde Shopify
+## 2. Gestionar el catálogo
 
-El catálogo se regenera en dos pasos:
+Ya NO hay sincronización con Shopify. Los productos se gestionan desde el panel:
 
-1. **Dump**: bajar todos los productos de la Shopify Admin API (GraphQL) a
-   `src/data/products-full.json`. La query exacta está documentada en el header
-   de `scripts/build-catalog.mjs`. Lo más fácil: pedirle al asistente (Claude,
-   con el MCP de Shopify conectado) que "sincronice el catálogo de VOLEA".
-2. **Build**: `node scripts/build-catalog.mjs` → regenera `src/data/shopify-catalog.json`
-   con categorías, detección de color/talle/sexo y alertas de datos (productos sin
-   foto, precios en $0).
+1. Entrá a `/#/admin` → pestaña **Productos** → "Nuevo producto" o el lápiz para editar.
+2. Cargá nombre, precio, categoría, descripción, **fotos** (se suben a Supabase
+   Storage), **talles**, **colores** y el **stock por combinación talle×color**.
+3. Guardá — los cambios son instantáneos en la web, sin rebuild ni deploy.
 
-Después: commit + push, y Vercel rebuilea automáticamente.
+> Migración histórica: los 30 productos y 35 fotos de Shopify se migraron el
+> 2026-07-09 con `scripts/migrate-to-native.mjs` (one-shot, no volver a correr).
 
 ---
 
@@ -79,10 +78,12 @@ Vercel → Settings → Domains → Add `volea.uy` (o el que tengas).
 - El fallback por password (`adminvolea` / `VITE_ADMIN_PASSWORD`) solo aplica si Supabase está caído.
 - Pestañas:
   - **Dashboard**: KPIs y alertas de stock
-  - **Stock & Alertas**: detalle por variante, filtros, link a Shopify para editar
-  - **Productos**: vista read-only con link directo a cada producto en Shopify (Shopify es la fuente)
-  - **Eventos / Clubes / Anuncios**: editables, persisten en Supabase
-  - **Pedidos**: consultas por WhatsApp con estados pendiente/confirmado/enviado/entregado (los pagos online viven en Shopify → admin.shopify.com/store/volea-6996/orders)
+  - **Stock & Alertas**: detalle por talle×color con filtros y edición directa
+  - **Productos**: CRUD completo — fotos, talles, colores, stock, destacado/oferta/activo
+  - **Pedidos**: pedidos de la web con estados pendiente/confirmado/enviado/entregado
+  - **Blog**: publicaciones con portada, borradores y publicación
+  - **Clasificación**: ranking "Camino al Mundial" (visible en /clasificacion)
+  - **Eventos / Categorías / Clubes / Anuncios**: editables, persisten en Supabase
 
 ---
 
@@ -90,7 +91,7 @@ Vercel → Settings → Domains → Add `volea.uy` (o el que tengas).
 
 Proyecto: **volea-web** (`scftuxrtflfowohiewsc`, región São Paulo). Schema documentado en `supabase-schema.sql` (v3: admins, events, clubs, announcements, orders + RLS con `is_admin()`).
 
-El cliente hace health-check al inicio. Si el proyecto está pausado o falla DNS, cae a localStorage en silencio (la tienda y el checkout de Shopify siguen funcionando; se pierde persistencia central de pedidos/eventos).
+El cliente hace health-check al inicio. Si el proyecto está pausado o falla DNS, cae al snapshot legacy + localStorage en silencio (la tienda se ve pero desactualizada, y los pedidos solo quedan en el navegador). Mantener el proyecto activo es importante.
 
 ⚠ **Plan free de Supabase**: el proyecto se pausa tras ~1 semana sin uso. Si el admin deja de persistir, revisar en el dashboard de Supabase que el proyecto esté activo y restaurarlo.
 
@@ -99,13 +100,12 @@ Env vars (ya configuradas en Vercel y `.env.local`): `VITE_SUPABASE_URL`, `VITE_
 ---
 
 ## 6. WhatsApp Business
-Los pedidos "consulta antes de pagar" se envían por WhatsApp al `+598 99 511 196`. El pago real va por el checkout de Shopify donde tenés configurado Mercado Pago, transferencia, etc.
+Todos los pedidos se envían por WhatsApp al `+598 99 511 196` y quedan registrados en la tabla `orders` (visibles en el admin). El pago se coordina por WhatsApp: transferencia, efectivo o lo que acuerden.
 
 ---
 
 ## 7. Recursos
 
-- Shopify admin: https://admin.shopify.com/store/volea-6996
 - Logo: `/public/logo.png` y `/public/logo-white.png`
-- Imágenes de productos: vienen del CDN de Shopify (`cdn.shopify.com`)
+- Imágenes de productos: Supabase Storage (bucket `product-images`), se suben desde el admin
 - Imágenes de lifestyle / hero: `/public/products/`

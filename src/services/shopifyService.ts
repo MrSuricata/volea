@@ -322,7 +322,8 @@ export function shopifyToProduct(sp: ShopifyProduct): Product {
     sku: sp.variants[0]?.sku || '',
     description: sp.description,
     price: sp.priceMin,
-    category: categoryLabelFromId(sp.category),
+    category: sp.category, // id de categoría, consistente con los productos nativos
+
     images: imageList.length ? imageList : [FALLBACK],
     sizes,
     colors,

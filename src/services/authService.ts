@@ -20,17 +20,14 @@ export async function sendMagicLink(email: string): Promise<{ success: boolean; 
   }
 
   // Pre-check: is this email in the admins allowlist?
-  // (Public RLS read policy allows querying the admins table)
-  const { data: admins, error: lookupErr } = await supabase
-    .from('admins')
-    .select('email')
-    .eq('email', trimmed)
-    .maybeSingle();
+  // RPC booleana (la tabla admins ya no es legible públicamente)
+  const { data: isAllowed, error: lookupErr } = await supabase
+    .rpc('is_admin_email', { p_email: trimmed });
 
   if (lookupErr) {
     return { success: false, error: 'Error al validar el email' };
   }
-  if (!admins) {
+  if (!isAllowed) {
     return { success: false, error: 'Este email no tiene acceso al panel' };
   }
 
