@@ -1,41 +1,29 @@
 -- ============================================
 -- VOLEA - Pickleball E-Commerce
--- Supabase Database Schema v2
+-- Supabase Database Schema v3
+-- Proyecto: volea-web (scftuxrtflfowohiewsc, sa-east-1)
 -- ============================================
--- Ejecutar este SQL en: Dashboard > SQL Editor > New Query > Pegar y Run
+-- Este archivo DOCUMENTA el schema real de la base (ya aplicado).
+-- Para recrear desde cero: SQL Editor > New Query > pegar y Run.
+--
+-- Nota de arquitectura: products y categories NO viven en Supabase.
+-- Shopify (volea-6996.myshopify.com) es la fuente de verdad del catálogo,
+-- snapshot en src/data/shopify-catalog.json regenerado con scripts/build-catalog.mjs.
 
--- Tabla de categorías
-CREATE TABLE IF NOT EXISTS categories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  sort_order INTEGER DEFAULT 0,
+-- Tabla de admins (allowlist para el login por magic link en /#/admin)
+CREATE TABLE IF NOT EXISTS admins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  role TEXT DEFAULT 'admin' CHECK (role IN ('owner', 'admin')),
   created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Tabla de productos
-CREATE TABLE IF NOT EXISTS products (
-  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  name TEXT NOT NULL,
-  sku TEXT DEFAULT '',
-  description TEXT DEFAULT '',
-  price INTEGER NOT NULL,
-  original_price INTEGER,
-  category TEXT NOT NULL,
-  images JSONB DEFAULT '[]'::JSONB,
-  sizes JSONB DEFAULT '[]'::JSONB,
-  colors JSONB DEFAULT '[]'::JSONB,
-  stock_by_size JSONB DEFAULT '{}'::JSONB,
-  is_featured BOOLEAN DEFAULT false,
-  is_offer BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Tabla de eventos
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
-  date TEXT NOT NULL,
+  date DATE NOT NULL,
   time TEXT DEFAULT '',
   location TEXT NOT NULL,
   city TEXT DEFAULT 'Montevideo',
@@ -45,16 +33,6 @@ CREATE TABLE IF NOT EXISTS events (
   max_participants INTEGER,
   status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming', 'past')),
   category TEXT DEFAULT 'tournament' CHECK (category IN ('tournament', 'clinic', 'social')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Tabla de pedidos
-CREATE TABLE IF NOT EXISTS orders (
-  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  items JSONB NOT NULL,
-  customer JSONB NOT NULL,
-  total INTEGER NOT NULL,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -66,13 +44,14 @@ CREATE TABLE IF NOT EXISTS clubs (
   address TEXT DEFAULT '',
   city TEXT DEFAULT '',
   country TEXT DEFAULT 'Uruguay',
-  lat DOUBLE PRECISION DEFAULT 0,
-  lng DOUBLE PRECISION DEFAULT 0,
+  lat NUMERIC DEFAULT 0,
+  lng NUMERIC DEFAULT 0,
   phone TEXT DEFAULT '',
   instagram TEXT DEFAULT '',
   has_pickleball BOOLEAN DEFAULT true,
   description TEXT DEFAULT '',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Tabla de anuncios
@@ -85,49 +64,65 @@ CREATE TABLE IF NOT EXISTS announcements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- RLS: permitir lectura pública, escritura con anon key
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+-- Tabla de pedidos (consultas por WhatsApp desde el checkout; los pagos
+-- online reales viven en Shopify)
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  customer_name TEXT DEFAULT '',
+  customer_email TEXT DEFAULT '',
+  customer_phone TEXT DEFAULT '',
+  customer_address TEXT DEFAULT '',
+  customer_city TEXT DEFAULT '',
+  customer_department TEXT DEFAULT '',
+  customer_notes TEXT DEFAULT '',
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total NUMERIC NOT NULL DEFAULT 0,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled')),
+  source TEXT DEFAULT 'whatsapp' CHECK (source IN ('whatsapp', 'shopify', 'web')),
+  shopify_order_gid TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Función helper: ¿el usuario autenticado está en la allowlist de admins?
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admins
+    WHERE lower(email) = lower(coalesce((auth.jwt() ->> 'email')::text, ''))
+  )
+$$;
+
+-- RLS
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clubs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
--- Políticas de acceso (lectura pública + escritura con anon key)
-CREATE POLICY "public_read_products" ON products FOR SELECT USING (true);
-CREATE POLICY "public_write_products" ON products FOR ALL USING (true) WITH CHECK (true);
+-- admins: lectura pública (el login pre-chequea el email), sin escritura via API
+CREATE POLICY "admins_public_read" ON admins FOR SELECT USING (true);
 
-CREATE POLICY "public_read_events" ON events FOR SELECT USING (true);
-CREATE POLICY "public_write_events" ON events FOR ALL USING (true) WITH CHECK (true);
+-- events / clubs: lectura pública, escritura solo admins
+CREATE POLICY "events_public_read" ON events FOR SELECT USING (true);
+CREATE POLICY "events_admin_write" ON events FOR ALL USING (is_admin()) WITH CHECK (is_admin());
 
-CREATE POLICY "public_read_orders" ON orders FOR SELECT USING (true);
-CREATE POLICY "public_write_orders" ON orders FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "clubs_public_read" ON clubs FOR SELECT USING (true);
+CREATE POLICY "clubs_admin_write" ON clubs FOR ALL USING (is_admin()) WITH CHECK (is_admin());
 
-CREATE POLICY "public_read_categories" ON categories FOR SELECT USING (true);
-CREATE POLICY "public_write_categories" ON categories FOR ALL USING (true) WITH CHECK (true);
+-- announcements: lectura pública solo de activos, escritura solo admins
+CREATE POLICY "announcements_public_read" ON announcements FOR SELECT USING (active = true);
+CREATE POLICY "announcements_admin_all" ON announcements FOR ALL USING (is_admin()) WITH CHECK (is_admin());
 
-CREATE POLICY "public_read_clubs" ON clubs FOR SELECT USING (true);
-CREATE POLICY "public_write_clubs" ON clubs FOR ALL USING (true) WITH CHECK (true);
+-- orders: cualquiera puede crear (checkout anónimo), solo admins leen/editan
+CREATE POLICY "orders_anon_insert" ON orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "orders_admin_all" ON orders FOR ALL USING (is_admin()) WITH CHECK (is_admin());
 
-CREATE POLICY "public_read_announcements" ON announcements FOR SELECT USING (true);
-CREATE POLICY "public_write_announcements" ON announcements FOR ALL USING (true) WITH CHECK (true);
-
--- Índices
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
-CREATE INDEX IF NOT EXISTS idx_products_is_featured ON products(is_featured);
-CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
-CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-CREATE INDEX IF NOT EXISTS idx_clubs_country ON clubs(country);
-CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(active);
-
--- Trigger updated_at
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER products_updated_at BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE TRIGGER orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+-- Seed de admins (allowlist del panel)
+INSERT INTO admins (email, name, role) VALUES
+  ('brianridv@gmail.com', 'Brian Ridvanovich', 'owner'),
+  ('bridvanovich@twf.uy', 'Brian Ridvanovich', 'owner'),
+  ('somosvolea@gmail.com', 'VOLEA Team', 'admin')
+ON CONFLICT (email) DO NOTHING;

@@ -1,82 +1,42 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import type { Product, Event, Order, Category, Club, Announcement } from '../types';
 
+function orderToRow(o: Order) {
+  return {
+    id: o.id,
+    items: o.items,
+    customer_name: o.customer.name || '',
+    customer_phone: o.customer.phone || '',
+    customer_email: o.customer.email || '',
+    customer_address: o.customer.address || '',
+    customer_city: o.customer.city || '',
+    customer_department: o.customer.department || '',
+    customer_notes: o.customer.notes || '',
+    total: o.total,
+    status: o.status,
+    source: 'whatsapp',
+  };
+}
+
 export const SupabaseService = {
   isConnected: isSupabaseConnected,
 
-  // ── Products ──
+  // ── Products / Categories ──
+  // Shopify es la fuente de verdad (snapshot en src/data/shopify-catalog.json).
+  // La base volea-web no tiene tablas products/categories: estas operaciones son no-op.
   async getProducts(): Promise<Product[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (error) { console.error('Error fetching products:', error); return []; }
-    return (data || []).map(row => ({
-      id: row.id,
-      name: row.name,
-      sku: row.sku || '',
-      description: row.description || '',
-      price: row.price,
-      originalPrice: row.original_price || undefined,
-      category: row.category,
-      images: row.images || [],
-      sizes: row.sizes || [],
-      colors: row.colors || [],
-      stockBySize: row.stock_by_size || {},
-      isFeatured: row.is_featured || false,
-      isOffer: row.is_offer || false,
-      createdAt: row.created_at?.split('T')[0] || '',
-    }));
+    return [];
   },
 
-  async setProducts(products: Product[]): Promise<void> {
-    if (!supabase) return;
-    for (const p of products) {
-      const row = {
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        description: p.description,
-        price: p.price,
-        original_price: p.originalPrice || null,
-        category: p.category,
-        images: p.images,
-        sizes: p.sizes,
-        colors: p.colors,
-        stock_by_size: p.stockBySize,
-        is_featured: p.isFeatured,
-        is_offer: p.isOffer,
-      };
-      await supabase.from('products').upsert(row, { onConflict: 'id' });
-    }
-  },
+  async setProducts(_products: Product[]): Promise<void> {},
 
-  async upsertProduct(p: Product): Promise<void> {
-    if (!supabase) return;
-    const { error } = await supabase.from('products').upsert({
-      id: p.id,
-      name: p.name,
-      sku: p.sku,
-      description: p.description,
-      price: p.price,
-      original_price: p.originalPrice || null,
-      category: p.category,
-      images: p.images,
-      sizes: p.sizes,
-      colors: p.colors,
-      stock_by_size: p.stockBySize,
-      is_featured: p.isFeatured,
-      is_offer: p.isOffer,
-    }, { onConflict: 'id' });
-    if (error) console.error('Error upserting product:', error);
-  },
+  async upsertProduct(_p: Product): Promise<void> {},
 
-  async deleteProduct(id: string): Promise<void> {
-    if (!supabase) return;
-    await supabase.from('products').delete().eq('id', id);
-  },
+  async deleteProduct(_id: string): Promise<void> {},
 
   // ── Events ──
   async getEvents(): Promise<Event[]> {
-    if (!supabase) return [];
+    if (!supabase || !isSupabaseConnected()) return [];
     const { data, error } = await supabase.from('events').select('*').order('date', { ascending: true });
     if (error) { console.error('Error fetching events:', error); return []; }
     return (data || []).map(row => ({
@@ -96,7 +56,7 @@ export const SupabaseService = {
   },
 
   async setEvents(events: Event[]): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     for (const e of events) {
       await supabase.from('events').upsert({
         id: e.id, name: e.name, date: e.date, time: e.time,
@@ -109,62 +69,65 @@ export const SupabaseService = {
   },
 
   async deleteEvent(id: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     await supabase.from('events').delete().eq('id', id);
   },
 
   // ── Orders ──
+  // La tabla orders usa columnas planas para el cliente (customer_name, customer_phone, ...).
   async getOrders(): Promise<Order[]> {
-    if (!supabase) return [];
+    if (!supabase || !isSupabaseConnected()) return [];
     const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
     if (error) { console.error('Error fetching orders:', error); return []; }
     return (data || []).map(row => ({
       id: row.id,
       items: row.items || [],
-      customer: row.customer || {},
-      total: row.total,
+      customer: {
+        name: row.customer_name || '',
+        phone: row.customer_phone || '',
+        email: row.customer_email || '',
+        address: row.customer_address || '',
+        city: row.customer_city || '',
+        department: row.customer_department || '',
+        notes: row.customer_notes || '',
+      },
+      total: Number(row.total) || 0,
       status: row.status || 'pending',
       createdAt: row.created_at?.split('T')[0] || '',
     }));
   },
 
+  // Insert plano para el checkout anónimo. RLS permite INSERT a cualquiera,
+  // pero rechaza el upsert (ON CONFLICT DO UPDATE) porque el brazo UPDATE
+  // exige is_admin(). No usar upsert acá.
+  async addOrder(o: Order): Promise<void> {
+    if (!supabase || !isSupabaseConnected()) return;
+    const { error } = await supabase.from('orders').insert(orderToRow(o));
+    if (error) console.error('Error inserting order:', error);
+  },
+
+  // Solo admins autenticados (magic link) pueden actualizar pedidos existentes.
   async setOrders(orders: Order[]): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     for (const o of orders) {
-      await supabase.from('orders').upsert({
-        id: o.id, items: o.items, customer: o.customer,
-        total: o.total, status: o.status,
-      }, { onConflict: 'id' });
+      const { error } = await supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' });
+      if (error) console.error('Error upserting order:', error);
     }
   },
 
   // ── Categories ──
+  // No-op: las categorías se derivan del catálogo de Shopify en build time.
   async getCategories(): Promise<Category[]> {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('categories').select('*').order('sort_order', { ascending: true });
-    if (error) { console.error('Error fetching categories:', error); return []; }
-    return (data || []).map(row => ({
-      id: row.id, name: row.name, sortOrder: row.sort_order || 0,
-    }));
+    return [];
   },
 
-  async deleteCategory(id: string): Promise<void> {
-    if (!supabase) return;
-    await supabase.from('categories').delete().eq('id', id);
-  },
+  async deleteCategory(_id: string): Promise<void> {},
 
-  async setCategories(categories: Category[]): Promise<void> {
-    if (!supabase) return;
-    for (const c of categories) {
-      await supabase.from('categories').upsert({
-        id: c.id, name: c.name, sort_order: c.sortOrder,
-      }, { onConflict: 'id' });
-    }
-  },
+  async setCategories(_categories: Category[]): Promise<void> {},
 
   // ── Clubs ──
   async getClubs(): Promise<Club[]> {
-    if (!supabase) return [];
+    if (!supabase || !isSupabaseConnected()) return [];
     const { data, error } = await supabase.from('clubs').select('*').order('country', { ascending: true });
     if (error) { console.error('Error fetching clubs:', error); return []; }
     return (data || []).map(row => ({
@@ -176,7 +139,7 @@ export const SupabaseService = {
   },
 
   async setClubs(clubs: Club[]): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     for (const c of clubs) {
       await supabase.from('clubs').upsert({
         id: c.id, name: c.name, address: c.address, city: c.city,
@@ -188,13 +151,13 @@ export const SupabaseService = {
   },
 
   async deleteClub(id: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     await supabase.from('clubs').delete().eq('id', id);
   },
 
   // ── Announcements ──
   async getAnnouncements(): Promise<Announcement[]> {
-    if (!supabase) return [];
+    if (!supabase || !isSupabaseConnected()) return [];
     const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
     if (error) { console.error('Error fetching announcements:', error); return []; }
     return (data || []).map(row => ({
@@ -205,7 +168,7 @@ export const SupabaseService = {
   },
 
   async setAnnouncements(announcements: Announcement[]): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     for (const a of announcements) {
       await supabase.from('announcements').upsert({
         id: a.id, title: a.title, content: a.content,
@@ -215,7 +178,7 @@ export const SupabaseService = {
   },
 
   async deleteAnnouncement(id: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || !isSupabaseConnected()) return;
     await supabase.from('announcements').delete().eq('id', id);
   },
 };

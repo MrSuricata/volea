@@ -1,4 +1,4 @@
-import type { Product, Event, Order, Category, Club, Announcement } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, CartItem } from '../types';
 
 const STORAGE_VERSION = '1.4.0';
 const KEYS = {
@@ -48,10 +48,8 @@ export const StorageService = {
   getAnnouncements: (): Announcement[] => get<Announcement[]>(KEYS.announcements) || [],
   setAnnouncements: (a: Announcement[]): void => set(KEYS.announcements, a),
 
-  getCart: (): { product: Product; quantity: number; selectedSize: string; selectedColor: string }[] =>
-    get(KEYS.cart) || [],
-  setCart: (c: { product: Product; quantity: number; selectedSize: string; selectedColor: string }[]): void =>
-    set(KEYS.cart, c),
+  getCart: (): CartItem[] => get<CartItem[]>(KEYS.cart) || [],
+  setCart: (c: CartItem[]): void => set(KEYS.cart, c),
 
   clearAll: (): void => {
     Object.values(KEYS).forEach((k) => localStorage.removeItem(k));

@@ -1,100 +1,111 @@
-# VOLEA - Guía de Deploy
+# VOLEA — Deploy & Sync Guide
 
-## 1. Desarrollo Local
+Stack: React 19 + Vite + Tailwind + Supabase (opcional) + Shopify (headless).
 
-```bash
-# Instalar dependencias
+---
+
+## Arquitectura
+
+- **Productos, stock y checkout**: Shopify Admin (`volea-6996.myshopify.com`) es la fuente de verdad.
+- **Web**: consume un snapshot del catálogo (`src/data/shopify-catalog.json`) generado al sincronizar. El botón "Pagar ahora" redirige al checkout real de Shopify vía cart permalinks.
+- **Eventos, clubes, anuncios, pedidos consulta**: Supabase (si está conectado) con fallback automático a localStorage.
+
+---
+
+## 1. Desarrollo local
+
+```powershell
 npm install
-
-# Iniciar servidor de desarrollo
 npm run dev
-# Abre en http://localhost:3000
-
-# Build de producción
-npm run build
+# http://localhost:3001
 ```
 
-## 2. Deploy en Vercel (Hoy)
+Si no querés tocar nada, la app arranca con el catálogo de Shopify ya sincronizado y `localStorage` para el resto.
 
-### Opción A: Vercel CLI (más rápido)
-```bash
-# Instalar Vercel CLI
+---
+
+## 2. Sincronizar catálogo desde Shopify
+
+El catálogo se regenera en dos pasos:
+
+1. **Dump**: bajar todos los productos de la Shopify Admin API (GraphQL) a
+   `src/data/products-full.json`. La query exacta está documentada en el header
+   de `scripts/build-catalog.mjs`. Lo más fácil: pedirle al asistente (Claude,
+   con el MCP de Shopify conectado) que "sincronice el catálogo de VOLEA".
+2. **Build**: `node scripts/build-catalog.mjs` → regenera `src/data/shopify-catalog.json`
+   con categorías, detección de color/talle/sexo y alertas de datos (productos sin
+   foto, precios en $0).
+
+Después: commit + push, y Vercel rebuilea automáticamente.
+
+---
+
+## 3. Deploy a Vercel
+
+### Opción A — CLI (rápido)
+```powershell
 npm i -g vercel
-
-# Deploy (te pide login la primera vez)
-npx vercel
-
-# Para producción
-npx vercel --prod
+npx vercel             # primer deploy (preview)
+npx vercel --prod      # producción
 ```
 
-### Opción B: Conectar repositorio GitHub
-1. Subir el código a un repo de GitHub
-2. Ir a [vercel.com](https://vercel.com) > New Project
-3. Importar el repositorio
-4. Framework Preset: Vite
-5. Build Command: `npm run build`
-6. Output Directory: `dist`
-7. Click Deploy
+### Opción B — GitHub → Vercel
+1. Subir el repo a GitHub.
+2. [vercel.com](https://vercel.com) → New Project → importar.
+3. Framework: **Vite** · Build: `npm run build` · Output: `dist`.
+4. Variables de entorno (opcionales — ver `.env.example`):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_ADMIN_PASSWORD`
+5. Deploy.
 
-### Variables de entorno (opcional)
-En Vercel Dashboard > Settings > Environment Variables:
-- `VITE_ADMIN_PASSWORD`: Contraseña del admin (default: adminvolea)
+### Dominio
+Vercel → Settings → Domains → Add `volea.uy` (o el que tengas).
 
-## 3. Dominio personalizado (opcional)
-1. Vercel Dashboard > tu proyecto > Settings > Domains
-2. Agregar tu dominio (ej: volea.uy)
-3. Configurar DNS según las instrucciones de Vercel
+`vercel.json` ya incluye:
+- Rewrites SPA (todo a `/index.html`)
+- Headers de seguridad (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`)
 
-## 4. Migración a Supabase (futuro)
+---
 
-### Paso 1: Crear proyecto Supabase
-1. Ir a [supabase.com](https://supabase.com) > New Project
-2. Elegir región: South America (São Paulo)
-3. Guardar la contraseña de la base de datos
+## 4. Panel de Admin
 
-### Paso 2: Crear tablas
-1. Dashboard > SQL Editor > New Query
-2. Copiar y pegar el contenido de `supabase-schema.sql`
-3. Click Run
+- URL: `https://<tu-dominio>/#/admin` (con el router actual: `/admin`)
+- **Login**: magic link por email (Supabase Auth). Solo emails en la tabla `admins`:
+  - `brianridv@gmail.com` (owner)
+  - `bridvanovich@twf.uy` (owner)
+  - `somosvolea@gmail.com` (admin)
+  - Para agregar a Gastón/Paula/Valeria: `INSERT INTO admins (email, name, role) VALUES ('email', 'Nombre', 'admin');` en el SQL Editor de Supabase.
+- El fallback por password (`adminvolea` / `VITE_ADMIN_PASSWORD`) solo aplica si Supabase está caído.
+- Pestañas:
+  - **Dashboard**: KPIs y alertas de stock
+  - **Stock & Alertas**: detalle por variante, filtros, link a Shopify para editar
+  - **Productos**: vista read-only con link directo a cada producto en Shopify (Shopify es la fuente)
+  - **Eventos / Clubes / Anuncios**: editables, persisten en Supabase
+  - **Pedidos**: consultas por WhatsApp con estados pendiente/confirmado/enviado/entregado (los pagos online viven en Shopify → admin.shopify.com/store/volea-6996/orders)
 
-### Paso 3: Configurar Storage
-1. Dashboard > Storage > Create new bucket
-2. Nombre: `product-images`, Public: true
-3. File size limit: 5MB
+---
 
-### Paso 4: Obtener credenciales
-1. Dashboard > Settings > API
-2. Copiar `Project URL` y `anon public key`
+## 5. Supabase
 
-### Paso 5: Agregar variables de entorno
-En Vercel (o en archivo `.env.local` para desarrollo):
-```
-VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
-VITE_SUPABASE_ANON_KEY=tu-anon-key
-```
+Proyecto: **volea-web** (`scftuxrtflfowohiewsc`, región São Paulo). Schema documentado en `supabase-schema.sql` (v3: admins, events, clubs, announcements, orders + RLS con `is_admin()`).
 
-### Paso 6: Instalar cliente Supabase
-```bash
-npm install @supabase/supabase-js
-```
+El cliente hace health-check al inicio. Si el proyecto está pausado o falla DNS, cae a localStorage en silencio (la tienda y el checkout de Shopify siguen funcionando; se pierde persistencia central de pedidos/eventos).
 
-### Paso 7: Crear servicio Supabase
-Crear `src/services/supabaseService.ts` que implemente la misma interfaz que `storageService.ts` pero usando el cliente de Supabase.
+⚠ **Plan free de Supabase**: el proyecto se pausa tras ~1 semana sin uso. Si el admin deja de persistir, revisar en el dashboard de Supabase que el proyecto esté activo y restaurarlo.
 
-## 5. Panel de Admin
+Env vars (ya configuradas en Vercel y `.env.local`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 
-- URL: `tudominio.com/#/admin`
-- Contraseña: `adminvolea`
-- Funciones: Gestión de productos, eventos, pedidos y categorías
-- Los cambios se guardan en localStorage (hasta migrar a Supabase)
+---
 
 ## 6. WhatsApp Business
-- Los pedidos se envían por WhatsApp al +598 99 511 196
-- Considerá usar WhatsApp Business para respuestas automáticas
+Los pedidos "consulta antes de pagar" se envían por WhatsApp al `+598 99 511 196`. El pago real va por el checkout de Shopify donde tenés configurado Mercado Pago, transferencia, etc.
 
-## 7. Notas importantes
-- Las imágenes de productos están en `/public/products/`
-- Para agregar nuevas imágenes, subilas a esa carpeta y usá la ruta `/products/nombre.png`
-- El sitio funciona 100% sin backend (localStorage)
-- Para múltiples dispositivos/administradores, migrá a Supabase
+---
+
+## 7. Recursos
+
+- Shopify admin: https://admin.shopify.com/store/volea-6996
+- Logo: `/public/logo.png` y `/public/logo-white.png`
+- Imágenes de productos: vienen del CDN de Shopify (`cdn.shopify.com`)
+- Imágenes de lifestyle / hero: `/public/products/`

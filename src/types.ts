@@ -18,6 +18,10 @@ export interface Product {
   isFeatured: boolean;
   isOffer: boolean;
   createdAt: string;
+  // Shopify integration (optional for backward compat with seeded products)
+  shopifyGid?: string;
+  shopifyHandle?: string;
+  variantMap?: Record<string, string>; // "${size}|${color}" → variantId
 }
 
 export interface CartItem {
@@ -25,6 +29,7 @@ export interface CartItem {
   quantity: number;
   selectedSize: string;
   selectedColor: string;
+  variantId?: string; // Shopify variant id for checkout permalink
 }
 
 export interface Event {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram,
   MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Edit, Package,
@@ -8,15 +9,32 @@ import {
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
   Globe, Navigation
 } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement } from './types';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE, ADMIN_PASSWORD,
-  INITIAL_CATEGORIES, INITIAL_PRODUCTS, INITIAL_EVENTS,
-  INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
+  INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
 } from './constants';
 import { StorageService } from './services/storageService';
 import { SupabaseService } from './services/supabaseService';
-import { isSupabaseConnected } from './services/supabaseClient';
+import { isSupabaseConnected, supabaseReady } from './services/supabaseClient';
+import {
+  sendMagicLink,
+  getCurrentAdmin,
+  onAuthStateChange,
+  signOut as authSignOut,
+  type AdminUser,
+} from './services/authService';
+import {
+  getProductsAsInternal,
+  getCategoriesAsInternal,
+  buildCartPermalink,
+  getVariantIdForSelection,
+  computeStockMetrics,
+  buildAdminProductUrl,
+  buildAdminInventoryUrl,
+  SHOPIFY_DOMAIN,
+} from './services/shopifyService';
 
 // ─── 1. Utility Functions ────────────────────────────────────────────────────
 
@@ -45,19 +63,112 @@ function ScrollToTop() {
   return null;
 }
 
-// ─── 2b. Reveal (IntersectionObserver) ───────────────────────────────────────
+// ─── 2a. usePageMeta — lightweight SEO ───────────────────────────────────────
 
-function Reveal({ children, className = '', delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
+interface PageMeta {
+  title: string;
+  description?: string;
+  image?: string;
+}
+
+function setMetaTag(attr: 'name' | 'property', key: string, content: string) {
+  let el = document.head.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute(attr, key);
+    document.head.appendChild(el);
+  }
+  el.content = content;
+}
+
+function usePageMeta({ title, description, image }: PageMeta) {
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setVisible(true); obs.disconnect(); } }, { threshold: 0.1 });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-  return <div ref={ref} className={`reveal ${visible ? 'visible' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>{children}</div>;
+    const fullTitle = title.includes('VOLEA') ? title : `${title} | VOLEA`;
+    document.title = fullTitle;
+    if (description) {
+      setMetaTag('name', 'description', description);
+      setMetaTag('property', 'og:description', description);
+    }
+    setMetaTag('property', 'og:title', fullTitle);
+    setMetaTag('property', 'og:type', 'website');
+    if (image) setMetaTag('property', 'og:image', image);
+    setMetaTag('name', 'twitter:card', image ? 'summary_large_image' : 'summary');
+    setMetaTag('name', 'twitter:title', fullTitle);
+    if (description) setMetaTag('name', 'twitter:description', description);
+    if (image) setMetaTag('name', 'twitter:image', image);
+  }, [title, description, image]);
+}
+
+// ─── 2b. Reveal (framer-motion scroll reveal) ────────────────────────────────
+
+function Reveal({ children, className = '', delay = 0, y = 40 }: { children: React.ReactNode; className?: string; delay?: number; y?: number }) {
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-80px' }}
+      transition={{ duration: 0.7, delay: delay / 1000, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// Stagger container for grids — children animate sequentially
+const STAGGER_CONTAINER: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
+  },
+};
+
+const STAGGER_ITEM: Variants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.16, 1, 0.3, 1] } },
+};
+
+function StaggerGrid({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <motion.div
+      className={className}
+      variants={STAGGER_CONTAINER}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: '-80px' }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function StaggerItem({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <motion.div variants={STAGGER_ITEM} className={className}>
+      {children}
+    </motion.div>
+  );
+}
+
+// Page transition wrapper — fades + subtle slide
+function PageTransition({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// Hook for parallax effect on hero
+function useParallax(distance = 80) {
+  const { scrollY } = useScroll();
+  return useTransform(scrollY, [0, 600], [0, distance]);
 }
 
 // ─── 3. StoreContext & StoreProvider ─────────────────────────────────────────
@@ -69,6 +180,7 @@ interface StoreContextType {
   setEvents: (e: Event[]) => void;
   orders: Order[];
   setOrders: (o: Order[]) => void;
+  addOrder: (o: Order) => void;
   categories: Category[];
   setCategories: (c: Category[]) => void;
   clubs: Club[];
@@ -81,7 +193,9 @@ interface StoreContextType {
   updateCartQuantity: (productId: string, size: string, color: string, qty: number) => void;
   clearCart: () => void;
   isAdmin: boolean;
+  currentAdmin: AdminUser | null;
   login: (password: string) => boolean;
+  sendLoginLink: (email: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -110,6 +224,26 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(() => {
     return sessionStorage.getItem('volea_admin') === 'true';
   });
+  const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
+
+  // Subscribe to Supabase auth state changes (magic link return path)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      await supabaseReady;
+      const admin = await getCurrentAdmin();
+      if (mounted && admin) {
+        setCurrentAdmin(admin);
+        setIsAdmin(true);
+      }
+    })();
+    const unsub = onAuthStateChange((admin) => {
+      if (!mounted) return;
+      setCurrentAdmin(admin);
+      if (admin) setIsAdmin(true);
+    });
+    return () => { mounted = false; unsub(); };
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -117,81 +251,69 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const loadData = async () => {
-      let loadedProducts: Product[] = [];
+      // Products & categories come from Shopify (source of truth, synced at build time)
+      const shopifyProducts = getProductsAsInternal();
+      const shopifyCategories = getCategoriesAsInternal();
+      _setProducts(shopifyProducts);
+      _setCategories(shopifyCategories);
+
+      // Wait for Supabase health probe (max 2.5s); falls back to localStorage on failure.
+      await supabaseReady;
+
+      // Events, clubs, announcements, orders: Supabase if connected, else localStorage
       if (isSupabaseConnected()) {
-        // Load from Supabase
-        const [p, e, o, c, cl, an] = await Promise.all([
-          SupabaseService.getProducts(),
+        const [e, o, cl, an] = await Promise.all([
           SupabaseService.getEvents(),
           SupabaseService.getOrders(),
-          SupabaseService.getCategories(),
           SupabaseService.getClubs(),
           SupabaseService.getAnnouncements(),
         ]);
-        loadedProducts = p.length ? p : INITIAL_PRODUCTS;
-        _setProducts(loadedProducts);
         _setEvents(e.length ? e : INITIAL_EVENTS);
         _setOrders(o);
-        _setCategories(c.length ? c : INITIAL_CATEGORIES);
         _setClubs(cl.length ? cl : INITIAL_CLUBS);
         _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
-        // Seed initial data if empty
-        if (!p.length) SupabaseService.setProducts(INITIAL_PRODUCTS);
-        if (!e.length) SupabaseService.setEvents(INITIAL_EVENTS);
-        if (!c.length) SupabaseService.setCategories(INITIAL_CATEGORIES);
-        if (!cl.length) SupabaseService.setClubs(INITIAL_CLUBS);
-        if (!an.length) SupabaseService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
+        // Note: anon users can't write to events/clubs/announcements (RLS).
+        // Seeds are only persisted when an admin signs in — see seedSupabaseIfEmpty.
       } else {
-        // Fallback to localStorage
         const ver = StorageService.getVersion();
         if (ver !== StorageService.currentVersion) {
           StorageService.clearAll();
           StorageService.setVersion();
-          StorageService.setProducts(INITIAL_PRODUCTS);
           StorageService.setEvents(INITIAL_EVENTS);
-          StorageService.setCategories(INITIAL_CATEGORIES);
           StorageService.setClubs(INITIAL_CLUBS);
           StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
-          loadedProducts = INITIAL_PRODUCTS;
-          _setProducts(INITIAL_PRODUCTS);
           _setEvents(INITIAL_EVENTS);
-          _setCategories(INITIAL_CATEGORIES);
           _setClubs(INITIAL_CLUBS);
           _setAnnouncements(INITIAL_ANNOUNCEMENTS);
           _setOrders([]);
         } else {
-          const p = StorageService.getProducts();
           const e = StorageService.getEvents();
-          const c = StorageService.getCategories();
           const o = StorageService.getOrders();
           const cl = StorageService.getClubs();
           const an = StorageService.getAnnouncements();
-          loadedProducts = p.length ? p : INITIAL_PRODUCTS;
-          _setProducts(loadedProducts);
           _setEvents(e.length ? e : INITIAL_EVENTS);
-          _setCategories(c.length ? c : INITIAL_CATEGORIES);
           _setClubs(cl.length ? cl : INITIAL_CLUBS);
           _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
           _setOrders(o);
-          if (!p.length) StorageService.setProducts(INITIAL_PRODUCTS);
           if (!e.length) StorageService.setEvents(INITIAL_EVENTS);
-          if (!c.length) StorageService.setCategories(INITIAL_CATEGORIES);
           if (!cl.length) StorageService.setClubs(INITIAL_CLUBS);
           if (!an.length) StorageService.setAnnouncements(INITIAL_ANNOUNCEMENTS);
         }
       }
-      // Cart always from localStorage (per-browser, personal to each user)
-      // Refresh cart items with current product data to avoid stale prices
+
+      // Cart: refresh items with current product data to avoid stale prices/stock
       const savedCart = StorageService.getCart();
-      const refreshedCart = savedCart.map(item => {
-        const currentProduct = loadedProducts.find(p => p.id === item.product.id);
-        if (currentProduct) {
-          return { ...item, product: currentProduct };
-        }
-        return item;
-      }).filter(item => {
-        return loadedProducts.some(p => p.id === item.product.id);
-      });
+      const refreshedCart: CartItem[] = [];
+      for (const item of savedCart) {
+        const currentProduct = shopifyProducts.find((p) => p.id === item.product.id);
+        if (!currentProduct) continue;
+        const variantId =
+          item.variantId ||
+          getVariantIdForSelection(currentProduct, item.selectedSize, item.selectedColor);
+        const refreshed: CartItem = { ...item, product: currentProduct };
+        if (variantId) refreshed.variantId = variantId;
+        refreshedCart.push(refreshed);
+      }
       _setCart(refreshedCart);
       StorageService.setCart(refreshedCart);
       setLoaded(true);
@@ -215,6 +337,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     _setOrders(o);
     StorageService.setOrders(o);
     if (isSupabaseConnected()) SupabaseService.setOrders(o);
+  }, []);
+
+  // Alta de pedido desde el checkout (anónimo): insert plano, no upsert.
+  const addOrder = useCallback((order: Order) => {
+    _setOrders(prev => {
+      const next = [...prev, order];
+      StorageService.setOrders(next);
+      return next;
+    });
+    if (isSupabaseConnected()) SupabaseService.addOrder(order);
   }, []);
 
   const setCategories = useCallback((c: Category[]) => {
@@ -249,16 +381,25 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       const availableStock = item.product.stockBySize[stockKey] || 0;
       const currentQty = idx >= 0 ? prev[idx].quantity : 0;
       const newQty = Math.min(currentQty + item.quantity, availableStock);
-      if (newQty <= 0) return prev;
+      if (newQty <= 0) {
+        toast.error('Sin stock para esta combinación');
+        return prev;
+      }
+
+      // Auto-resolve Shopify variant id from the product's variantMap
+      const variantId =
+        item.variantId ||
+        getVariantIdForSelection(item.product, item.selectedSize, item.selectedColor);
 
       let next: CartItem[];
       if (idx >= 0) {
         next = [...prev];
-        next[idx] = { ...next[idx], quantity: newQty };
+        next[idx] = { ...next[idx], quantity: newQty, variantId: next[idx].variantId || variantId };
       } else {
-        next = [...prev, { ...item, quantity: Math.min(item.quantity, availableStock) }];
+        next = [...prev, { ...item, variantId, quantity: Math.min(item.quantity, availableStock) }];
       }
       StorageService.setCart(next);
+      toast.success(`Agregado al carrito — ${item.product.name}`);
       return next;
     });
   }, []);
@@ -292,6 +433,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback((password: string) => {
+    // Legacy fallback: only allowed when Supabase auth is unavailable
+    if (isSupabaseConnected()) return false;
     if (password === ADMIN_PASSWORD) {
       setIsAdmin(true);
       sessionStorage.setItem('volea_admin', 'true');
@@ -300,7 +443,13 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     return false;
   }, []);
 
-  const logout = useCallback(() => {
+  const sendLoginLink = useCallback(async (email: string) => {
+    return await sendMagicLink(email);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await authSignOut();
+    setCurrentAdmin(null);
     setIsAdmin(false);
     sessionStorage.removeItem('volea_admin');
   }, []);
@@ -319,10 +468,10 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StoreContext.Provider value={{
-      products, setProducts, events, setEvents, orders, setOrders,
+      products, setProducts, events, setEvents, orders, setOrders, addOrder,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
       cart, addToCart, removeFromCart,
-      updateCartQuantity, clearCart, isAdmin, login, logout,
+      updateCartQuantity, clearCart, isAdmin, currentAdmin, login, sendLoginLink, logout,
       searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
       cartOpen, setCartOpen
     }}>
@@ -531,17 +680,35 @@ function CartDrawer() {
 
         {/* Footer */}
         {cart.length > 0 && (
-          <div className="border-t border-gray-200 p-4">
-            <div className="flex justify-between items-center mb-4">
+          <div className="border-t border-gray-200 p-4 space-y-2">
+            <div className="flex justify-between items-center mb-2">
               <span className="font-display font-semibold text-lg">Total</span>
               <span className="font-display font-bold text-xl text-navy-700">{formatPrice(total)}</span>
             </div>
+            <button
+              onClick={() => {
+                const lines = cart
+                  .filter((i) => i.variantId)
+                  .map((i) => ({ variantId: i.variantId!, quantity: i.quantity }));
+                if (lines.length !== cart.length) {
+                  toast.error('No se pudo armar el checkout. Probá refrescar la página.');
+                  return;
+                }
+                toast.success('Redirigiendo al pago seguro...');
+                setTimeout(() => {
+                  window.location.href = buildCartPermalink(lines);
+                }, 400);
+              }}
+              className="w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 pulse-glow"
+            >
+              <Zap size={18} /> Pagar ahora
+            </button>
             <Link
               to="/checkout"
               onClick={() => setCartOpen(false)}
-              className="block w-full text-center bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors"
+              className="block w-full text-center bg-white hover:bg-gray-50 border border-gray-300 text-navy-700 font-display font-semibold py-2.5 rounded-lg transition-colors text-sm"
             >
-              Finalizar Compra
+              Ver opciones (Pago o WhatsApp)
             </Link>
           </div>
         )}
@@ -609,6 +776,13 @@ function ProductCard({ product }: { product: Product }) {
 function HomePage() {
   const { products, events, categories, announcements } = useStore();
   const featured = products.filter(p => p.isFeatured).slice(0, 4);
+  const heroBgY = useParallax(120);
+  const heroTextY = useParallax(-40);
+  usePageMeta({
+    title: 'VOLEA | La Primera Marca de Pickleball en Uruguay',
+    description: 'Indumentaria y accesorios de pickleball de alto rendimiento. Remeras, polos, vestidos, shorts, gorros y más. Diseñado en Uruguay.',
+    image: window.location.origin + '/logo.png',
+  });
   const upcomingEvents = events.filter(e => new Date(e.date) >= new Date());
   const nextEvent = upcomingEvents.length > 0
     ? upcomingEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0]
@@ -642,21 +816,24 @@ function HomePage() {
   return (
     <div className="fade-in">
       {/* Hero */}
-      <section
-        className="relative min-h-screen flex items-center overflow-hidden"
-        style={{
-          backgroundImage: 'url(/products/lifestyle-sunset-back.jpg)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundAttachment: 'fixed',
-        }}
-      >
+      <section className="relative min-h-screen flex items-center overflow-hidden">
+        {/* Parallax background image */}
+        <motion.div
+          aria-hidden
+          className="absolute inset-0 -top-20 -bottom-20"
+          style={{
+            y: heroBgY,
+            backgroundImage: 'url(/products/lifestyle-sunset-back.jpg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        />
         {/* Dark gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-navy-900/95 via-navy-700/85 to-navy-700/70" />
         {/* Subtle pattern */}
         <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }} />
 
-        <div className="relative z-10 max-w-7xl mx-auto px-4 py-20 w-full">
+        <motion.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-20 w-full">
           <div className="max-w-3xl">
             <p className="hero-enter hero-enter-1 opacity-0 text-lime-400 font-display font-bold text-sm md:text-base uppercase tracking-[0.3em] mb-6">
               La primera marca de Uruguay
@@ -698,7 +875,7 @@ function HomePage() {
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
 
         {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
@@ -719,13 +896,13 @@ function HomePage() {
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {featured.map((p, i) => (
-              <Reveal key={p.id} delay={i * 100}>
+          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {featured.map((p) => (
+              <StaggerItem key={p.id}>
                 <ProductCard product={p} />
-              </Reveal>
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
           <Reveal>
             <div className="text-center mt-10">
               <Link
@@ -942,13 +1119,11 @@ function HomePage() {
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-4xl mx-auto">
             {[
-              { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
-              { src: '/products/14.png', name: 'Enzo Rameau', role: 'Jugador VOLEA' },
               { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
+              { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
               { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora VOLEA' },
-              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Fundadora VOLEA' },
             ].map((member, i) => (
               <Reveal key={i} delay={i * 120}>
                 <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-gray-200">
@@ -1053,6 +1228,10 @@ function ShopPage() {
   const { products, categories, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory } = useStore();
   const [searchParams] = useSearchParams();
   const [sort, setSort] = useState('recent');
+  usePageMeta({
+    title: 'Tienda — Indumentaria de Pickleball | VOLEA',
+    description: 'Comprá la nueva colección VOLEA: remeras técnicas, polos, vestidos court, shorts y accesorios. Envíos a todo Uruguay.',
+  });
 
   useEffect(() => {
     const cat = searchParams.get('category');
@@ -1129,9 +1308,13 @@ function ShopPage() {
           <p className="font-display text-lg">No se encontraron productos</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map(p => <ProductCard key={p.id} product={p} />)}
-        </div>
+        <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filtered.map((p) => (
+            <StaggerItem key={p.id}>
+              <ProductCard product={p} />
+            </StaggerItem>
+          ))}
+        </StaggerGrid>
       )}
     </div>
   );
@@ -1144,6 +1327,11 @@ function ProductDetailPage() {
   const { products, addToCart, setCartOpen } = useStore();
   const navigate = useNavigate();
   const product = products.find(p => p.id === id);
+  usePageMeta({
+    title: product ? `${product.name} — ${formatPrice(product.price)}` : 'Producto',
+    description: product ? product.description.slice(0, 160) : 'Producto VOLEA',
+    image: product?.images[0],
+  });
   const [mainImg, setMainImg] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
@@ -1842,14 +2030,17 @@ function ContactPage() {
 // ─── 12. CheckoutPage ────────────────────────────────────────────────────────
 
 function CheckoutPage() {
-  const { cart, clearCart, orders, setOrders, products, setProducts } = useStore();
-  const navigate = useNavigate();
+  const { cart, clearCart, addOrder } = useStore();
   const [customer, setCustomer] = useState<CustomerInfo>({
     name: '', phone: '', email: '', address: '', city: '', department: 'Montevideo', notes: ''
   });
   const [success, setSuccess] = useState(false);
 
   const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+
+  // All items must have a Shopify variantId for the real checkout to work
+  const cartItemsWithVariants = cart.filter((i) => i.variantId);
+  const allItemsHaveVariants = cart.length > 0 && cartItemsWithVariants.length === cart.length;
 
   if (cart.length === 0 && !success) {
     return (
@@ -1869,8 +2060,11 @@ function CheckoutPage() {
         <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <Check size={40} className="text-green-500" />
         </div>
-        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Pedido Confirmado!</h1>
-        <p className="text-gray-500 mb-8 max-w-md mx-auto">Tu pedido fue enviado por WhatsApp. Te contactaremos a la brevedad para confirmar los detalles.</p>
+        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Mensaje enviado!</h1>
+        <p className="text-gray-500 mb-8 max-w-md mx-auto">
+          Te contactaremos por WhatsApp para coordinar tu pedido.
+          ¿Preferís pagar online? Volvé al carrito y elegí "Pagar ahora".
+        </p>
         <Link
           to="/"
           className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
@@ -1881,7 +2075,22 @@ function CheckoutPage() {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const payWithShopify = () => {
+    if (!allItemsHaveVariants) {
+      toast.error('No se pudo armar el checkout — probá recargar la página o consultar por WhatsApp.');
+      return;
+    }
+    const url = buildCartPermalink(
+      cart.map((i) => ({ variantId: i.variantId!, quantity: i.quantity }))
+    );
+    toast.success('Redirigiendo al pago seguro de Shopify...');
+    // Small delay so the toast renders
+    setTimeout(() => {
+      window.location.href = url;
+    }, 400);
+  };
+
+  const handleSubmitWhatsApp = (e: React.FormEvent) => {
     e.preventDefault();
     const orderId = `VO-${Date.now().toString(36).toUpperCase()}`;
     const order: Order = {
@@ -1892,27 +2101,12 @@ function CheckoutPage() {
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
-    setOrders([...orders, order]);
-
-    // Decrement stock for purchased items
-    const updatedProducts = products.map(p => {
-      const cartItem = cart.find(ci => ci.product.id === p.id);
-      if (!cartItem) return p;
-      const stockKey = cartItem.selectedColor ? `${cartItem.selectedSize}|${cartItem.selectedColor}` : cartItem.selectedSize;
-      return {
-        ...p,
-        stockBySize: {
-          ...p.stockBySize,
-          [stockKey]: Math.max(0, (p.stockBySize[stockKey] || 0) - cartItem.quantity)
-        }
-      };
-    });
-    setProducts(updatedProducts);
+    addOrder(order);
 
     // Build WhatsApp message
     const lines = [
-      `🏓 *Nuevo Pedido VOLEA*`,
-      `📌 Pedido: ${orderId}`,
+      `🏓 *Consulta VOLEA*`,
+      `📌 Ref: ${orderId}`,
       ``,
       `👤 *Cliente:* ${customer.name}`,
       `📱 *Tel:* ${customer.phone}`,
@@ -1921,9 +2115,11 @@ function CheckoutPage() {
       customer.notes ? `📝 *Notas:* ${customer.notes}` : '',
       ``,
       `🛍 *Productos:*`,
-      ...cart.map(i => `  • [${i.product.sku}] ${i.product.name} (${i.selectedSize}/${i.selectedColor}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
+      ...cart.map(i => `  • ${i.product.name} (${i.selectedSize}/${i.selectedColor}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
       ``,
       `💰 *Total: ${formatPrice(total)}*`,
+      ``,
+      `_Quiero coordinar este pedido._`,
     ].filter(Boolean).join('\n');
 
     const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines)}`;
@@ -1937,7 +2133,7 @@ function CheckoutPage() {
       <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Finalizar Compra</h1>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
 
-      <form onSubmit={handleSubmit} className="grid lg:grid-cols-2 gap-12">
+      <div className="grid lg:grid-cols-2 gap-12">
         {/* Order Summary */}
         <div className="order-2 lg:order-1">
           <h2 className="font-display text-xl font-bold text-navy-700 mb-4">Resumen del Pedido</h2>
@@ -1964,12 +2160,37 @@ function CheckoutPage() {
               <span className="font-display text-2xl font-bold text-navy-700">{formatPrice(total)}</span>
             </div>
           </div>
+
+          {/* Primary CTA: Shopify Checkout */}
+          <div className="mt-6 bg-gradient-to-br from-navy-700 to-navy-900 rounded-xl p-6 text-white">
+            <div className="flex items-center gap-2 mb-2">
+              <Shield size={18} className="text-lime-400" />
+              <h3 className="font-display font-bold text-lg">Pago seguro online</h3>
+            </div>
+            <p className="text-sm text-gray-300 mb-4">
+              Tarjeta, transferencia o efectivo. Procesado por Shopify, encriptado de punta a punta.
+            </p>
+            <button
+              type="button"
+              onClick={payWithShopify}
+              disabled={!allItemsHaveVariants}
+              className="w-full bg-lime-400 hover:bg-lime-500 disabled:bg-gray-400 disabled:cursor-not-allowed text-navy-700 font-display font-bold py-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-lg pulse-glow"
+            >
+              <Zap size={20} /> Pagar ahora — {formatPrice(total)}
+            </button>
+            {!allItemsHaveVariants && (
+              <p className="text-xs text-yellow-300 mt-2 text-center">
+                Algunos productos no se pueden pagar online. Usá WhatsApp para coordinar.
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Customer Form */}
+        {/* Customer Form for WhatsApp */}
         <div className="order-1 lg:order-2">
-          <h2 className="font-display text-xl font-bold text-navy-700 mb-4">Datos de Envío</h2>
-          <div className="space-y-4">
+          <h2 className="font-display text-xl font-bold text-navy-700 mb-2">¿Preferís consultar antes?</h2>
+          <p className="text-sm text-gray-500 mb-4">Dejá tus datos y te contactamos por WhatsApp.</p>
+          <form onSubmit={handleSubmitWhatsApp} className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
               <input
@@ -2049,13 +2270,263 @@ function CheckoutPage() {
             </div>
             <button
               type="submit"
-              className="w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-lg"
+              className="w-full bg-white hover:bg-gray-50 border-2 border-navy-700 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              <MessageCircle size={20} /> Confirmar Pedido por WhatsApp
+              <MessageCircle size={20} /> Coordinar por WhatsApp
             </button>
-          </div>
+          </form>
         </div>
-      </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── 12b. StockDashboard ─────────────────────────────────────────────────────
+
+type StockFilter = 'all' | 'low' | 'out';
+
+function StockDashboard({ products }: { products: Product[] }) {
+  const [filter, setFilter] = useState<StockFilter>('all');
+  const [search, setSearch] = useState('');
+  const threshold = 3;
+
+  // Per-product variant breakdown
+  const enriched = products.map((p) => {
+    const variants = Object.entries(p.stockBySize).map(([key, qty]) => {
+      const [size, color] = key.split('|');
+      return { key, size, color: color || 'Único', qty, variantId: p.variantMap?.[key] };
+    });
+    const lowVariants = variants.filter((v) => v.qty > 0 && v.qty <= threshold);
+    const outVariants = variants.filter((v) => v.qty <= 0);
+    const totalUnits = variants.reduce((s, v) => s + Math.max(0, v.qty), 0);
+    return { product: p, variants, lowVariants, outVariants, totalUnits };
+  });
+
+  const totalUnits = enriched.reduce((s, e) => s + e.totalUnits, 0);
+  const totalVariants = enriched.reduce((s, e) => s + e.variants.length, 0);
+  const totalLow = enriched.reduce((s, e) => s + e.lowVariants.length, 0);
+  const totalOut = enriched.reduce((s, e) => s + e.outVariants.length, 0);
+
+  const filteredProducts = enriched
+    .filter((e) => {
+      if (search && !e.product.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filter === 'low') return e.lowVariants.length > 0;
+      if (filter === 'out') return e.outVariants.length > 0;
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by urgency: out > low > healthy
+      const score = (e: typeof a) => e.outVariants.length * 10 + e.lowVariants.length;
+      return score(b) - score(a);
+    });
+
+  return (
+    <div className="fade-in">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Stock &amp; Alertas</h1>
+        <a
+          href={buildAdminInventoryUrl()}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-navy-700 hover:bg-navy-800 text-white font-display font-bold py-2 px-4 rounded-lg flex items-center gap-2 text-sm transition-colors"
+        >
+          <ExternalLink size={16} /> Inventario en Shopify
+        </a>
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard label="Unidades Totales" value={totalUnits} color="bg-green-50 text-green-700" icon={<Package size={20} />} />
+        <StatCard label="Variantes" value={totalVariants} color="bg-blue-50 text-blue-700" icon={<Tag size={20} />} />
+        <StatCard label="Bajo Stock (≤3)" value={totalLow} color="bg-yellow-50 text-yellow-700" icon={<AlertCircle size={20} />} />
+        <StatCard label="Sin Stock" value={totalOut} color="bg-red-50 text-red-700" icon={<XCircle size={20} />} />
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6 flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+        <div className="flex-1 relative">
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar producto..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none text-sm"
+          />
+        </div>
+        <div className="flex gap-2">
+          {(['all', 'low', 'out'] as StockFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-2 rounded-lg font-display text-sm font-semibold transition-colors ${
+                filter === f ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
+              }`}
+            >
+              {f === 'all' ? 'Todos' : f === 'low' ? 'Bajo stock' : 'Sin stock'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Product list */}
+      {filteredProducts.length === 0 ? (
+        <div className="bg-white rounded-xl p-12 text-center text-gray-400">
+          <Check size={48} className="mx-auto mb-3 text-green-400" />
+          <p className="font-display">
+            {filter === 'out'
+              ? '¡Ningún producto sin stock!'
+              : filter === 'low'
+              ? '¡Sin alertas de bajo stock!'
+              : 'No se encontraron productos'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredProducts.map(({ product, variants, lowVariants, outVariants, totalUnits }) => (
+            <StockProductRow
+              key={product.id}
+              product={product}
+              variants={variants}
+              lowVariants={lowVariants}
+              outVariants={outVariants}
+              totalUnits={totalUnits}
+              threshold={threshold}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, color, icon }: { label: string; value: number | string; color: string; icon: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${color}`}>{icon}</div>
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="font-display text-2xl font-bold text-navy-700">{value}</p>
+    </div>
+  );
+}
+
+interface StockVariantInfo {
+  key: string;
+  size: string;
+  color: string;
+  qty: number;
+  variantId: string | undefined;
+}
+
+function StockProductRow({
+  product,
+  variants,
+  lowVariants,
+  outVariants,
+  totalUnits,
+  threshold,
+}: {
+  product: Product;
+  variants: StockVariantInfo[];
+  lowVariants: StockVariantInfo[];
+  outVariants: StockVariantInfo[];
+  totalUnits: number;
+  threshold: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasAlert = lowVariants.length > 0 || outVariants.length > 0;
+
+  return (
+    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${hasAlert ? 'border-yellow-200' : 'border-gray-100'}`}>
+      <div className="p-4 flex items-center gap-4">
+        <img
+          src={product.images[0] || FALLBACK_IMG}
+          alt={product.name}
+          className="w-16 h-16 object-cover rounded-lg flex-shrink-0"
+          onError={handleImgError}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-display font-bold text-navy-700">{product.name}</h3>
+            {outVariants.length > 0 && (
+              <span className="bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {outVariants.length} sin stock
+              </span>
+            )}
+            {lowVariants.length > 0 && (
+              <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {lowVariants.length} bajo stock
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {variants.length} variantes · {totalUnits} unidades · {formatPrice(product.price)}
+          </p>
+        </div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-navy-700 hover:text-lime-500 p-2 transition-colors"
+        >
+          <ChevronDown size={20} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+        {product.shopifyGid && (
+          <a
+            href={buildAdminProductUrl(product.shopifyGid)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-navy-700 hover:text-lime-500 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Editar en Shopify"
+          >
+            Editar <ExternalLink size={12} />
+          </a>
+        )}
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Variante</th>
+                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Color</th>
+                <th className="text-right px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Cantidad</th>
+                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {variants
+                .slice()
+                .sort((a, b) => a.qty - b.qty)
+                .map((v) => {
+                  const isOut = v.qty <= 0;
+                  const isLow = v.qty > 0 && v.qty <= threshold;
+                  return (
+                    <tr key={v.key} className={`border-t border-gray-100 ${isOut ? 'bg-red-50/50' : isLow ? 'bg-yellow-50/50' : ''}`}>
+                      <td className="px-4 py-2 font-medium text-navy-700">{v.size}</td>
+                      <td className="px-4 py-2 text-gray-600">{v.color}</td>
+                      <td className="px-4 py-2 text-right font-display font-bold tabular-nums">{v.qty}</td>
+                      <td className="px-4 py-2">
+                        {isOut ? (
+                          <span className="inline-flex items-center gap-1 text-red-700 text-xs font-semibold">
+                            <XCircle size={14} /> Sin stock
+                          </span>
+                        ) : isLow ? (
+                          <span className="inline-flex items-center gap-1 text-yellow-700 text-xs font-semibold">
+                            <AlertCircle size={14} /> Bajo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-green-700 text-xs font-semibold">
+                            <Check size={14} /> OK
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -2065,14 +2536,19 @@ function CheckoutPage() {
 function AdminPage() {
   const store = useStore();
   const {
-    isAdmin, login, logout, products, setProducts, events, setEvents,
+    isAdmin, currentAdmin, login, sendLoginLink, logout, products, setProducts, events, setEvents,
     orders, setOrders, categories, setCategories, clubs, setClubs,
     announcements, setAnnouncements
   } = store;
   const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState(false);
+  const [email, setEmail] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [showPasswordFallback, setShowPasswordFallback] = useState(false);
+  const [sendingMagicLink, setSendingMagicLink] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const useSupabaseAuth = isSupabaseConnected();
 
   // Product modal state
   const [productModal, setProductModal] = useState(false);
@@ -2110,36 +2586,91 @@ function AdminPage() {
               <Shield size={32} className="text-lime-400" />
             </div>
             <h1 className="font-display text-2xl font-bold text-navy-700">Panel de Administración</h1>
-            <p className="text-gray-500 text-sm mt-1">Ingresá la contraseña para acceder</p>
+            <p className="text-gray-500 text-sm mt-1">
+              {useSupabaseAuth && !showPasswordFallback
+                ? 'Te mandamos un link mágico a tu email'
+                : 'Ingresá la contraseña para acceder'}
+            </p>
           </div>
+
           {loginError && (
             <div className="bg-red-50 text-red-600 border border-red-200 rounded-lg p-3 mb-4 flex items-center gap-2 text-sm">
-              <AlertCircle size={16} /> Contraseña incorrecta
+              <AlertCircle size={16} /> {loginError}
             </div>
           )}
-          <form
-            onSubmit={e => {
-              e.preventDefault();
-              if (!login(password)) {
-                setLoginError(true);
-                setTimeout(() => setLoginError(false), 3000);
-              }
-            }}
-          >
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors mb-4"
-            />
-            <button
-              type="submit"
-              className="w-full bg-navy-700 hover:bg-navy-800 text-white font-display font-bold py-3 rounded-lg transition-colors"
+
+          {magicLinkSent ? (
+            <div className="text-center">
+              <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Mail size={28} className="text-green-600" />
+              </div>
+              <p className="text-navy-700 font-display font-semibold mb-2">¡Mail enviado!</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Revisá <strong>{email}</strong> y hacé click en el link para entrar.
+              </p>
+              <button
+                onClick={() => { setMagicLinkSent(false); setEmail(''); }}
+                className="text-lime-600 text-sm font-semibold hover:underline"
+              >
+                Usar otro email
+              </button>
+            </div>
+          ) : useSupabaseAuth && !showPasswordFallback ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setLoginError('');
+                setSendingMagicLink(true);
+                const result = await sendLoginLink(email);
+                setSendingMagicLink(false);
+                if (result.success) {
+                  setMagicLinkSent(true);
+                } else {
+                  setLoginError(result.error || 'Error al enviar el link');
+                }
+              }}
             >
-              Ingresar
-            </button>
-          </form>
+              <input
+                type="email"
+                placeholder="tu@email.com"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors mb-4"
+              />
+              <button
+                type="submit"
+                disabled={sendingMagicLink}
+                className="w-full bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {sendingMagicLink ? 'Enviando...' : (<><Mail size={18} /> Recibir link mágico</>)}
+              </button>
+            </form>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!login(password)) {
+                  setLoginError('Contraseña incorrecta');
+                  setTimeout(() => setLoginError(''), 3000);
+                }
+              }}
+            >
+              <input
+                type="password"
+                placeholder="Contraseña"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors mb-4"
+              />
+              <button
+                type="submit"
+                className="w-full bg-navy-700 hover:bg-navy-800 text-white font-display font-bold py-3 rounded-lg transition-colors"
+              >
+                Ingresar
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -2152,6 +2683,7 @@ function AdminPage() {
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={18} /> },
+    { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={18} /> },
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
     { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
@@ -2159,6 +2691,9 @@ function AdminPage() {
     { id: 'clubs', label: 'Clubes', icon: <Map size={18} /> },
     { id: 'announcements', label: 'Anuncios', icon: <Megaphone size={18} /> },
   ];
+
+  // Stock metrics (read from Shopify catalog snapshot)
+  const stockMetrics = computeStockMetrics(3);
 
   return (
     <div className="flex min-h-[calc(100vh-120px)]">
@@ -2214,12 +2749,39 @@ function AdminPage() {
         {activeTab === 'dashboard' && (
           <div className="fade-in">
             <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700 mb-6">Dashboard</h1>
+
+            {/* Stock alert banners */}
+            {stockMetrics.outOfStockVariants > 0 && (
+              <button
+                onClick={() => setActiveTab('stock')}
+                className="w-full mb-3 flex items-center gap-3 bg-red-50 hover:bg-red-100 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded-r-lg transition-colors text-left"
+              >
+                <AlertCircle size={20} className="flex-shrink-0" />
+                <div className="flex-1 text-sm">
+                  <strong>{stockMetrics.outOfStockVariants} variantes sin stock.</strong> Ver detalle.
+                </div>
+                <ArrowRight size={18} />
+              </button>
+            )}
+            {stockMetrics.lowStockVariants > 0 && (
+              <button
+                onClick={() => setActiveTab('stock')}
+                className="w-full mb-6 flex items-center gap-3 bg-yellow-50 hover:bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded-r-lg transition-colors text-left"
+              >
+                <AlertCircle size={20} className="flex-shrink-0" />
+                <div className="flex-1 text-sm">
+                  <strong>{stockMetrics.lowStockVariants} variantes con stock bajo</strong> (≤ 3 unidades). Reponé pronto.
+                </div>
+                <ArrowRight size={18} />
+              </button>
+            )}
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Total Productos', value: products.length, icon: <Package size={24} />, color: 'bg-blue-50 text-blue-600' },
+                { label: 'Productos Shopify', value: products.length, icon: <Package size={24} />, color: 'bg-blue-50 text-blue-600' },
+                { label: 'Unidades en Stock', value: stockMetrics.totalUnits, icon: <BarChart3 size={24} />, color: 'bg-green-50 text-green-600' },
                 { label: 'Pedidos Pendientes', value: pendingOrders, icon: <Store size={24} />, color: 'bg-yellow-50 text-yellow-600' },
-                { label: 'Ingresos Totales', value: formatPrice(totalRevenue), icon: <BarChart3 size={24} />, color: 'bg-green-50 text-green-600' },
-                { label: 'Sin Stock', value: outOfStock, icon: <AlertCircle size={24} />, color: 'bg-red-50 text-red-600' },
+                { label: 'Variantes sin Stock', value: stockMetrics.outOfStockVariants, icon: <AlertCircle size={24} />, color: 'bg-red-50 text-red-600' },
               ].map((stat, i) => (
                 <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${stat.color}`}>
@@ -2255,17 +2817,30 @@ function AdminPage() {
           </div>
         )}
 
+        {/* Stock & Alertas Tab */}
+        {activeTab === 'stock' && (
+          <StockDashboard products={products} />
+        )}
+
         {/* Products Tab */}
         {activeTab === 'products' && (
           <div className="fade-in">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
               <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Productos</h1>
-              <button
-                onClick={() => { setEditingProduct(null); setProductModal(true); }}
+              <a
+                href={`https://admin.shopify.com/store/volea-6996/products`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-2 px-6 rounded-lg transition-colors flex items-center gap-2"
               >
-                <Plus size={18} /> Agregar Producto
-              </button>
+                <ExternalLink size={18} /> Gestionar en Shopify
+              </a>
+            </div>
+            <div className="mb-4 bg-blue-50 border-l-4 border-blue-500 px-4 py-3 rounded-r-lg flex items-start gap-3 text-sm text-blue-900">
+              <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Los productos vienen de Shopify ({SHOPIFY_DOMAIN}).</strong> Para crear, editar precios o cambiar stock, hacelo en el admin de Shopify y la web se sincroniza en el próximo build. La gestión local de productos quedó deshabilitada para evitar inconsistencias.
+              </div>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
@@ -2280,7 +2855,7 @@ function AdminPage() {
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden sm:table-cell">Stock</th>
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden lg:table-cell">Dest.</th>
                       <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden lg:table-cell">Oferta</th>
-                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Acciones</th>
+                      <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Shopify</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2303,20 +2878,19 @@ function AdminPage() {
                           {p.isOffer && <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-full">OFERTA</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => { setEditingProduct(p); setProductModal(true); }}
-                              className="text-navy-700 hover:text-lime-500 transition-colors"
+                          {p.shopifyGid ? (
+                            <a
+                              href={buildAdminProductUrl(p.shopifyGid)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-navy-700 hover:text-lime-500 transition-colors inline-flex"
+                              title="Editar en Shopify"
                             >
-                              <Edit size={16} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(p.id)}
-                              className="text-gray-400 hover:text-red-500 transition-colors"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
+                              <ExternalLink size={16} />
+                            </a>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -2325,37 +2899,6 @@ function AdminPage() {
               </div>
             </div>
 
-            {/* Product Modal */}
-            {productModal && (
-              <ProductModal
-                product={editingProduct}
-                categories={categories}
-                onClose={() => { setProductModal(false); setEditingProduct(null); }}
-                onSave={(p) => {
-                  if (editingProduct) {
-                    setProducts(products.map(pr => pr.id === p.id ? p : pr));
-                  } else {
-                    setProducts([...products, p]);
-                  }
-                  setProductModal(false);
-                  setEditingProduct(null);
-                }}
-              />
-            )}
-
-            {/* Delete Confirm */}
-            {deleteConfirm && (
-              <ConfirmDialog
-                title="¿Eliminar producto?"
-                message="Esta acción no se puede deshacer."
-                onCancel={() => setDeleteConfirm(null)}
-                onConfirm={() => {
-                  if (isSupabaseConnected()) SupabaseService.deleteProduct(deleteConfirm);
-                  setProducts(products.filter(p => p.id !== deleteConfirm));
-                  setDeleteConfirm(null);
-                }}
-              />
-            )}
           </div>
         )}
 
@@ -3843,27 +4386,49 @@ function Footer() {
 
 // ─── 17. Main App Component ──────────────────────────────────────────────────
 
+function AnimatedRoutes() {
+  const location = useLocation();
+  // Sin AnimatePresence: con framer-motion 12 + React 19, mode="wait" deja la
+  // animación de salida colgada y la ruta nueva nunca monta (navegación rota).
+  // El key en Routes fuerza remount por ruta, así cada página repite su fade-in.
+  return (
+    <Routes location={location} key={location.pathname}>
+      <Route path="/" element={<PageTransition><HomePage /></PageTransition>} />
+      <Route path="/tienda" element={<PageTransition><ShopPage /></PageTransition>} />
+      <Route path="/producto/:id" element={<PageTransition><ProductDetailPage /></PageTransition>} />
+      <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
+      <Route path="/mapa" element={<PageTransition><MapPage /></PageTransition>} />
+      <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />
+      <Route path="/checkout" element={<PageTransition><CheckoutPage /></PageTransition>} />
+      <Route path="/admin" element={<PageTransition><AdminPage /></PageTransition>} />
+      <Route path="*" element={<PageTransition><NotFoundPage /></PageTransition>} />
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
     <HashRouter>
       <StoreProvider>
         <ScrollToTop />
+        <Toaster
+          position="bottom-right"
+          theme="dark"
+          richColors
+          toastOptions={{
+            style: {
+              background: '#001F3F',
+              color: '#fff',
+              border: '1px solid #ccff00',
+            },
+          }}
+        />
         <div className="flex flex-col min-h-screen">
           <TopBar />
           <Navbar />
           <CartDrawer />
           <main className="flex-1">
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/tienda" element={<ShopPage />} />
-              <Route path="/producto/:id" element={<ProductDetailPage />} />
-              <Route path="/eventos" element={<EventsPage />} />
-              <Route path="/mapa" element={<MapPage />} />
-              <Route path="/contacto" element={<ContactPage />} />
-              <Route path="/checkout" element={<CheckoutPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+            <AnimatedRoutes />
           </main>
           <Footer />
           <FloatingWhatsApp />

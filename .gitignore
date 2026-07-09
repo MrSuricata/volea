@@ -5,3 +5,8 @@ dist
 .DS_Store
 *.log
 .claude
+
+.vercel
+.env*
+tsconfig.app.tsbuildinfo
+!.env.example
