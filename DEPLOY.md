@@ -74,7 +74,7 @@ Vercel → Settings → Domains → Add `volea.uy` (o el que tengas).
   - `brianridv@gmail.com` (owner)
   - `bridvanovich@twf.uy` (owner)
   - `somosvolea@gmail.com` (admin)
-  - Para agregar a Gastón/Paula/Valeria: `INSERT INTO admins (email, name, role) VALUES ('email', 'Nombre', 'admin');` en el SQL Editor de Supabase.
+  - Para agregar a Gastón/Paula: `INSERT INTO admins (email, name, role) VALUES ('email', 'Nombre', 'admin');` en el SQL Editor de Supabase.
 - El fallback por password (`adminvolea` / `VITE_ADMIN_PASSWORD`) solo aplica si Supabase está caído.
 - Pestañas:
   - **Dashboard**: KPIs y alertas de stock

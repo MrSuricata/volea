@@ -1343,12 +1343,11 @@ function HomePage() {
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <StaggerGrid className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 max-w-5xl mx-auto">
+          <StaggerGrid className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 max-w-4xl mx-auto">
             {[
               { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
               { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
               { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora VOLEA' },
-              { src: '/products/team-valeria.jpg', name: 'Valeria Morales', role: 'Fundadora VOLEA' },
             ].map((member, i) => (
               <StaggerItem key={i}>
                 <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-navy-800">
