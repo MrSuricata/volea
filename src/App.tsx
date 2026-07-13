@@ -32,6 +32,7 @@ import { BlogListPage, BlogPostPage } from './components/BlogPages';
 import { StandingsPage } from './components/StandingsPage';
 import { AdminBlogTab } from './components/AdminBlogTab';
 import { AdminCajaTab } from './components/AdminCajaTab';
+import { AdminOrderModal } from './components/AdminOrderModal';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
 
@@ -2696,7 +2697,7 @@ function AdminPage() {
   const store = useStore();
   const {
     isAdmin, currentAdmin, login, sendLoginLink, logout, products, refreshProducts, saveProduct, removeProduct, events, setEvents,
-    orders, setOrders, categories, setCategories, clubs, setClubs,
+    orders, setOrders, addOrder, categories, setCategories, clubs, setClubs,
     announcements, setAnnouncements, posts, savePost, removePost,
     standings, saveStanding, removeStanding
   } = store;
@@ -2743,8 +2744,9 @@ function AdminPage() {
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [deleteAnnouncementConfirm, setDeleteAnnouncementConfirm] = useState<string | null>(null);
 
-  // Expanded order
+  // Expanded order + alta manual
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [orderModal, setOrderModal] = useState(false);
 
   // New category
   const [newCategory, setNewCategory] = useState('');
@@ -3243,7 +3245,27 @@ function AdminPage() {
         {/* Orders Tab */}
         {activeTab === 'orders' && (
           <div className="fade-in">
-            <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700 mb-6">Pedidos</h1>
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Pedidos</h1>
+              <button
+                onClick={() => setOrderModal(true)}
+                className="bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-6 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Plus size={18} /> Nuevo pedido
+              </button>
+            </div>
+            {orderModal && (
+              <AdminOrderModal
+                products={products}
+                onClose={() => setOrderModal(false)}
+                onSave={(o) => {
+                  addOrder(o);
+                  setOrderModal(false);
+                  setExpandedOrder(o.id);
+                  toast.success(`Pedido ${o.id} creado`);
+                }}
+              />
+            )}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               {orders.length === 0 ? (
                 <div className="p-12 text-center text-gray-400">
