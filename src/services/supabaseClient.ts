@@ -10,6 +10,41 @@ const supabaseUrl = 'https://scftuxrtflfowohiewsc.supabase.co';
 const supabaseAnonKey =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjZnR1eHJ0Zmxmb3dvaGlld3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDgyMjAsImV4cCI6MjA5NTMyNDIyMH0.F9n9X_urG0O0Oo2vTI_S8LcRWR93girs1e4eZb8bWUI';
 
+// ── Rescate de tokens del magic link (HashRouter) ───────────────────────────
+// GoTrue redirige a `${redirect_to}#access_token=...`. Como redirect_to ya
+// contiene la ruta "#/admin", la URL final queda "#/admin#access_token=..."
+// (doble numeral) y supabase-js NO encuentra los tokens: parsea todo el
+// fragmento como una sola clave y los descarta, dejando al usuario en el
+// formulario de login otra vez. Acá los extraemos a mano, limpiamos la URL
+// (queda "#/admin") y más abajo creamos la sesión con setSession().
+function rescueHashTokens(): { access_token: string; refresh_token: string } | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash;
+  const i = hash.indexOf('#access_token=');
+  if (i <= 0) return null; // sin doble hash: lo maneja detectSessionInUrl
+  const params = new URLSearchParams(hash.slice(i + 1));
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+  window.history.replaceState(null, '', window.location.pathname + window.location.search + hash.slice(0, i));
+  if (!access_token || !refresh_token) return null;
+  return { access_token, refresh_token };
+}
+
+// Links vencidos o ya usados vuelven como "#/admin#error=...": limpiar la ruta
+// para que el formulario de login quede utilizable.
+function stripHashError(): void {
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash;
+  const i = hash.indexOf('#error');
+  if (i > 0) {
+    console.warn('Magic link rechazado por Supabase:', hash.slice(i + 1));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + hash.slice(0, i));
+  }
+}
+
+const _pendingMagicLink = rescueHashTokens();
+stripHashError();
+
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
@@ -23,6 +58,20 @@ export const supabaseReady: Promise<boolean> = (async () => {
   if (!supabase) {
     _checked = true;
     return false;
+  }
+  // Sesión pendiente del magic link: crearla ANTES de que el resto de la app
+  // toque Supabase (todo el arranque espera supabaseReady). getSession()
+  // espera la inicialización interna del cliente, evitando la pelea por el
+  // navigator lock que se da si setSession corre en paralelo con otras
+  // llamadas en la primera carga.
+  if (_pendingMagicLink) {
+    try {
+      await supabase.auth.getSession();
+      const { error } = await supabase.auth.setSession(_pendingMagicLink);
+      if (error) console.error('No se pudo crear la sesión desde el magic link:', error);
+    } catch (e) {
+      console.error('No se pudo crear la sesión desde el magic link:', e);
+    }
   }
   try {
     const ctrl = new AbortController();
