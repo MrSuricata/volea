@@ -10,3 +10,4 @@ dist
 .env*
 tsconfig.app.tsbuildinfo
 !.env.example
+!.env.production
