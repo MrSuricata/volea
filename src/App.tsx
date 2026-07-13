@@ -7,7 +7,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper
+  Globe, Navigation, Newspaper, Wallet
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
@@ -30,6 +30,7 @@ import { getProductsAsInternal, getCategoriesAsInternal } from './services/shopi
 import { BlogListPage, BlogPostPage } from './components/BlogPages';
 import { StandingsPage } from './components/StandingsPage';
 import { AdminBlogTab } from './components/AdminBlogTab';
+import { AdminCajaTab } from './components/AdminCajaTab';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
 
@@ -177,6 +178,7 @@ function useParallax(distance = 80) {
 interface StoreContextType {
   products: Product[];
   setProducts: (p: Product[]) => void;
+  refreshProducts: () => Promise<void>;
   saveProduct: (p: Product) => void;
   removeProduct: (id: string) => void;
   events: Event[];
@@ -353,6 +355,17 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     _setProducts(p);
     StorageService.setProducts(p);
     if (isSupabaseConnected()) SupabaseService.setProducts(p);
+  }, []);
+
+  // Recarga de solo lectura desde Supabase (ej: tras reponer stock al anular
+  // una venta en la Caja). No escribe nada de vuelta a la nube.
+  const refreshProducts = useCallback(async () => {
+    if (!isSupabaseConnected()) return;
+    const p = await SupabaseService.getProducts();
+    if (p) {
+      _setProducts(p);
+      StorageService.setProducts(p);
+    }
   }, []);
 
   // Aviso genérico cuando la nube rechaza una escritura (sesión vencida, RLS).
@@ -546,7 +559,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StoreContext.Provider value={{
-      products, setProducts, saveProduct, removeProduct, events, setEvents, orders, setOrders, addOrder,
+      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, orders, setOrders, addOrder,
       posts, savePost, removePost, standings, saveStanding, removeStanding,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
       cart, addToCart, removeFromCart,
@@ -2682,11 +2695,21 @@ function StockProductRow({
 function AdminPage() {
   const store = useStore();
   const {
-    isAdmin, currentAdmin, login, sendLoginLink, logout, products, saveProduct, removeProduct, events, setEvents,
+    isAdmin, currentAdmin, login, sendLoginLink, logout, products, refreshProducts, saveProduct, removeProduct, events, setEvents,
     orders, setOrders, categories, setCategories, clubs, setClubs,
     announcements, setAnnouncements, posts, savePost, removePost,
     standings, saveStanding, removeStanding
   } = store;
+
+  // Caja: callbacks con identidad estable para no re-disparar el fetch del
+  // ledger en cada re-render de AdminPage (sidebar, auth refresh, etc.).
+  const loadLedger = useCallback(() => SupabaseService.getLedger(), []);
+  const revertLedgerEntry = useCallback(async (id: string) => {
+    const result = await SupabaseService.revertLedgerEntry(id);
+    // Si se repuso stock, las otras pestañas (Stock, Productos) deben verlo.
+    if (result.ok && result.stockRestored) refreshProducts();
+    return result;
+  }, [refreshProducts]);
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -2833,6 +2856,7 @@ function AdminPage() {
     { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={18} /> },
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
+    { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
     { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
     { id: 'standings', label: 'Clasificación', icon: <Trophy size={18} /> },
     { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
@@ -3488,6 +3512,13 @@ function AdminPage() {
                 }}
               />
             )}
+          </div>
+        )}
+
+        {/* Caja Tab (ventas/gastos del bot de Telegram) */}
+        {activeTab === 'caja' && (
+          <div className="fade-in">
+            <AdminCajaTab loadLedger={loadLedger} revertEntry={revertLedgerEntry} />
           </div>
         )}
 

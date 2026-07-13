@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry } from '../types';
 
 function orderToRow(o: Order) {
   return {
@@ -206,6 +206,48 @@ export const SupabaseService = {
     const { error } = await supabase.from('standings').delete().eq('id', id);
     if (error) { console.error('Error deleting standing:', error); return false; }
     return true;
+  },
+
+  // ── Caja: libro de ventas/gastos del bot de Telegram (solo admins vía RLS) ──
+  async getLedger(): Promise<LedgerEntry[] | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    // Sin sesión de magic link, RLS devuelve lista vacía sin error: mejor
+    // avisar el problema de sesión que mostrar una caja "vacía" engañosa.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await supabase.from('bot_ledger').select('*')
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) { console.error('Error fetching ledger:', error); return null; }
+    return (data || []).map(row => ({
+      id: row.id,
+      kind: row.kind === 'gasto' ? 'gasto' as const : 'venta' as const,
+      productId: row.product_id ?? null,
+      variantKey: row.variant_key ?? null,
+      label: row.label || '',
+      qty: row.qty || 1,
+      amount: Number(row.amount) || 0,
+      reportedBy: row.reported_by || '',
+      reverted: row.reverted || false,
+      createdAt: row.created_at || '',
+    }));
+  },
+
+  /** Anula un movimiento de la Caja; si era una venta de catálogo, repone stock. */
+  async revertLedgerEntry(id: string): Promise<{ ok: boolean; stockRestored: boolean; error?: string }> {
+    if (!supabase || !isSupabaseConnected()) {
+      return { ok: false, stockRestored: false, error: 'Sin conexión con Supabase' };
+    }
+    const { data, error } = await supabase.rpc('admin_revert_ledger', { p_id: id });
+    if (error) {
+      console.error('Error reverting ledger entry:', error);
+      return { ok: false, stockRestored: false, error: error.message };
+    }
+    return {
+      ok: data?.ok === true,
+      stockRestored: data?.stock_restored === true,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+    };
   },
 
   // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──

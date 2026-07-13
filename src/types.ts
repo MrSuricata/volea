@@ -47,6 +47,20 @@ export interface StandingEntry {
   notes: string;
 }
 
+/** Movimiento de la Caja: venta o gasto registrado por el bot de Telegram. */
+export interface LedgerEntry {
+  id: string;
+  kind: 'venta' | 'gasto';
+  productId: string | null;
+  variantKey: string | null; // "talle|color" del producto vendido
+  label: string;
+  qty: number;
+  amount: number;
+  reportedBy: string;
+  reverted: boolean;
+  createdAt: string; // ISO timestamp
+}
+
 export interface CartItem {
   product: Product;
   quantity: number;
