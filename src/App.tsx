@@ -20,6 +20,7 @@ import { SupabaseService } from './services/supabaseService';
 import { isSupabaseConnected, supabaseReady } from './services/supabaseClient';
 import {
   sendMagicLink,
+  signInWithPassword,
   getCurrentAdmin,
   onAuthStateChange,
   signOut as authSignOut,
@@ -2713,8 +2714,11 @@ function AdminPage() {
   const [email, setEmail] = useState('');
   const [loginError, setLoginError] = useState('');
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [showPasswordFallback, setShowPasswordFallback] = useState(false);
   const [sendingMagicLink, setSendingMagicLink] = useState(false);
+  // 'password' es el modo principal; el magic link queda como alternativa
+  // (el SMTP built-in de Supabase tiene límite de ~2 mails/hora).
+  const [authMode, setAuthMode] = useState<'password' | 'magiclink'>('password');
+  const [signingIn, setSigningIn] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const useSupabaseAuth = isSupabaseConnected();
@@ -2756,9 +2760,11 @@ function AdminPage() {
             </div>
             <h1 className="font-display text-2xl font-bold text-navy-700">Panel de Administración</h1>
             <p className="text-gray-500 text-sm mt-1">
-              {useSupabaseAuth && !showPasswordFallback
-                ? 'Ingresá tu email y te mandamos un link de acceso'
-                : 'Ingresá la contraseña para acceder'}
+              {!useSupabaseAuth
+                ? 'Ingresá la contraseña para acceder'
+                : authMode === 'password'
+                  ? 'Ingresá tu email y contraseña'
+                  : 'Ingresá tu email y te mandamos un link de acceso'}
             </p>
           </div>
 
@@ -2784,7 +2790,54 @@ function AdminPage() {
                 Usar otro email
               </button>
             </div>
-          ) : useSupabaseAuth && !showPasswordFallback ? (
+          ) : useSupabaseAuth && authMode === 'password' ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setLoginError('');
+                setSigningIn(true);
+                const result = await signInWithPassword(email, password);
+                if (!result.success) {
+                  setSigningIn(false);
+                  setLoginError(result.error || 'No se pudo iniciar sesión');
+                }
+                // Éxito: onAuthStateChange activa isAdmin y este form desaparece.
+              }}
+            >
+              <input
+                type="email"
+                placeholder="tu@email.com"
+                required
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors mb-4"
+              />
+              <input
+                type="password"
+                placeholder="Contraseña"
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors mb-4"
+              />
+              <button
+                type="submit"
+                disabled={signingIn}
+                className="w-full bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-bold py-3 rounded-lg transition-colors"
+              >
+                {signingIn ? 'Entrando...' : 'Ingresar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLoginError(''); setAuthMode('magiclink'); }}
+                className="w-full mt-3 text-lime-600 text-sm font-semibold hover:underline"
+              >
+                ¿Preferís recibir un link por email?
+              </button>
+            </form>
+          ) : useSupabaseAuth ? (
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -2813,6 +2866,13 @@ function AdminPage() {
                 className="w-full bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 {sendingMagicLink ? 'Enviando...' : (<><Mail size={18} /> Recibir link de acceso</>)}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLoginError(''); setAuthMode('password'); }}
+                className="w-full mt-3 text-lime-600 text-sm font-semibold hover:underline"
+              >
+                Entrar con contraseña
               </button>
             </form>
           ) : (

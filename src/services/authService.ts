@@ -45,6 +45,41 @@ export async function sendMagicLink(email: string): Promise<{ success: boolean; 
 }
 
 /**
+ * Sign in with email + password (Supabase Auth). Same allowlist as the magic
+ * link: only emails present in `admins` can get in.
+ */
+export async function signInWithPassword(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase || !isSupabaseConnected()) {
+    return { success: false, error: 'Servicio de autenticación no disponible' };
+  }
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed || !trimmed.includes('@')) {
+    return { success: false, error: 'Email inválido' };
+  }
+  if (!password) {
+    return { success: false, error: 'Ingresá la contraseña' };
+  }
+
+  const { data: isAllowed, error: lookupErr } = await supabase
+    .rpc('is_admin_email', { p_email: trimmed });
+  if (lookupErr) {
+    return { success: false, error: 'Error al validar el email' };
+  }
+  if (!isAllowed) {
+    return { success: false, error: 'Este email no tiene acceso al panel' };
+  }
+
+  const { error } = await supabase.auth.signInWithPassword({ email: trimmed, password });
+  if (error) {
+    const msg = /invalid login credentials/i.test(error.message)
+      ? 'Contraseña incorrecta'
+      : error.message;
+    return { success: false, error: msg };
+  }
+  return { success: true };
+}
+
+/**
  * Sign out the current user.
  */
 export async function signOut(): Promise<void> {
@@ -77,7 +112,13 @@ export async function getCurrentAdmin(): Promise<AdminUser | null> {
  */
 export function onAuthStateChange(cb: (admin: AdminUser | null) => void): () => void {
   if (!supabase) return () => {};
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(async () => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Usar la sesión del evento: en SIGNED_OUT llega null y evita la carrera
+    // de re-consultar con una sesión cacheada (dejaba el panel "abierto").
+    if (!session?.user?.email) {
+      cb(null);
+      return;
+    }
     const admin = await getCurrentAdmin();
     cb(admin);
   });
