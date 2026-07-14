@@ -59,6 +59,13 @@ export interface LedgerEntry {
   reportedBy: string;
   reverted: boolean;
   createdAt: string; // ISO timestamp
+  /** Cómo pagaron la venta (null en gastos y registros viejos). */
+  paymentMethod: 'mp' | 'efectivo' | 'transferencia' | 'debe' | null;
+  /** Quién debe, cuando paymentMethod es 'debe'. */
+  debtorName: string | null;
+  /** Cuándo y cómo se cobró la deuda (null = sigue pendiente). */
+  settledAt: string | null;
+  settledMethod: 'mp' | 'efectivo' | 'transferencia' | null;
 }
 
 export interface CartItem {

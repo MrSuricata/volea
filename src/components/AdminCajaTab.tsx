@@ -46,6 +46,12 @@ const formatVariant = (key: string | null) => {
   return [size, color].filter(Boolean).join(' · ');
 };
 
+const PAYMENT_LABELS: Record<string, string> = {
+  mp: 'Mercado Pago',
+  efectivo: 'Efectivo',
+  transferencia: 'Transferencia',
+};
+
 export function AdminCajaTab({ loadLedger, revertEntry }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
@@ -118,6 +124,20 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
     return { ventas, gastos, balance: ventas - gastos, count };
   }, [entries, period]);
 
+  // Deudas abiertas (sobre todo lo cargado, sin filtro de período)
+  const porCobrar = useMemo(() => {
+    let total = 0, count = 0;
+    const nombres = new Set<string>();
+    for (const e of entries) {
+      if (e.kind === 'venta' && e.paymentMethod === 'debe' && !e.settledAt && !e.reverted) {
+        total += e.amount;
+        count++;
+        if (e.debtorName) nombres.add(e.debtorName);
+      }
+    }
+    return { total, count, nombres: Array.from(nombres) };
+  }, [entries]);
+
   const handleRevert = async (entry: LedgerEntry) => {
     if (reverting) return; // ya hay una anulación en curso
     setReverting(entry.id);
@@ -187,6 +207,15 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
           <p className="font-display text-2xl font-bold text-navy-700">{totals.count}</p>
         </div>
       </div>
+      )}
+
+      {/* Deudas abiertas */}
+      {!loadFailed && porCobrar.count > 0 && (
+        <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 px-4 py-3 rounded-r-lg text-sm text-amber-900">
+          📒 <b>Por cobrar: {formatMoney(porCobrar.total)}</b> en {porCobrar.count} venta{porCobrar.count > 1 ? 's' : ''} fiada{porCobrar.count > 1 ? 's' : ''}
+          {porCobrar.nombres.length > 0 && <> — {porCobrar.nombres.join(', ')}</>}.
+          {' '}Se cobran desde el bot: <i>cobré + nombre</i>.
+        </div>
       )}
 
       {/* Filters */}
@@ -280,6 +309,19 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
                       )}
                       {entry.kind === 'venta' && !entry.productId && (
                         <p className="text-xs text-gray-400">Ítem suelto (sin stock)</p>
+                      )}
+                      {entry.kind === 'venta' && entry.paymentMethod && entry.paymentMethod !== 'debe' && (
+                        <p className="text-xs text-gray-400">{PAYMENT_LABELS[entry.paymentMethod]}</p>
+                      )}
+                      {entry.paymentMethod === 'debe' && (
+                        entry.settledAt ? (
+                          <p className="text-xs text-green-600">
+                            Debía {entry.debtorName || '—'} · cobrado
+                            {entry.settledMethod ? ` (${PAYMENT_LABELS[entry.settledMethod]})` : ''}
+                          </p>
+                        ) : (
+                          <p className="text-xs font-semibold text-amber-600">Debe {entry.debtorName || '—'}</p>
+                        )
                       )}
                       {entry.reverted && (
                         <p className="text-xs text-red-400 font-semibold">Anulado</p>

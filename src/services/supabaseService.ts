@@ -230,6 +230,10 @@ export const SupabaseService = {
       reportedBy: row.reported_by || '',
       reverted: row.reverted || false,
       createdAt: row.created_at || '',
+      paymentMethod: row.payment_method ?? null,
+      debtorName: row.debtor_name ?? null,
+      settledAt: row.settled_at ?? null,
+      settledMethod: row.settled_method ?? null,
     }));
   },
 
