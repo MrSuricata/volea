@@ -78,7 +78,7 @@ export const SupabaseService = {
   // Las escrituras admin devuelven false si la nube las rechazó (RLS/sesión vencida),
   // para que la UI avise en vez de fingir éxito.
   async setProducts(products: Product[]): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     let ok = true;
     for (const p of products) {
       const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
@@ -88,14 +88,14 @@ export const SupabaseService = {
   },
 
   async upsertProduct(p: Product): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
     if (error) { console.error('Error upserting product:', error); return false; }
     return true;
   },
 
   async deleteProduct(id: string): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (error) { console.error('Error deleting product:', error); return false; }
     return true;
@@ -110,7 +110,7 @@ export const SupabaseService = {
   },
 
   async setCategories(categories: Category[]): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     let ok = true;
     for (const c of categories) {
       const { error } = await supabase.from('categories').upsert(
@@ -123,7 +123,7 @@ export const SupabaseService = {
   },
 
   async deleteCategory(id: string): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('categories').delete().eq('id', id);
     if (error) { console.error('Error deleting category:', error); return false; }
     return true;
@@ -148,7 +148,7 @@ export const SupabaseService = {
   },
 
   async upsertPost(p: Post): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('posts').upsert({
       id: p.id,
       title: p.title,
@@ -164,7 +164,7 @@ export const SupabaseService = {
   },
 
   async deletePost(id: string): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('posts').delete().eq('id', id);
     if (error) { console.error('Error deleting post:', error); return false; }
     return true;
@@ -188,7 +188,7 @@ export const SupabaseService = {
   },
 
   async upsertStanding(s: StandingEntry): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('standings').upsert({
       id: s.id,
       position: s.position,
@@ -202,7 +202,7 @@ export const SupabaseService = {
   },
 
   async deleteStanding(id: string): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     const { error } = await supabase.from('standings').delete().eq('id', id);
     if (error) { console.error('Error deleting standing:', error); return false; }
     return true;
@@ -256,7 +256,7 @@ export const SupabaseService = {
 
   // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──
   async uploadImage(file: File, folder = 'uploads'): Promise<string | null> {
-    if (!supabase || !isSupabaseConnected()) return null;
+    if (!supabase) return null;
     const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const { error } = await supabase.storage.from('product-images').upload(path, file, {
@@ -290,7 +290,7 @@ export const SupabaseService = {
   },
 
   async setEvents(events: Event[]): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     for (const e of events) {
       await supabase.from('events').upsert({
         id: e.id, name: e.name, date: e.date, time: e.time,
@@ -303,7 +303,7 @@ export const SupabaseService = {
   },
 
   async deleteEvent(id: string): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     await supabase.from('events').delete().eq('id', id);
   },
 
@@ -335,14 +335,14 @@ export const SupabaseService = {
   // pero rechaza el upsert (ON CONFLICT DO UPDATE) porque el brazo UPDATE
   // exige is_admin(). No usar upsert acá.
   async addOrder(o: Order): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     const { error } = await supabase.from('orders').insert(orderToRow(o));
     if (error) console.error('Error inserting order:', error);
   },
 
   // Solo admins autenticados (magic link) pueden actualizar pedidos existentes.
   async setOrders(orders: Order[]): Promise<boolean> {
-    if (!supabase || !isSupabaseConnected()) return true;
+    if (!supabase) return true;
     let ok = true;
     for (const o of orders) {
       const { error } = await supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' });
@@ -365,7 +365,7 @@ export const SupabaseService = {
   },
 
   async setClubs(clubs: Club[]): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     for (const c of clubs) {
       await supabase.from('clubs').upsert({
         id: c.id, name: c.name, address: c.address, city: c.city,
@@ -377,7 +377,7 @@ export const SupabaseService = {
   },
 
   async deleteClub(id: string): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     await supabase.from('clubs').delete().eq('id', id);
   },
 
@@ -394,7 +394,7 @@ export const SupabaseService = {
   },
 
   async setAnnouncements(announcements: Announcement[]): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     for (const a of announcements) {
       await supabase.from('announcements').upsert({
         id: a.id, title: a.title, content: a.content,
@@ -404,7 +404,7 @@ export const SupabaseService = {
   },
 
   async deleteAnnouncement(id: string): Promise<void> {
-    if (!supabase || !isSupabaseConnected()) return;
+    if (!supabase) return;
     await supabase.from('announcements').delete().eq('id', id);
   },
 };

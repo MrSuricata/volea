@@ -356,7 +356,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const setProducts = useCallback((p: Product[]) => {
     _setProducts(p);
     StorageService.setProducts(p);
-    if (isSupabaseConnected()) SupabaseService.setProducts(p);
+    SupabaseService.setProducts(p);
   }, []);
 
   // Recarga de solo lectura desde Supabase (ej: tras reponer stock al anular
@@ -370,9 +370,14 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Aviso genérico cuando la nube rechaza una escritura (sesión vencida, RLS).
+  // Aviso genérico cuando la nube rechaza una escritura (sin conexión, sesión
+  // vencida, RLS). El cambio siempre quedó guardado en este dispositivo; el
+  // aviso evita que se pierda "en silencio" sin llegar a la nube.
   const warnCloudFail = (ok: boolean) => {
-    if (!ok) toast.error('No se pudo guardar en la nube — cerrá sesión y volvé a entrar al panel.');
+    if (!ok) toast.error(
+      '⚠️ No se pudo subir a la nube. El cambio quedó guardado solo en este dispositivo. Revisá tu conexión / que sigas con sesión de admin, y guardá de nuevo.',
+      { duration: 9000 },
+    );
   };
 
   const saveProduct = useCallback((p: Product) => {
@@ -382,7 +387,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       StorageService.setProducts(next);
       return next;
     });
-    if (isSupabaseConnected()) SupabaseService.upsertProduct(p).then(warnCloudFail);
+    SupabaseService.upsertProduct(p).then(warnCloudFail);
   }, []);
 
   const removeProduct = useCallback((id: string) => {
@@ -391,7 +396,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       StorageService.setProducts(next);
       return next;
     });
-    if (isSupabaseConnected()) SupabaseService.deleteProduct(id).then(warnCloudFail);
+    SupabaseService.deleteProduct(id).then(warnCloudFail);
   }, []);
 
   const savePost = useCallback((p: Post) => {
@@ -399,12 +404,12 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       const idx = prev.findIndex(x => x.id === p.id);
       return idx >= 0 ? prev.map(x => (x.id === p.id ? p : x)) : [p, ...prev];
     });
-    if (isSupabaseConnected()) SupabaseService.upsertPost(p).then(warnCloudFail);
+    SupabaseService.upsertPost(p).then(warnCloudFail);
   }, []);
 
   const removePost = useCallback((id: string) => {
     _setPosts(prev => prev.filter(x => x.id !== id));
-    if (isSupabaseConnected()) SupabaseService.deletePost(id).then(warnCloudFail);
+    SupabaseService.deletePost(id).then(warnCloudFail);
   }, []);
 
   const saveStanding = useCallback((s: StandingEntry) => {
@@ -413,28 +418,24 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       const next = idx >= 0 ? prev.map(x => (x.id === s.id ? s : x)) : [...prev, s];
       return next.sort((a, b) => a.category.localeCompare(b.category) || a.position - b.position);
     });
-    if (isSupabaseConnected()) SupabaseService.upsertStanding(s).then(warnCloudFail);
+    SupabaseService.upsertStanding(s).then(warnCloudFail);
   }, []);
 
   const removeStanding = useCallback((id: string) => {
     _setStandings(prev => prev.filter(x => x.id !== id));
-    if (isSupabaseConnected()) SupabaseService.deleteStanding(id).then(warnCloudFail);
+    SupabaseService.deleteStanding(id).then(warnCloudFail);
   }, []);
 
   const setEvents = useCallback((e: Event[]) => {
     _setEvents(e);
     StorageService.setEvents(e);
-    if (isSupabaseConnected()) SupabaseService.setEvents(e);
+    SupabaseService.setEvents(e);
   }, []);
 
   const setOrders = useCallback((o: Order[]) => {
     _setOrders(o);
     StorageService.setOrders(o);
-    if (isSupabaseConnected()) {
-      SupabaseService.setOrders(o).then(ok => {
-        if (!ok) toast.error('No se pudo guardar el cambio en la nube — cerrá sesión y volvé a entrar al panel.');
-      });
-    }
+    SupabaseService.setOrders(o).then(warnCloudFail);
   }, []);
 
   // Alta de pedido desde el checkout (anónimo): insert plano, no upsert.
@@ -444,25 +445,25 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       StorageService.setOrders(next);
       return next;
     });
-    if (isSupabaseConnected()) SupabaseService.addOrder(order);
+    SupabaseService.addOrder(order);
   }, []);
 
   const setCategories = useCallback((c: Category[]) => {
     _setCategories(c);
     StorageService.setCategories(c);
-    if (isSupabaseConnected()) SupabaseService.setCategories(c);
+    SupabaseService.setCategories(c);
   }, []);
 
   const setClubs = useCallback((c: Club[]) => {
     _setClubs(c);
     StorageService.setClubs(c);
-    if (isSupabaseConnected()) SupabaseService.setClubs(c);
+    SupabaseService.setClubs(c);
   }, []);
 
   const setAnnouncements = useCallback((a: Announcement[]) => {
     _setAnnouncements(a);
     StorageService.setAnnouncements(a);
-    if (isSupabaseConnected()) SupabaseService.setAnnouncements(a);
+    SupabaseService.setAnnouncements(a);
   }, []);
 
   const setCart = useCallback((c: CartItem[]) => {
@@ -3233,7 +3234,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteEventConfirm(null)}
                 onConfirm={() => {
-                  if (isSupabaseConnected()) SupabaseService.deleteEvent(deleteEventConfirm);
+                  SupabaseService.deleteEvent(deleteEventConfirm);
                   setEvents(events.filter(e => e.id !== deleteEventConfirm));
                   setDeleteEventConfirm(null);
                 }}
@@ -3395,7 +3396,7 @@ function AdminPage() {
                     <span className="font-display font-semibold text-navy-700">{cat.name}</span>
                     <button
                       onClick={() => {
-                        if (isSupabaseConnected()) SupabaseService.deleteCategory(cat.id);
+                        SupabaseService.deleteCategory(cat.id);
                         setCategories(categories.filter(c => c.id !== cat.id));
                       }}
                       className="text-gray-400 hover:text-red-500 transition-colors"
@@ -3487,7 +3488,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteClubConfirm(null)}
                 onConfirm={() => {
-                  if (isSupabaseConnected()) SupabaseService.deleteClub(deleteClubConfirm);
+                  SupabaseService.deleteClub(deleteClubConfirm);
                   setClubs(clubs.filter(c => c.id !== deleteClubConfirm));
                   setDeleteClubConfirm(null);
                 }}
@@ -3587,7 +3588,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteAnnouncementConfirm(null)}
                 onConfirm={() => {
-                  if (isSupabaseConnected()) SupabaseService.deleteAnnouncement(deleteAnnouncementConfirm);
+                  SupabaseService.deleteAnnouncement(deleteAnnouncementConfirm);
                   setAnnouncements(announcements.filter(a => a.id !== deleteAnnouncementConfirm));
                   setDeleteAnnouncementConfirm(null);
                 }}

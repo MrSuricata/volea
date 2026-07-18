@@ -73,20 +73,25 @@ export const supabaseReady: Promise<boolean> = (async () => {
       console.error('No se pudo crear la sesión desde el magic link:', e);
     }
   }
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2500);
-    const res = await fetch(`${supabaseUrl}/rest/v1/`, {
-      method: 'HEAD',
-      headers: { apikey: supabaseAnonKey },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    // Any HTTP response (even 401/404) means DNS resolved + server is up.
-    // Network errors throw and land in the catch below.
-    _healthy = res.status >= 200 && res.status < 600;
-  } catch {
-    _healthy = false;
+  // Chequeo con reintento: Supabase free "frío" puede tardar en la primera
+  // respuesta. Un timeout corto de un solo intento daba falsos negativos que
+  // mandaban la app a datos viejos y hacían que las escrituras no llegaran a
+  // la nube. 2 intentos de 6s; cualquier respuesta HTTP (incluso 401/404)
+  // significa DNS + servidor arriba.
+  for (let intento = 0; intento < 2 && !_healthy; intento++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+        method: 'HEAD',
+        headers: { apikey: supabaseAnonKey },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      _healthy = res.status >= 200 && res.status < 600;
+    } catch {
+      _healthy = false;
+    }
   }
   _checked = true;
   return _healthy;
