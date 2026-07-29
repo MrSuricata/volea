@@ -531,6 +531,8 @@ git commit -m "feat: UI del gestor migrada (dialogos, pasos, pantallas) + Torneo
 
 ### Task V4: Sync local-first (merge puro con TDD + hook)
 
+> **SUPERSEDIDO POR REVIEW:** el código inline de useSyncTorneos de este task tenía 3 críticos (race de flags en push, conflictos no excluidos del push, resurrección de borrados) — la implementación real en el repo es la corregida; ver commits.
+
 **Files:**
 - Create: `src/torneos/sync.ts`
 - Test: `src/torneos/sync.test.ts`
@@ -1006,8 +1008,11 @@ Los criterios:
 2. **Torneo completo online**: crear "E2E Web" (formato grupos, cat B), 8 parejas, sortear, cargar los 12 resultados, armar llave recomendada, jugarla, terminar. Verificar podio + que `rk_torneos.fase = 'terminado'` y el ranking del gestor sumó.
 3. **Offline**: con el torneo abierto, `browserContext.setOffline(true)` (Playwright), cargar 2-3 resultados → indicador "⚠ Sin conexión", los cambios se ven en la UI; `setOffline(false)` → en <35 s (reintento periódico) el indicador pasa a "✓" y `execute_sql` muestra los resultados en `data`. ESTE ES EL CRITERIO ESTRELLA.
 4. **Seguridad**: repetir los curl anon de V2 (select 200 con visibles; insert 401/403). Además `update` anon → debe fallar.
-5. **Suite**: `npm test` (85) + `npx tsc -b` + `npm run build` verdes.
+5. **Suite**: `npm test` (87) + `npx tsc -b` + `npm run build` verdes.
 6. Limpiar TODO lo de prueba: torneos E2E borrados desde el gestor (verifica el delete-sync), jugadores de prueba borrados, admin temporal eliminado. `select count(*) from rk_torneos;` → solo lo real de Brian (o 0 si aún no importó).
+7. **Conflicto real**: dos contextos de navegador (o dos `BrowserContext` de Playwright) logueados como el mismo admin, editando el MISMO torneo en paralelo → al segundo en pushear le debe aparecer el banner de conflicto. Probar la resolución en ambos sentidos (en dos torneos de prueba distintos, para no repetir setup): "Mi versión" en uno, "La del server" en el otro → verificar que ninguno pierde datos y que el banner desaparece en los dos casos tras resolver.
+8. **Borrado no resucita**: borrar un torneo de prueba desde el gestor y apretar "Refrescar" inmediatamente (antes de que termine el push del delete) → el torneo NO debe reaparecer en la lista ni en `rk_torneos`.
+9. **Carga rápida con red lenta**: con Playwright route throttling (latencia alta / ancho de banda limitado sobre las rutas de Supabase) cargar varios resultados seguidos rápido en un torneo → verificar que ninguno se pierde: todos terminan reflejados en `rk_torneos.data` una vez que drena la cola de pushes.
 
 - [ ] **Step 2: Actualizar `GUIA-USO.md` de pickle-torneos** (repo `pickle-torneos`, commit propio allá): agregar al principio:
 ```markdown

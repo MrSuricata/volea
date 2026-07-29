@@ -172,13 +172,17 @@ describe('unirJugadores', () => {
 });
 
 describe('reasignarJugador', () => {
-  it('reescribe jugadorIds de deId a aId en las parejas', () => {
-    const torneos = [torneoBase({
-      parejas: [{ id: 'p', nombre: 'X y Y', jugadorIds: ['j2', 'j9'] }, { id: 'q', nombre: 'Z', jugadorIds: ['j5'] }],
-    })];
+  it('reescribe jugadorIds de deId a aId en las parejas; preserva la referencia de torneos no afectados', () => {
+    const torneos = [
+      torneoBase({
+        parejas: [{ id: 'p', nombre: 'X y Y', jugadorIds: ['j2', 'j9'] }, { id: 'q', nombre: 'Z', jugadorIds: ['j5'] }],
+      }),
+      torneoBase({ id: 'sinCambios', parejas: [{ id: 'r', nombre: 'W', jugadorIds: ['j7'] }] }),
+    ];
     const r = reasignarJugador(torneos, 'j2', 'j1');
     expect(r[0].parejas[0].jugadorIds).toEqual(['j1', 'j9']);
     expect(r[0].parejas[1].jugadorIds).toEqual(['j5']);
+    expect(r[1]).toBe(torneos[1]); // no afectado: misma referencia (clave para no marcarlo "sucio" en el sync)
   });
 });
 

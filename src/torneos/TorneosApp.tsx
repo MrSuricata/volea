@@ -55,7 +55,17 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
     if (!t) return;
     const r = await reconciliarTorneo(t, estado.jugadores, dialogos);
     if (r.cancelado) return;
-    setEstado((e) => ({ ...e, jugadores: r.jugadores, torneos: e.torneos.map((x) => (x.id === torneoId ? r.torneo : x)) }));
+    // reconciliarTorneo tarda (pregunta al usuario con dialogos): para cuando `r` resuelve,
+    // el estado puede haber avanzado (un pull-merge, otra pestaña). Aplicar como DELTA
+    // dentro del updater en vez de pisar con la foto vieja de estado.jugadores/torneos.
+    setEstado((e) => {
+      const porId = new Map(e.jugadores.map((j) => [j.id, j]));
+      for (const j of r.jugadores) porId.set(j.id, j); // r gana por id (altas y alias nuevos de esta reconciliacion)
+      const jugadores = [...porId.values()];
+      const existe = e.torneos.some((x) => x.id === torneoId);
+      const torneos = existe ? e.torneos.map((x) => (x.id === torneoId ? r.torneo : x)) : e.torneos;
+      return { ...e, jugadores, torneos };
+    });
   }
 
   async function crearTorneo() {
@@ -130,6 +140,7 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
         const t = dato.torneo;
         const formaValida = typeof t.id === 'string' && typeof t.nombre === 'string' && Array.isArray(t.parejas) && Array.isArray(t.grupos) && Array.isArray(t.partidosGrupo);
         if (!formaValida) throw new Error('El archivo de torneo está dañado o incompleto');
+        if (typeof t.creadoEl !== 'string' || !t.creadoEl) throw new Error('Archivo sin fecha de creación');
         setEstado((e) => {
           const idsJ = new Set(e.jugadores.map((j) => j.id));
           const jugadoresNuevos = (dato.jugadores ?? []).filter((j) => j && typeof j.id === 'string' && !idsJ.has(j.id));

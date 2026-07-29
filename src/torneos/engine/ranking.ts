@@ -111,13 +111,19 @@ export function unirJugadores(jugadores: Jugador[], idQueda: string, idAbsorbido
 }
 
 // Reescribe un jugadorId por otro en todas las parejas (para cuando se fusionan personas).
+// Preserva la referencia de los torneos no afectados (ninguna pareja con deId): el sync
+// local-first marca "sucio" por cambio de referencia, asi que tocar TODOS los torneos por
+// una fusion de jugadores en uno solo forzaria un push de todo el padron de torneos.
 export function reasignarJugador(torneos: Torneo[], deId: string, aId: string): Torneo[] {
-  return torneos.map((t) => ({
-    ...t,
-    parejas: t.parejas.map((p) =>
-      p.jugadorIds && p.jugadorIds.includes(deId)
-        ? { ...p, jugadorIds: p.jugadorIds.map((id) => (id === deId ? aId : id)) }
-        : p,
-    ),
-  }));
+  return torneos.map((t) => {
+    if (!t.parejas.some((p) => p.jugadorIds && p.jugadorIds.includes(deId))) return t; // sin cambios: misma referencia
+    return {
+      ...t,
+      parejas: t.parejas.map((p) =>
+        p.jugadorIds && p.jugadorIds.includes(deId)
+          ? { ...p, jugadorIds: p.jugadorIds.map((id) => (id === deId ? aId : id)) }
+          : p,
+      ),
+    };
+  });
 }
