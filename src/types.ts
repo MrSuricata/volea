@@ -68,6 +68,47 @@ export interface LedgerEntry {
   settledMethod: 'mp' | 'efectivo' | 'transferencia' | null;
 }
 
+export type SocioName = 'brian' | 'paula' | 'gaston';
+
+/**
+ * Movimiento de cuentas entre socios (reparto Brian 50% / Paula 25% / Gastón 25%).
+ * Los impactos guardan cuánto suma (+debe) o resta (−a favor) al saldo de cada
+ * socio; siempre suman ~0. Positivo = le debe al grupo, negativo = a favor.
+ */
+export interface SocioMove {
+  id: string;
+  area: 'marca' | 'showroom' | 'cafeteria' | 'crp' | 'argentinos' | 'otros';
+  tipo: 'gasto' | 'pago' | 'venta' | 'ajuste';
+  periodo: string | null; // etiqueta del Excel histórico (mes o evento) cuando no hay fecha
+  fecha: string | null; // YYYY-MM-DD
+  descripcion: string;
+  monto: number;
+  pagador: SocioName | null; // en gastos: quién puso la plata
+  de: SocioName | null; // en pagos: quién paga · en ventas: a quién le corresponde
+  para: SocioName | null; // en pagos: quién recibe · en ventas: quién cobró (y debe)
+  moneda: 'UYU' | 'ARS';
+  impBrian: number;
+  impPaula: number;
+  impGaston: number;
+  source: string;
+  createdAt: string;
+}
+
+/** Alta de movimiento de socios desde el admin (los impactos se calculan antes de guardar). */
+export interface SocioMoveInput {
+  area: SocioMove['area'];
+  tipo: 'gasto' | 'pago';
+  descripcion: string;
+  monto: number;
+  fecha: string | null;
+  pagador: SocioName | null;
+  de: SocioName | null;
+  para: SocioName | null;
+  impBrian: number;
+  impPaula: number;
+  impGaston: number;
+}
+
 export interface CartItem {
   product: Product;
   quantity: number;

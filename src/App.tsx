@@ -2706,6 +2706,7 @@ function AdminPage() {
   // Caja: callbacks con identidad estable para no re-disparar el fetch del
   // ledger en cada re-render de AdminPage (sidebar, auth refresh, etc.).
   const loadLedger = useCallback(() => SupabaseService.getLedger(), []);
+  const loadLedgerFull = useCallback(() => SupabaseService.getLedger(5000), []);
   const revertLedgerEntry = useCallback(async (id: string) => {
     const result = await SupabaseService.revertLedgerEntry(id);
     // Si se repuso stock, las otras pestañas (Stock, Productos) deben verlo.
@@ -3600,7 +3601,14 @@ function AdminPage() {
         {/* Caja Tab (ventas/gastos del bot de Telegram) */}
         {activeTab === 'caja' && (
           <div className="fade-in">
-            <AdminCajaTab loadLedger={loadLedger} revertEntry={revertLedgerEntry} />
+            <AdminCajaTab
+              loadLedger={loadLedger}
+              loadLedgerFull={loadLedgerFull}
+              revertEntry={revertLedgerEntry}
+              loadSocioMoves={SupabaseService.getSocioMoves}
+              addSocioMove={SupabaseService.addSocioMove}
+              deleteSocioMove={SupabaseService.deleteSocioMove}
+            />
           </div>
         )}
 

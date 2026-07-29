@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Check, X, Info, MessageCircle } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Check, X, Info, MessageCircle, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry } from '../types';
+import type { LedgerEntry, SocioMove, SocioMoveInput } from '../types';
+import { AdminSociosSection } from './AdminSociosSection';
+import { exportCajaExcel } from '../utils/cajaExcel';
 
 const TZ = 'America/Montevideo';
 
@@ -52,9 +54,13 @@ const PAYMENT_LABELS: Record<string, string> = {
   transferencia: 'Transferencia',
 };
 
-export function AdminCajaTab({ loadLedger, revertEntry }: {
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, addSocioMove, deleteSocioMove }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
+  loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
+  loadSocioMoves: () => Promise<SocioMove[] | null>;
+  addSocioMove: (input: SocioMoveInput) => Promise<boolean>;
+  deleteSocioMove: (id: string) => Promise<boolean>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +69,9 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
   const [kind, setKind] = useState<KindFilter>('todos');
   const [revertConfirm, setRevertConfirm] = useState<string | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
+  const [socioMoves, setSocioMoves] = useState<SocioMove[] | null>(null);
+  const [sociosLoading, setSociosLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   // Secuencia de fetches: si una respuesta vieja llega después de una nueva
   // (ej: refresh disparado justo antes de confirmar una anulación), se ignora.
@@ -83,7 +92,34 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
     setLoading(false);
   }, [loadLedger]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  const refreshSocios = useCallback(async () => {
+    setSociosLoading(true);
+    const data = await loadSocioMoves();
+    setSocioMoves(data);
+    setSociosLoading(false);
+  }, [loadSocioMoves]);
+
+  useEffect(() => { refresh(); refreshSocios(); }, [refresh, refreshSocios]);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      // Se baja el ledger completo (la vista se corta en 500) + cuentas socios.
+      const [full, socios] = await Promise.all([loadLedgerFull(), loadSocioMoves()]);
+      if (full === null) {
+        toast.error('No se pudo leer la caja. Verificá tu sesión de admin.');
+        return;
+      }
+      await exportCajaExcel(full, socios);
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error('Error exportando caja:', err);
+      toast.error('No se pudo generar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -159,13 +195,22 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Caja</h1>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExport}
+            disabled={exporting || loading}
+            className="bg-white hover:bg-gray-50 disabled:opacity-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+          >
+            <FileDown size={16} /> {exporting ? 'Generando…' : 'Descargar Excel'}
+          </button>
+          <button
+            onClick={() => { refresh(); refreshSocios(); }}
+            disabled={loading}
+            className="bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
+          </button>
+        </div>
       </div>
 
       {/* Info banner */}
@@ -382,6 +427,15 @@ export function AdminCajaTab({ loadLedger, revertEntry }: {
           )}
         </div>
       )}
+
+      {/* Cuentas entre socios (histórico del Excel + altas desde acá) */}
+      <AdminSociosSection
+        moves={socioMoves}
+        loading={sociosLoading}
+        onRefresh={refreshSocios}
+        onAdd={addSocioMove}
+        onDelete={deleteSocioMove}
+      />
     </div>
   );
 }

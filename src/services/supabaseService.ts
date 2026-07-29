@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput } from '../types';
 
 function orderToRow(o: Order) {
   return {
@@ -209,7 +209,7 @@ export const SupabaseService = {
   },
 
   // ── Caja: libro de ventas/gastos del bot de Telegram (solo admins vía RLS) ──
-  async getLedger(): Promise<LedgerEntry[] | null> {
+  async getLedger(limit = 500): Promise<LedgerEntry[] | null> {
     if (!supabase || !isSupabaseConnected()) return null;
     // Sin sesión de magic link, RLS devuelve lista vacía sin error: mejor
     // avisar el problema de sesión que mostrar una caja "vacía" engañosa.
@@ -217,7 +217,7 @@ export const SupabaseService = {
     if (!session) return null;
     const { data, error } = await supabase.from('bot_ledger').select('*')
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(limit);
     if (error) { console.error('Error fetching ledger:', error); return null; }
     return (data || []).map(row => ({
       id: row.id,
@@ -252,6 +252,71 @@ export const SupabaseService = {
       stockRestored: data?.stock_restored === true,
       error: typeof data?.error === 'string' ? data.error : undefined,
     };
+  },
+
+  // ── Cuentas entre socios (tabla socio_moves, solo admins vía RLS) ──
+  async getSocioMoves(): Promise<SocioMove[] | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await supabase.from('socio_moves').select('*')
+      .order('orden', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+      .limit(3000);
+    if (error) { console.error('Error fetching socio moves:', error); return null; }
+    return (data || []).map(row => ({
+      id: row.id,
+      area: row.area,
+      tipo: row.tipo,
+      periodo: row.periodo ?? null,
+      fecha: row.fecha ?? null,
+      descripcion: row.descripcion || '',
+      monto: Number(row.monto) || 0,
+      pagador: row.pagador ?? null,
+      de: row.de ?? null,
+      para: row.para ?? null,
+      moneda: row.moneda === 'ARS' ? 'ARS' as const : 'UYU' as const,
+      impBrian: Number(row.imp_brian) || 0,
+      impPaula: Number(row.imp_paula) || 0,
+      impGaston: Number(row.imp_gaston) || 0,
+      source: row.source || '',
+      createdAt: row.created_at || '',
+    }));
+  },
+
+  async addSocioMove(input: SocioMoveInput): Promise<boolean> {
+    if (!supabase) return false;
+    // Los saldos siempre tienen que cerrar en cero: se rechaza cualquier alta
+    // cuyo reparto no cuadre (protege la contabilidad ante bugs del form).
+    const suma = input.impBrian + input.impPaula + input.impGaston;
+    if (Math.abs(suma) > 0.04 || !(input.monto > 0)) {
+      console.error('Movimiento de socios inválido:', input);
+      return false;
+    }
+    const { error } = await supabase.from('socio_moves').insert({
+      area: input.area,
+      tipo: input.tipo,
+      fecha: input.fecha,
+      descripcion: input.descripcion,
+      monto: Math.round(input.monto * 100) / 100,
+      pagador: input.pagador,
+      de: input.de,
+      para: input.para,
+      moneda: 'UYU',
+      imp_brian: input.impBrian,
+      imp_paula: input.impPaula,
+      imp_gaston: input.impGaston,
+      source: 'web',
+    });
+    if (error) { console.error('Error adding socio move:', error); return false; }
+    return true;
+  },
+
+  async deleteSocioMove(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await supabase.from('socio_moves').delete().eq('id', id);
+    if (error) { console.error('Error deleting socio move:', error); return false; }
+    return true;
   },
 
   // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──
