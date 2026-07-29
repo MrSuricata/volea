@@ -11,6 +11,32 @@ const MES_NUM: Record<string, number> = {
  * mes son del año 2026 (series del Excel histórico); los movimientos nuevos y
  * las cuotas de 2027 llevan fecha real.
  */
+/**
+ * Ventas brutas del negocio a partir del libro de socios. Las filas importadas
+ * del Excel guardan los REPARTOS (la parte que el que cobró les debe a los
+ * otros): se agrupan por venta y se dividen por la fracción repartida (50% si
+ * cobró Brian, 75% si cobró Paula o Gastón). Las ventas cargadas desde la web
+ * ya guardan el monto bruto directo.
+ */
+export function ventasBrutasSocios(moves: SocioMove[]): number {
+  let total = 0;
+  const grupos = new Map<string, { shares: number; f: number }>();
+  for (const m of moves) {
+    if (m.tipo !== 'venta' || m.moneda !== 'UYU') continue;
+    if (m.source.startsWith('excel')) {
+      const f = m.para === 'brian' ? 0.5 : 0.75;
+      const key = `${m.fecha || ''}|${(m.descripcion || '').trim().toUpperCase()}|${m.para}`;
+      const g = grupos.get(key) || { shares: 0, f };
+      g.shares += m.monto;
+      grupos.set(key, g);
+    } else {
+      total += m.monto;
+    }
+  }
+  for (const g of grupos.values()) total += g.shares / g.f;
+  return total;
+}
+
 export function esCuotaFutura(m: SocioMove, hoy: Date = new Date()): boolean {
   if (m.tipo !== 'gasto') return false;
   const actual = hoy.getFullYear() * 100 + (hoy.getMonth() + 1);

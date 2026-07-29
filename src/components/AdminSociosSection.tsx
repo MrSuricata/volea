@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Users, Plus, Trash2, Check, X, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SocioMove, SocioMoveInput, SocioName } from '../types';
-import { esCuotaFutura } from '../utils/socios';
+import { esCuotaFutura, ventasBrutasSocios } from '../utils/socios';
 
 const NOMBRES: Record<SocioName, string> = { brian: 'Brian', paula: 'Paula', gaston: 'Gastón' };
 const SOCIOS: SocioName[] = ['brian', 'paula', 'gaston'];
@@ -50,13 +50,28 @@ function impactosPago(monto: number, de: SocioName, para: SocioName) {
   return imp;
 }
 
+/** Venta cobrada por un socio: les debe a los otros su parte (50/25/25 del total). */
+function impactosVenta(monto: number, cobrador: SocioName) {
+  const CUOTA: Record<SocioName, number> = { brian: 0.5, paula: 0.25, gaston: 0.25 };
+  const imp: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
+  let debe = 0;
+  for (const s of SOCIOS) {
+    if (s === cobrador) continue;
+    const parte = Math.round(monto * CUOTA[s] * 100) / 100;
+    imp[s] = -parte; // queda a favor: el cobrador le debe su parte
+    debe += parte;
+  }
+  imp[cobrador] = Math.round(debe * 100) / 100;
+  return imp;
+}
+
 const hoyISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 type FormState = {
-  tipo: 'gasto' | 'pago';
+  tipo: 'gasto' | 'pago' | 'venta';
   area: SocioMove['area'];
   descripcion: string;
   monto: string;
@@ -64,11 +79,12 @@ type FormState = {
   pagador: SocioName;
   de: SocioName;
   para: SocioName;
+  cobrador: SocioName;
 };
 
 const FORM_INICIAL: FormState = {
   tipo: 'gasto', area: 'marca', descripcion: '', monto: '', fecha: hoyISO(),
-  pagador: 'brian', de: 'brian', para: 'gaston',
+  pagador: 'brian', de: 'brian', para: 'gaston', cobrador: 'gaston',
 };
 
 export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete }: {
@@ -90,18 +106,23 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
   const cortes = useMemo(() => {
     const hoy: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
     const total: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
-    let futurasMonto = 0, futurasN = 0;
+    let futurasMonto = 0, futurasN = 0, invertidoTotal = 0, invertidoHoy = 0;
     const ahora = new Date();
     for (const m of moves || []) {
       if (m.moneda !== 'UYU') continue;
       total.brian += m.impBrian; total.paula += m.impPaula; total.gaston += m.impGaston;
-      if (esCuotaFutura(m, ahora)) {
+      const futura = esCuotaFutura(m, ahora);
+      if (m.tipo === 'gasto') {
+        invertidoTotal += m.monto;
+        if (!futura) invertidoHoy += m.monto;
+      }
+      if (futura) {
         futurasMonto += m.monto; futurasN++;
       } else {
         hoy.brian += m.impBrian; hoy.paula += m.impPaula; hoy.gaston += m.impGaston;
       }
     }
-    return { hoy, total, futurasMonto, futurasN };
+    return { hoy, total, futurasMonto, futurasN, invertidoHoy, invertidoTotal, ventas: ventasBrutasSocios(moves || []) };
   }, [moves]);
 
   const saldos = modo === 'hoy' ? cortes.hoy : cortes.total;
@@ -134,13 +155,15 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
   const montoOk = !isNaN(montoNum) && montoNum > 0;
   const preview = useMemo(() => {
     if (!montoOk) return null;
-    return form.tipo === 'gasto'
-      ? impactosGasto(montoNum, form.pagador)
-      : impactosPago(montoNum, form.de, form.para);
-  }, [form.tipo, form.pagador, form.de, form.para, montoNum, montoOk]);
+    if (form.tipo === 'gasto') return impactosGasto(montoNum, form.pagador);
+    if (form.tipo === 'venta') return impactosVenta(montoNum, form.cobrador);
+    return impactosPago(montoNum, form.de, form.para);
+  }, [form.tipo, form.pagador, form.de, form.para, form.cobrador, montoNum, montoOk]);
 
   const formValido = montoOk &&
-    (form.tipo === 'gasto' ? form.descripcion.trim().length > 0 : form.de !== form.para);
+    (form.tipo === 'gasto' ? form.descripcion.trim().length > 0
+      : form.tipo === 'pago' ? form.de !== form.para
+      : true);
 
   const handleSave = async () => {
     if (!formValido || !preview || saving) return;
@@ -148,21 +171,22 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
     const ok = await onAdd({
       area: form.tipo === 'pago' ? 'marca' : form.area,
       tipo: form.tipo,
-      descripcion: form.tipo === 'gasto'
-        ? form.descripcion.trim()
-        : (form.descripcion.trim() || `Pago ${NOMBRES[form.de]} a ${NOMBRES[form.para]}`),
+      descripcion: form.descripcion.trim()
+        || (form.tipo === 'pago' ? `Pago ${NOMBRES[form.de]} a ${NOMBRES[form.para]}`
+          : form.tipo === 'venta' ? 'Venta' : ''),
       monto: montoNum,
       fecha: form.fecha || null,
       pagador: form.tipo === 'gasto' ? form.pagador : null,
       de: form.tipo === 'pago' ? form.de : null,
-      para: form.tipo === 'pago' ? form.para : null,
+      para: form.tipo === 'pago' ? form.para : form.tipo === 'venta' ? form.cobrador : null,
       impBrian: preview.brian,
       impPaula: preview.paula,
       impGaston: preview.gaston,
     });
     setSaving(false);
     if (!ok) { toast.error('No se pudo guardar el movimiento'); return; }
-    toast.success(form.tipo === 'gasto' ? 'Gasto agregado a las cuentas' : 'Pago registrado');
+    toast.success(form.tipo === 'gasto' ? 'Gasto agregado a las cuentas'
+      : form.tipo === 'venta' ? 'Venta repartida entre los socios' : 'Pago registrado');
     setShowForm(false);
     setForm({ ...FORM_INICIAL, fecha: hoyISO() });
     onRefresh();
@@ -182,7 +206,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
   const selectCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy-700';
 
   return (
-    <div className="mt-10">
+    <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <h2 className="font-display text-xl font-bold text-navy-700 flex items-center gap-2">
           <Users size={20} /> Cuentas entre socios
@@ -202,6 +226,8 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
           {' '}<b>Brian 50% · Paula 25% · Gastón 25%</b>. Saldo positivo = le debe al grupo;
           negativo = el grupo le debe. <b>Al día de hoy</b> cuenta solo las cuotas ya vencidas;
           {' '}<b>Total comprometido</b> incluye también las cuotas que faltan vencer.
+          Ojo: las ventas de la Caja (bot) <b>no</b> entran solas acá — cuando repartan esa plata,
+          cargala con <b>Nuevo movimiento → Venta</b>.
         </p>
       </div>
 
@@ -273,6 +299,37 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
               })}{' '}ARS
             </div>
           )}
+
+          {/* Números del negocio */}
+          <h3 className="font-display text-sm font-bold text-gray-500 uppercase mb-2 mt-6">Números del negocio</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="text-xs font-display font-semibold text-gray-500 uppercase mb-1">Ventas totales</div>
+              <p className="font-display text-2xl font-bold text-green-600">{money(cortes.ventas)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">reconstruidas de los repartos + ventas cargadas acá</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="text-xs font-display font-semibold text-gray-500 uppercase mb-1">Invertido en gastos</div>
+              <p className="font-display text-2xl font-bold text-red-500">
+                {money(modo === 'hoy' ? cortes.invertidoHoy : cortes.invertidoTotal)}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {modo === 'hoy' ? 'solo cuotas vencidas' : 'incluye cuotas futuras'}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <div className="text-xs font-display font-semibold text-gray-500 uppercase mb-1">Balance ventas − gastos</div>
+              {(() => {
+                const bal = cortes.ventas - (modo === 'hoy' ? cortes.invertidoHoy : cortes.invertidoTotal);
+                return (
+                  <p className={`font-display text-2xl font-bold ${bal >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    {bal < 0 ? '−' : ''}{money(Math.abs(bal))}
+                  </p>
+                );
+              })()}
+              <p className="text-xs text-gray-400 mt-0.5">no descuenta el stock sin vender</p>
+            </div>
+          </div>
 
           {/* Filtros */}
           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -350,7 +407,9 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                         <p className="text-xs text-gray-400">
                           {m.tipo === 'gasto' && (m.pagador ? `Pagó ${NOMBRES[m.pagador]}` : 'Pagaron varios')}
                           {m.tipo === 'pago' && m.de && m.para && `${NOMBRES[m.de]} → ${NOMBRES[m.para]}`}
-                          {m.tipo === 'venta' && m.de && m.para && `Cobró ${NOMBRES[m.para]} · parte de ${NOMBRES[m.de]}`}
+                          {m.tipo === 'venta' && m.para && (m.de
+                            ? `Cobró ${NOMBRES[m.para]} · parte de ${NOMBRES[m.de]}`
+                            : `Cobró ${NOMBRES[m.para]} · repartida 50/25/25`)}
                           {m.moneda === 'ARS' && ' · ARS'}
                         </p>
                       </td>
@@ -410,15 +469,20 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
             </div>
 
             <div className="flex bg-gray-100 rounded-lg p-1 mb-4">
-              {(['gasto', 'pago'] as const).map(t => (
+              {([['gasto', 'Gasto'], ['venta', 'Venta'], ['pago', 'Pago']] as const).map(([t, lbl]) => (
                 <button key={t} onClick={() => setForm(f => ({ ...f, tipo: t }))}
                   className={`flex-1 py-2 rounded-md text-sm font-display font-semibold transition-colors ${
                     form.tipo === t ? 'bg-white text-navy-700 shadow-sm' : 'text-gray-500'
                   }`}>
-                  {t === 'gasto' ? 'Gasto compartido' : 'Pago entre socios'}
+                  {lbl}
                 </button>
               ))}
             </div>
+            <p className="text-xs text-gray-400 -mt-2 mb-3">
+              {form.tipo === 'gasto' && 'Gasto compartido: el que pagó queda a favor, los otros deben su parte.'}
+              {form.tipo === 'venta' && 'Venta cobrada por un socio: les debe a los otros su parte del total.'}
+              {form.tipo === 'pago' && 'Plata real que un socio le pasó a otro para saldar cuentas.'}
+            </p>
 
             <div className="space-y-3">
               {form.tipo === 'gasto' ? (
@@ -440,6 +504,29 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                   <div>
                     <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Pagó</label>
                     <select value={form.pagador} onChange={e => setForm(f => ({ ...f, pagador: e.target.value as SocioName }))} className={selectCls}>
+                      {SOCIOS.map(s => <option key={s} value={s}>{NOMBRES[s]}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : form.tipo === 'venta' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Área</label>
+                    <select value={form.area} onChange={e => setForm(f => ({ ...f, area: e.target.value as SocioMove['area'] }))} className={selectCls}>
+                      <option value="marca">Marca</option>
+                      <option value="cafeteria">Cafetería</option>
+                      <option value="showroom">Showroom</option>
+                      <option value="otros">Otros</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Descripción</label>
+                    <input type="text" value={form.descripcion} placeholder="Ej: ventas del bot — julio"
+                      onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} className={selectCls} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Cobró</label>
+                    <select value={form.cobrador} onChange={e => setForm(f => ({ ...f, cobrador: e.target.value as SocioName }))} className={selectCls}>
                       {SOCIOS.map(s => <option key={s} value={s}>{NOMBRES[s]}</option>)}
                     </select>
                   </div>
@@ -473,7 +560,9 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Monto ($)</label>
+                  <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">
+                    {form.tipo === 'venta' ? 'Total vendido ($)' : 'Monto ($)'}
+                  </label>
                   <input type="number" min="0" step="0.01" value={form.monto} placeholder="0"
                     onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} className={selectCls} />
                 </div>

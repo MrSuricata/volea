@@ -97,7 +97,7 @@ export interface SocioMove {
 /** Alta de movimiento de socios desde el admin (los impactos se calculan antes de guardar). */
 export interface SocioMoveInput {
   area: SocioMove['area'];
-  tipo: 'gasto' | 'pago';
+  tipo: 'gasto' | 'pago' | 'venta';
   descripcion: string;
   monto: number;
   fecha: string | null;

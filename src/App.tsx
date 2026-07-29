@@ -32,6 +32,7 @@ import { BlogListPage, BlogPostPage } from './components/BlogPages';
 import { StandingsPage } from './components/StandingsPage';
 import { AdminBlogTab } from './components/AdminBlogTab';
 import { AdminCajaTab } from './components/AdminCajaTab';
+import { AdminSociosTab } from './components/AdminSociosTab';
 import { AdminOrderModal } from './components/AdminOrderModal';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
@@ -2920,6 +2921,7 @@ function AdminPage() {
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
     { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
+    { id: 'socios', label: 'Socios', icon: <Users size={18} /> },
     { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
     { id: 'standings', label: 'Clasificación', icon: <Trophy size={18} /> },
     { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
@@ -3606,10 +3608,18 @@ function AdminPage() {
               loadLedgerFull={loadLedgerFull}
               revertEntry={revertLedgerEntry}
               loadSocioMoves={SupabaseService.getSocioMoves}
-              addSocioMove={SupabaseService.addSocioMove}
-              deleteSocioMove={SupabaseService.deleteSocioMove}
             />
           </div>
+        )}
+
+        {/* Socios Tab (cuentas entre socios + números del negocio) */}
+        {activeTab === 'socios' && (
+          <AdminSociosTab
+            loadLedgerFull={loadLedgerFull}
+            loadSocioMoves={SupabaseService.getSocioMoves}
+            addSocioMove={SupabaseService.addSocioMove}
+            deleteSocioMove={SupabaseService.deleteSocioMove}
+          />
         )}
 
         {/* Blog Tab */}

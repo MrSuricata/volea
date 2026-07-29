@@ -1,5 +1,5 @@
 import type { LedgerEntry, SocioMove, SocioName } from '../types';
-import { esCuotaFutura } from './socios';
+import { esCuotaFutura, ventasBrutasSocios } from './socios';
 
 const TZ = 'America/Montevideo';
 const NAVY = 'FF1F3557';
@@ -37,7 +37,10 @@ const cuandoSocio = (m: SocioMove) => (m.fecha ? fmtFecha(m.fecha) : (m.periodo 
 const quienSocio = (m: SocioMove) => {
   if (m.tipo === 'gasto') return m.pagador ? `Pagó ${NOMBRES[m.pagador]}` : 'Pagaron varios';
   if (m.tipo === 'pago') return m.de && m.para ? `${NOMBRES[m.de]} → ${NOMBRES[m.para]}` : '';
-  if (m.tipo === 'venta') return m.de && m.para ? `Cobró ${NOMBRES[m.para]} · parte de ${NOMBRES[m.de]}` : '';
+  if (m.tipo === 'venta') {
+    if (!m.para) return '';
+    return m.de ? `Cobró ${NOMBRES[m.para]} · parte de ${NOMBRES[m.de]}` : `Cobró ${NOMBRES[m.para]}`;
+  }
   return '';
 };
 
@@ -108,11 +111,16 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
       sHead.eachCell(c => { c.font = { name: 'Arial', size: 10, bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } }; });
       const ceros = () => ({ brian: 0, paula: 0, gaston: 0 } as Record<SocioName, number>);
       const alDia = ceros(), futuras = ceros();
-      let futMonto = 0, futN = 0;
+      let futMonto = 0, futN = 0, invHoy = 0, invTotal = 0;
       for (const m of uyu) {
-        const dest = esCuotaFutura(m, hoy) ? futuras : alDia;
+        const esFutura = esCuotaFutura(m, hoy);
+        const dest = esFutura ? futuras : alDia;
         dest.brian += m.impBrian; dest.paula += m.impPaula; dest.gaston += m.impGaston;
-        if (dest === futuras) { futMonto += m.monto; futN++; }
+        if (esFutura) { futMonto += m.monto; futN++; }
+        if (m.tipo === 'gasto') {
+          invTotal += m.monto;
+          if (!esFutura) invHoy += m.monto;
+        }
       }
       (Object.keys(alDia) as SocioName[]).forEach(k => {
         const total = alDia[k] + futuras[k];
@@ -128,6 +136,17 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
       if (futN > 0) {
         ws.addRow([`"Cuotas futuras" = ${futN} cuotas por $ ${futMonto.toLocaleString('es-UY', { minimumFractionDigits: 2 })} que vencen después de este mes.`]);
       }
+
+      ws.addRow([]);
+      const ventasNegocio = ventasBrutasSocios(socios);
+      const nHead = ws.addRow(['Números del negocio', 'Ventas ($)', 'Invertido ($)', 'Balance ($)', '', 'balance = ventas − gastos, sin descontar stock']);
+      nHead.eachCell(c => { c.font = { name: 'Arial', size: 10, bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } }; });
+      for (const [lbl, inv] of [['Al día de hoy', invHoy], ['Total comprometido', invTotal]] as const) {
+        const row = ws.addRow([lbl, Math.round(ventasNegocio * 100) / 100, Math.round(inv * 100) / 100,
+          Math.round((ventasNegocio - inv) * 100) / 100, '', '']);
+        for (let i = 2; i <= 4; i++) row.getCell(i).numFmt = MONEY;
+      }
+      ws.addRow(['Ventas = reconstruidas de los repartos entre socios + ventas cargadas en la web. No incluye ventas del bot sin repartir.']);
       const ars = socios.filter(m => m.moneda === 'ARS');
       if (ars.length > 0) {
         const arsB = ars.reduce((s, m) => s + m.impBrian, 0);

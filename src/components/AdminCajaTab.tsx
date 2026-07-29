@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Check, X, Info, MessageCircle, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, SocioMove, SocioMoveInput } from '../types';
-import { AdminSociosSection } from './AdminSociosSection';
+import type { LedgerEntry, SocioMove } from '../types';
 import { exportCajaExcel } from '../utils/cajaExcel';
 
 const TZ = 'America/Montevideo';
@@ -54,13 +53,11 @@ const PAYMENT_LABELS: Record<string, string> = {
   transferencia: 'Transferencia',
 };
 
-export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, addSocioMove, deleteSocioMove }: {
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
-  addSocioMove: (input: SocioMoveInput) => Promise<boolean>;
-  deleteSocioMove: (id: string) => Promise<boolean>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,8 +66,6 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [kind, setKind] = useState<KindFilter>('todos');
   const [revertConfirm, setRevertConfirm] = useState<string | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
-  const [socioMoves, setSocioMoves] = useState<SocioMove[] | null>(null);
-  const [sociosLoading, setSociosLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
   // Secuencia de fetches: si una respuesta vieja llega después de una nueva
@@ -92,14 +87,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     setLoading(false);
   }, [loadLedger]);
 
-  const refreshSocios = useCallback(async () => {
-    setSociosLoading(true);
-    const data = await loadSocioMoves();
-    setSocioMoves(data);
-    setSociosLoading(false);
-  }, [loadSocioMoves]);
-
-  useEffect(() => { refresh(); refreshSocios(); }, [refresh, refreshSocios]);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const handleExport = async () => {
     if (exporting) return;
@@ -204,7 +192,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
             <FileDown size={16} /> {exporting ? 'Generando…' : 'Descargar Excel'}
           </button>
           <button
-            onClick={() => { refresh(); refreshSocios(); }}
+            onClick={refresh}
             disabled={loading}
             className="bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
           >
@@ -427,15 +415,6 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           )}
         </div>
       )}
-
-      {/* Cuentas entre socios (histórico del Excel + altas desde acá) */}
-      <AdminSociosSection
-        moves={socioMoves}
-        loading={sociosLoading}
-        onRefresh={refreshSocios}
-        onAdd={addSocioMove}
-        onDelete={deleteSocioMove}
-      />
     </div>
   );
 }
