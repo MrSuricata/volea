@@ -42,9 +42,19 @@ export function mergeTorneos(args: {
     // sucio: si la base conocida no coincide con el server (incluida una base
     // desconocida, que nunca coincide) es CONFLICTO; de lo contrario el server
     // no avanzo desde la ultima vez que sincronizamos y el local sigue pendiente.
-    if (base[local.id] !== rem.updatedAt) conflictos.push(local.id);
+    if (base[local.id] !== rem.updatedAt) {
+      // CONFLICTO: la base NO avanza al updatedAt del server. Si adoptaramos
+      // rem.updatedAt aca, el proximo pull (con el mismo server y el mismo local
+      // sin resolver) dejaria de detectar el conflicto - se "autoresolveria" en
+      // silencio. Se deja la entrada vieja (o ausente si nunca hubo una) para que
+      // vuelva a marcarse en cada pull hasta que se resuelva explicitamente.
+      conflictos.push(local.id);
+      resultado.push(local);
+      if (local.id in base) nuevaBase[local.id] = base[local.id];
+      continue;
+    }
     resultado.push(local);
-    nuevaBase[local.id] = base[local.id] ?? rem.updatedAt;
+    nuevaBase[local.id] = rem.updatedAt;
   }
 
   for (const rem of remotos) {

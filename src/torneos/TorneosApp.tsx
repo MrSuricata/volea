@@ -53,14 +53,22 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
   async function vincularTorneo(torneoId: string) {
     const t = estado.torneos.find((x) => x.id === torneoId);
     if (!t) return;
-    const r = await reconciliarTorneo(t, estado.jugadores, dialogos);
+    const jugadoresAntes = estado.jugadores; // snapshot pre-modal: para detectar que jugadores toco la reconciliacion
+    const r = await reconciliarTorneo(t, jugadoresAntes, dialogos);
     if (r.cancelado) return;
     // reconciliarTorneo tarda (pregunta al usuario con dialogos): para cuando `r` resuelve,
-    // el estado puede haber avanzado (un pull-merge, otra pestaña). Aplicar como DELTA
-    // dentro del updater en vez de pisar con la foto vieja de estado.jugadores/torneos.
+    // el estado puede haber avanzado (un pull-merge, otra pestaña, un rename concurrente).
+    // reconciliarTorneo devuelve TODO el padron (lo toco o no), asi que no alcanza con
+    // "r gana por id" para cada id presente en r.jugadores - eso pisaria en silencio un
+    // cambio concurrente en un jugador que esta reconciliacion nunca toco. Solo overlay
+    // los que reconciliarTorneo efectivamente modifico (referencia distinta a jugadoresAntes)
+    // o dio de alta (id nuevo); el resto queda como este en e.jugadores.
     setEstado((e) => {
-      const porId = new Map(e.jugadores.map((j) => [j.id, j]));
-      for (const j of r.jugadores) porId.set(j.id, j); // r gana por id (altas y alias nuevos de esta reconciliacion)
+      const antesPorId = new Map(jugadoresAntes.map((j) => [j.id, j]));
+      const porId = new Map(e.jugadores.map((j) => [j.id, j])); // base: lo mas reciente
+      for (const j of r.jugadores) {
+        if (antesPorId.get(j.id) !== j) porId.set(j.id, j); // tocado por esta reconciliacion (alias nuevo o alta): aplicar
+      }
       const jugadores = [...porId.values()];
       const existe = e.torneos.some((x) => x.id === torneoId);
       const torneos = existe ? e.torneos.map((x) => (x.id === torneoId ? r.torneo : x)) : e.torneos;

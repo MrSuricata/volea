@@ -14,12 +14,13 @@ type Cache = {
   jugadoresBase: string[]; // ids de jugadores que sabemos que existen en el server (para poder borrar los que ya no estan)
   jugadoresSucios: boolean;
   configSucia: boolean;
+  conflictos: string[]; // ids con conflicto sin resolver; vive en el cache (no en un ref de resultado)
 };
 
 type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
 
 function cacheVacia(): Cache {
-  return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false };
+  return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false, conflictos: [] };
 }
 
 function leerCache(): Cache {
@@ -36,6 +37,7 @@ function leerCache(): Cache {
           jugadoresBase: c.jugadoresBase ?? [],
           jugadoresSucios: c.jugadoresSucios ?? false,
           configSucia: c.configSucia ?? false,
+          conflictos: c.conflictos ?? [],
         };
       }
     }
@@ -53,7 +55,10 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   const [cache, setCache] = useState<Cache>(() => leerCache());
   const [estadoSync, setEstadoSync] = useState<EstadoSync>('pendiente');
   const [conflictos, setConflictos] = useState<string[]>([]);
-  const conflictosRef = useRef<string[]>([]); // espejo sincronico de `conflictos`, para que push() los excluya sin esperar un render
+  // Espejo sincronico de `cache.conflictos`, para que push() los excluya sin esperar un
+  // render. UN SOLO escritor: el effect de persistencia/derivacion, de abajo, cada vez
+  // que `cache` cambia (garantizado post-commit, no una lectura inmediata tras setCache).
+  const conflictosRef = useRef<Set<string>>(new Set());
   const timerPush = useRef<number | null>(null);
   const cacheRef = useRef(cache);
   cacheRef.current = cache;
@@ -61,8 +66,7 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   const pedidoReentrada = useRef(false); // si llego un pedido mientras habia uno en vuelo, se encola UNA repeticion
   const avisosPorClave = useRef<Set<string>>(new Set()); // evita repetir el mismo aviso de dato invalido para siempre
   const ultimoAvisoGeneral = useRef(0); // rate-limit general (ms epoch de time del ultimo aviso "generico")
-  const resultadoPullRef = useRef<{ conflictos: string[] } | null>(null);
-  const resultadoPushRef = useRef<{ quedaAlgoSucio: boolean } | null>(null);
+  const ultimoPushFallo = useRef(false); // ultimo intento de push (o su ausencia de supabase): fallo? lo deriva el effect
 
   // Aviso rate-limitado: con `clave` se reporta UNA sola vez por clave (para siempre, hasta
   // reload); sin `clave` es un aviso "generico" limitado a 1 cada 60s para no floodear toasts
@@ -80,7 +84,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     avisarError(mensaje);
   }, [avisarError]);
 
-  // ---- PERSISTENCIA: reacciona a cache, nunca corre dentro de un updater de setCache ----
+  // ---- PERSISTENCIA + DERIVACION: unica fuente de verdad post-commit sobre `cache' ----
+  // Nunca corre dentro de un updater de setCache (evita el anti-patron de leer un ref de
+  // resultado justo despues de llamar setCache, que dependia de la evaluacion eager de
+  // updaters - una optimizacion de React, no parte de su contrato). `conflictos` vive en
+  // `cache.conflictos` (lo escribe el merge del pull, o resolverConflicto); este effect es
+  // el UNICO que propaga eso al estado React `conflictos` y al espejo sincronico `conflictosRef`,
+  // y el UNICO que deriva `estadoSync` a partir de las banderas sucias del cache.
   useEffect(() => {
     try {
       localStorage.setItem(CLAVE_CACHE, JSON.stringify(cache));
@@ -88,14 +98,25 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       console.error('[torneos sync] no se pudo persistir en localStorage', e);
       avisarLimitado('No se pudieron guardar los cambios en este navegador (almacenamiento lleno o bloqueado).');
     }
+
+    setConflictos(cache.conflictos);
+    conflictosRef.current = new Set(cache.conflictos);
+
+    const hayAlgoSucio = cache.sucios.length > 0 || cache.borrados.length > 0 || cache.jugadoresSucios || cache.configSucia;
+    if (!hayAlgoSucio) {
+      setEstadoSync('sincronizado');
+    } else {
+      setEstadoSync(ultimoPushFallo.current ? 'sinConexion' : 'pendiente');
+    }
   }, [cache, avisarLimitado]);
 
   // ---- PUSH: sube sucios + borrados + jugadores + config, con guard de reentrada ----
   const push = useCallback(async () => {
     if (enVuelo.current) { pedidoReentrada.current = true; return; }
-    if (!supabase) { setEstadoSync('sinConexion'); return; }
+    if (!supabase) { ultimoPushFallo.current = true; setEstadoSync('sinConexion'); return; }
     enVuelo.current = true;
     try {
+      ultimoPushFallo.current = false; // optimista: se marca true mas abajo si algo falla en este intento
       const c = cacheRef.current;
       const conflictoSet = new Set(conflictosRef.current);
       // snapshot: lo que vamos a subir es exactamente esto, tomado ANTES de los await.
@@ -114,8 +135,10 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
 
       const hayAlgoQueHacer = snapshotTorneos.size > 0 || snapshotBorrados.length > 0 || snapshotJugadoresSucios || snapshotConfigSucia;
       if (!hayAlgoQueHacer) {
-        // puede haber sucios igual: son los excluidos por conflicto, que siguen pendientes de resolver
-        setEstadoSync(c.sucios.length > 0 ? 'pendiente' : 'sincronizado');
+        // nada que subir ahora mismo (puede haber sucios igual: son los excluidos por
+        // conflicto, pendientes de resolver). `cache` no cambia en esta rama - la
+        // derivacion del effect ya reflejaba el estado correcto desde el cambio que
+        // disparo este push (una edicion, un pull, etc), no hace falta tocar nada aca.
         return;
       }
 
@@ -166,9 +189,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       // ---- borrados: delete de tombstones locales ----
       let borradosOk: string[] = [];
       if (snapshotBorrados.length > 0) {
-        const { error } = await supabase.from('rk_torneos').delete().in('id', snapshotBorrados);
-        if (!error) borradosOk = snapshotBorrados;
-        else { huboErrorGeneral = true; console.error('[torneos sync] borrado de torneos fallo', error); }
+        // defensa extra: si el id reaparecio localmente (p.ej. reimport) entre el
+        // snapshot y este punto, NO lo borramos en el server. cacheRef.current es la
+        // lectura mas fresca posible en este momento (setEstado ya lo saca de `borrados`
+        // apenas reaparece, pero esto cubre cualquier ventana de carrera residual).
+        const idsActuales = new Set(cacheRef.current.estado.torneos.map((x) => x.id));
+        const aBorrar = snapshotBorrados.filter((id) => !idsActuales.has(id));
+        if (aBorrar.length > 0) {
+          const { error } = await supabase.from('rk_torneos').delete().in('id', aBorrar);
+          if (!error) borradosOk = aBorrar;
+          else { huboErrorGeneral = true; console.error('[torneos sync] borrado de torneos fallo', error); }
+        }
       }
 
       // ---- jugadores: upsert de los locales + delete de los que ya no estan ----
@@ -202,6 +233,8 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       }
 
       // ---- cleanup: solo lo que efectivamente se confirmo, y con base como DELTA ----
+      // Updater puro: sin refs de resultado ni otros side effects adentro. `estadoSync`
+      // se deriva del `cache` resultante en el effect de persistencia (unica fuente).
       setCache((prev) => {
         const suciosRestantes = prev.sucios.filter((id) => {
           if (conflictoSet.has(id)) return true; // excluido del push: sigue sucio
@@ -216,8 +249,6 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         const jugadoresSuciosRestante = jugadoresOk && prev.estado.jugadores === snapshotJugadores ? false : prev.jugadoresSucios;
         const configSuciaRestante = configOk && prev.estado.configPuntos === snapshotConfig ? false : prev.configSucia;
         const jugadoresBaseNueva = jugadoresOk ? snapshotJugadores.map((j) => j.id) : prev.jugadoresBase;
-        const quedaAlgoSucio = suciosRestantes.length > 0 || borradosRestantes.length > 0 || jugadoresSuciosRestante || configSuciaRestante;
-        resultadoPushRef.current = { quedaAlgoSucio };
         return {
           ...prev,
           base: nuevaBase,
@@ -230,13 +261,18 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       });
 
       if (huboErrorGeneral) {
-        setEstadoSync('sinConexion');
+        ultimoPushFallo.current = true;
         avisarLimitado('No se pudo sincronizar todo con la nube. Se reintenta solo; tus cambios siguen guardados en este navegador.');
-      } else if (resultadoPushRef.current) {
-        setEstadoSync(resultadoPushRef.current.quedaAlgoSucio ? 'pendiente' : 'sincronizado');
       }
+      // exito limpio (sin huboErrorGeneral): nada mas que hacer aca, la derivacion la
+      // hace el effect de persistencia en reaccion al `cache` que acabamos de setear.
     } catch (err) {
       console.error('[torneos sync] push fallo', err);
+      ultimoPushFallo.current = true;
+      // caso excepcional no cubierto por el manejo por seccion de arriba (todas esas
+      // ramas capturan su propio error sin relanzar): `cache` no cambio en este catch,
+      // asi que el effect no se dispara solo; fallback directo para no dejar la UI
+      // mostrando un estado viejo mientras algo realmente se rompio.
       setEstadoSync('sinConexion');
       avisarLimitado('No se pudo sincronizar con la nube. Tus cambios quedan guardados en este navegador y se reintenta solo.');
     } finally {
@@ -272,20 +308,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         const jugadoresDelServer = (rj.data ?? []).map((f) => ({ id: f.id as string, nombre: f.nombre as string, alias: (f.alias as string[]) ?? [] }));
         const jugadores = prev.jugadoresSucios ? prev.estado.jugadores : jugadoresDelServer;
         const configPuntos = prev.configSucia ? prev.estado.configPuntos : ((rc.data?.data as EstadoTorneos['configPuntos']) ?? prev.estado.configPuntos);
-        // dentro del updater: nada de side effects (podria correr 2 veces en StrictMode).
-        // El resultado se guarda en una ref y se usa DESPUES del setCache.
-        resultadoPullRef.current = { conflictos: m.conflictos };
+        // updater puro: `conflictos` que computa el merge se escribe DIRECTO en el cache
+        // resultante (no en un ref leido inmediatamente despues del setCache). El effect
+        // de persistencia es quien despues propaga cache.conflictos a `conflictos`/`conflictosRef`.
         return {
           ...prev,
           estado: { torneos: m.torneos, jugadores, configPuntos },
           base: m.base,
           jugadoresBase: jugadoresDelServer.map((j) => j.id), // siempre la verdad del server
+          conflictos: m.conflictos,
         };
       });
-      if (resultadoPullRef.current) {
-        conflictosRef.current = resultadoPullRef.current.conflictos;
-        setConflictos(resultadoPullRef.current.conflictos);
-      }
       setEstadoSync((s) => (s === 'sinConexion' ? 'pendiente' : s));
       void push(); // si habia sucios, empujarlos ahora
     } catch (err) {
@@ -305,6 +338,7 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       const idsAhora = new Set(estadoNuevo.torneos.map((t) => t.id));
       for (const t of estadoNuevo.torneos) {
         if (antesPorId.get(t.id) !== t) suciosNuevos.add(t.id); // referencia cambio: contenido editado
+        borradosNuevos.delete(t.id); // reaparecio (p.ej. reimport de un id previamente borrado): ya no es tombstone
       }
       for (const t of prev.estado.torneos) {
         if (!idsAhora.has(t.id)) {
@@ -314,6 +348,8 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           delete baseNueva[t.id];
         }
       }
+      // estadoSync no se toca aca: el effect de persistencia lo deriva de `cache` apenas
+      // este setCache haga efecto (siempre queda algo sucio recien editado => 'pendiente').
       return {
         ...prev,
         estado: estadoNuevo,
@@ -324,18 +360,22 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         configSucia: prev.configSucia || estadoNuevo.configPuntos !== prev.estado.configPuntos,
       };
     });
-    setEstadoSync('pendiente');
     if (timerPush.current !== null) window.clearTimeout(timerPush.current);
     timerPush.current = window.setTimeout(() => { void push(); }, 1500);
   }, [push]);
 
   // ---- resolver conflicto: 'local' re-empuja lo mio; 'server' trae lo del server ----
+  // `conflictos` vive en el cache: se edita via setCache, nunca con un setConflictos/ref
+  // directo aca (ese es el trabajo exclusivo del effect de persistencia, que corre
+  // garantizado despues de que este setCache haga efecto).
   const resolverConflicto = useCallback(async (id: string, eleccion: 'local' | 'server') => {
     if (eleccion === 'local') {
-      conflictosRef.current = conflictosRef.current.filter((x) => x !== id);
-      setConflictos(conflictosRef.current);
-      setCache((prev) => (prev.sucios.includes(id) ? prev : { ...prev, sucios: [...prev.sucios, id] }));
-      void push(); // ya no esta en conflictos: el proximo push lo incluye y pisa al server
+      setCache((prev) => ({
+        ...prev,
+        conflictos: prev.conflictos.filter((x) => x !== id),
+        sucios: prev.sucios.includes(id) ? prev.sucios : [...prev.sucios, id],
+      }));
+      void push(); // una vez que el effect propague esto a conflictosRef, el push lo incluye y pisa al server
       return;
     }
     if (!supabase) return;
@@ -346,9 +386,8 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       estado: { ...prev.estado, torneos: prev.estado.torneos.map((t) => (t.id === id ? (data.data as Torneo) : t)) },
       base: { ...prev.base, [id]: data.updated_at as string },
       sucios: prev.sucios.filter((x) => x !== id),
+      conflictos: prev.conflictos.filter((x) => x !== id),
     }));
-    conflictosRef.current = conflictosRef.current.filter((x) => x !== id);
-    setConflictos(conflictosRef.current);
   }, [avisarLimitado, push]);
 
   // ---- arranque + reconexion + reintento periodico + limpieza al desmontar ----

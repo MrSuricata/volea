@@ -46,6 +46,9 @@ describe('mergeTorneos', () => {
     });
     expect(r.conflictos).toEqual(['t1']);
     expect(r.torneos[0].nombre).toBe('Editado local');
+    // la base NO avanza al updatedAt del server en conflicto: se queda en la vieja,
+    // para que el conflicto se vuelva a marcar en el proximo pull hasta resolverse.
+    expect(r.base.t1).toBe('2026-07-29T11:00:00.000Z');
   });
 
   it('nuevo local (sin base, sucio): se conserva; nuevo remoto: se agrega', () => {
@@ -94,5 +97,26 @@ describe('mergeTorneos', () => {
     });
     expect(r.conflictos).toEqual(['t1']);
     expect(r.torneos[0].nombre).toBe('Editado local sin base');
+    expect(r.base.t1).toBeUndefined(); // base desconocida: sigue ausente, no se adopta la del server
+  });
+
+  it('conflicto con base desconocida persiste en pulls sucesivos (no se autoresuelve)', () => {
+    const args = {
+      locales: [t('t1', 'Editado local sin base')],
+      remotos: [remoto(t('t1', 'Version del server'), '2026-07-29T09:00:00.000Z')],
+      sucios: new Set(['t1']),
+      borrados: new Set<string>(),
+      base: {},
+    };
+    const r1 = mergeTorneos(args);
+    expect(r1.conflictos).toEqual(['t1']);
+    expect(r1.base.t1).toBeUndefined();
+
+    // "segundo pull": mismo escenario (server y local sin cambios), alimentado con
+    // la base que devolvio el primer merge. Si el bug estuviera presente (adoptar
+    // rem.updatedAt pese al conflicto), esta vuelta ya NO marcaria conflicto.
+    const r2 = mergeTorneos({ ...args, base: r1.base });
+    expect(r2.conflictos).toEqual(['t1']);
+    expect(r2.torneos[0].nombre).toBe('Editado local sin base');
   });
 });
