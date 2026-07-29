@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, FileDown } from 'lucide-react';
+import { RefreshCw, FileDown, HandCoins } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, SocioMove, SocioMoveInput } from '../types';
+import type { LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
 import { AdminSociosSection } from './AdminSociosSection';
+import { AdminLiquidarCajaModal } from './AdminLiquidarCajaModal';
 import { exportCajaExcel } from '../utils/cajaExcel';
 
 /** Pestaña Socios: cuentas entre socios + números del negocio (separada de la Caja del bot). */
-export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, deleteSocioMove }: {
+export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, deleteSocioMove, liquidarCaja }: {
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
   addSocioMove: (input: SocioMoveInput) => Promise<boolean>;
   deleteSocioMove: (id: string) => Promise<boolean>;
+  liquidarCaja: (ids: string[], moves: SocioLiquidacionMove[]) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [moves, setMoves] = useState<SocioMove[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [showLiquidar, setShowLiquidar] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -51,6 +54,13 @@ export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, d
         <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Socios</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <button
+            onClick={() => setShowLiquidar(true)}
+            disabled={loading}
+            className="bg-lime-400 hover:bg-lime-500 disabled:opacity-50 text-navy-700 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+          >
+            <HandCoins size={16} /> Liquidar caja
+          </button>
+          <button
             onClick={handleExport}
             disabled={exporting || loading}
             className="bg-white hover:bg-gray-50 disabled:opacity-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
@@ -74,6 +84,16 @@ export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, d
         onAdd={addSocioMove}
         onDelete={deleteSocioMove}
       />
+
+      {showLiquidar && (
+        <AdminLiquidarCajaModal
+          socioMoves={moves}
+          loadLedgerFull={loadLedgerFull}
+          liquidar={liquidarCaja}
+          onClose={() => setShowLiquidar(false)}
+          onDone={() => { setShowLiquidar(false); refresh(); }}
+        />
+      )}
     </div>
   );
 }

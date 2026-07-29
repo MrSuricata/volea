@@ -3619,6 +3619,7 @@ function AdminPage() {
             loadSocioMoves={SupabaseService.getSocioMoves}
             addSocioMove={SupabaseService.addSocioMove}
             deleteSocioMove={SupabaseService.deleteSocioMove}
+            liquidarCaja={SupabaseService.liquidarCaja}
           />
         )}
 

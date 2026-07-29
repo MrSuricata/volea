@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Users, Plus, Trash2, Check, X, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SocioMove, SocioMoveInput, SocioName } from '../types';
-import { esCuotaFutura, ventasBrutasSocios } from '../utils/socios';
+import { esCuotaFutura, ventasBrutasSocios, impactosGasto, impactosPago, impactosVenta } from '../utils/socios';
 
 const NOMBRES: Record<SocioName, string> = { brian: 'Brian', paula: 'Paula', gaston: 'Gastón' };
 const SOCIOS: SocioName[] = ['brian', 'paula', 'gaston'];
@@ -28,42 +28,6 @@ const fmtFecha = (ymd: string) => {
   const [y, m, d] = ymd.split('-');
   return d && m && y ? `${d}/${m}/${y.slice(2)}` : ymd;
 };
-
-/**
- * Reparto estándar Brian 50% / Paula 25% / Gastón 25%. Las partes se redondean
- * a centésimos y la de Gastón absorbe el resto para que sumen exacto el monto;
- * al restarle el monto al pagador, los tres impactos cierran en cero.
- */
-function impactosGasto(monto: number, pagador: SocioName) {
-  const pB = Math.round(monto * 50) / 100;
-  const pP = Math.round(monto * 25) / 100;
-  const pG = Math.round((monto - pB - pP) * 100) / 100;
-  const imp: Record<SocioName, number> = { brian: pB, paula: pP, gaston: pG };
-  imp[pagador] = Math.round((imp[pagador] - monto) * 100) / 100;
-  return imp;
-}
-
-function impactosPago(monto: number, de: SocioName, para: SocioName) {
-  const imp: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
-  imp[de] = -Math.round(monto * 100) / 100;
-  imp[para] = Math.round(monto * 100) / 100;
-  return imp;
-}
-
-/** Venta cobrada por un socio: les debe a los otros su parte (50/25/25 del total). */
-function impactosVenta(monto: number, cobrador: SocioName) {
-  const CUOTA: Record<SocioName, number> = { brian: 0.5, paula: 0.25, gaston: 0.25 };
-  const imp: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
-  let debe = 0;
-  for (const s of SOCIOS) {
-    if (s === cobrador) continue;
-    const parte = Math.round(monto * CUOTA[s] * 100) / 100;
-    imp[s] = -parte; // queda a favor: el cobrador le debe su parte
-    debe += parte;
-  }
-  imp[cobrador] = Math.round(debe * 100) / 100;
-  return imp;
-}
 
 const hoyISO = () => {
   const d = new Date();

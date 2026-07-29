@@ -169,6 +169,7 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
       { header: 'Cant.', width: 7 }, { header: 'Monto ($)', width: 12 },
       { header: 'Método', width: 14 }, { header: 'Debe / cobrado', width: 22 },
       { header: 'Registró', width: 12 }, { header: 'Anulado', width: 9 },
+      { header: 'Liquidado a socios', width: 15 },
     ];
     for (const e of entries) {
       const debeInfo = e.paymentMethod === 'debe'
@@ -182,11 +183,12 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
         e.qty, e.kind === 'venta' ? e.amount : -e.amount,
         e.paymentMethod ? (METODO_LBL[e.paymentMethod] || e.paymentMethod) : '',
         debeInfo, e.reportedBy, e.reverted ? 'Sí' : '',
+        e.socioSettledAt ? 'Sí' : '',
       ]);
       row.getCell(6).numFmt = MONEY;
       if (e.reverted) row.eachCell(c => { c.font = { name: 'Arial', size: 10, strike: true, color: { argb: 'FF999999' } }; });
     }
-    ws.autoFilter = { from: 'A1', to: `J${entries.length + 1}` };
+    ws.autoFilter = { from: 'A1', to: `K${entries.length + 1}` };
     styleHeader(ws);
     baseFont(ws);
   }

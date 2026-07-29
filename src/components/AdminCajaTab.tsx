@@ -359,6 +359,9 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                       {entry.reverted && (
                         <p className="text-xs text-red-400 font-semibold">Anulado</p>
                       )}
+                      {entry.socioSettledAt && !entry.reverted && (
+                        <p className="text-[10px] text-teal-600 font-semibold">✓ liquidado a socios</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">{entry.qty}</td>
                     <td className={`px-4 py-3 text-sm font-bold whitespace-nowrap ${

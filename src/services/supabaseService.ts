@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
 
 function orderToRow(o: Order) {
   return {
@@ -234,6 +234,7 @@ export const SupabaseService = {
       debtorName: row.debtor_name ?? null,
       settledAt: row.settled_at ?? null,
       settledMethod: row.settled_method ?? null,
+      socioSettledAt: row.socio_settled_at ?? null,
     }));
   },
 
@@ -317,6 +318,23 @@ export const SupabaseService = {
     const { error } = await supabase.from('socio_moves').delete().eq('id', id);
     if (error) { console.error('Error deleting socio move:', error); return false; }
     return true;
+  },
+
+  /**
+   * Liquida ventas/gastos del bot a las cuentas de socios: crea los movimientos
+   * y marca las filas de la caja como liquidadas, todo en una sola transacción
+   * (el RPC valida que los montos coincidan y que nada esté ya liquidado).
+   */
+  async liquidarCaja(ids: string[], moves: SocioLiquidacionMove[]): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase || !isSupabaseConnected()) {
+      return { ok: false, error: 'Sin conexión con Supabase' };
+    }
+    const { data, error } = await supabase.rpc('admin_liquidar_caja', { p_ids: ids, p_moves: moves });
+    if (error) {
+      console.error('Error liquidando caja:', error);
+      return { ok: false, error: error.message };
+    }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 
   // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──

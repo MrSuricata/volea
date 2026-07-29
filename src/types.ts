@@ -66,6 +66,23 @@ export interface LedgerEntry {
   /** Cuándo y cómo se cobró la deuda (null = sigue pendiente). */
   settledAt: string | null;
   settledMethod: 'mp' | 'efectivo' | 'transferencia' | null;
+  /** Cuándo se liquidó a las cuentas de socios (null = pendiente de liquidar). */
+  socioSettledAt: string | null;
+}
+
+/** Fila que la liquidación de caja asienta en socio_moves (claves = columnas del RPC). */
+export interface SocioLiquidacionMove {
+  area: SocioMove['area'];
+  tipo: 'venta' | 'gasto';
+  fecha: string | null;
+  descripcion: string;
+  monto: number;
+  pagador: SocioName | null;
+  de: SocioName | null;
+  para: SocioName | null;
+  imp_brian: number;
+  imp_paula: number;
+  imp_gaston: number;
 }
 
 export type SocioName = 'brian' | 'paula' | 'gaston';
