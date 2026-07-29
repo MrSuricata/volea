@@ -1,0 +1,22 @@
+export type PartidoFixture = { ronda: number; aId: string; bId: string };
+
+const LIBRE = '__libre__'; // sentinela interno; seguro: los ids reales son base36 (nunca tienen "_")
+
+// Método del círculo: se fija el primer elemento y el resto rota cada ronda.
+export function generarFixture(parejaIds: string[]): PartidoFixture[] {
+  const lista = [...parejaIds];
+  if (lista.length < 2) return [];
+  if (lista.length % 2 === 1) lista.push(LIBRE);
+  const n = lista.length;
+  const partidos: PartidoFixture[] = [];
+  const rot = [...lista];
+  for (let ronda = 1; ronda <= n - 1; ronda++) {
+    for (let i = 0; i < n / 2; i++) {
+      const a = rot[i];
+      const b = rot[n - 1 - i];
+      if (a !== LIBRE && b !== LIBRE) partidos.push({ ronda, aId: a, bId: b });
+    }
+    rot.splice(1, 0, rot.pop()!); // rotar: el último pasa a la posición 1 (el primero queda fijo)
+  }
+  return partidos;
+}

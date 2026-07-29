@@ -1,0 +1,123 @@
+import type { ConfigPuntos, Escalon, PartidoLlave, Torneo, Jugador } from './tipos';
+import { ESCALONES } from './tipos';
+import { campeonDe, ganadorPartido, resolverSlot } from './llave';
+import { calcularTabla } from './tabla';
+
+export function puntosDe(escalon: Escalon, categoria: 'A' | 'B', config: ConfigPuntos): number {
+  const idx = ESCALONES.indexOf(escalon);
+  if (idx < 0) return config.escalera[config.escalera.length - 1]; // escalon desconocido => piso
+  const off = categoria === 'B' ? config.offsetB : 0;
+  return config.escalera[Math.min(idx + off, config.escalera.length - 1)];
+}
+
+// distancia a la final => escalon (0 = perdio la final)
+function escalonPorDistancia(d: number): Escalon {
+  if (d === 0) return 'FINALISTA';
+  if (d === 1) return 'SEMI';
+  if (d === 2) return 'CUARTOS';
+  if (d === 3) return 'OCTAVOS';
+  return 'PARTICIPO';
+}
+
+// Escalon de una pareja segun hasta donde llego en la llave. Asume una llave TERMINADA
+// (el llamador debe filtrar por torneo terminado; en una llave a medias sub-valora).
+export function escalonEnLlave(partidos: PartidoLlave[], parejaId: string): Escalon {
+  if (campeonDe(partidos) === parejaId) return 'CAMPEON';
+  const reales = partidos.filter((p) => !p.esTercerPuesto);
+  const maxRonda = Math.max(...reales.map((p) => p.ronda));
+  let peor: number | null = null; // ronda mas alta donde perdio
+  for (const p of reales) {
+    const a = resolverSlot(p.a, partidos);
+    const b = resolverSlot(p.b, partidos);
+    if (a !== parejaId && b !== parejaId) continue;
+    const g = ganadorPartido(p, partidos);
+    if (g === null || g === parejaId) continue; // sin resultado o lo gano
+    peor = peor === null ? p.ronda : Math.max(peor, p.ronda);
+  }
+  if (peor === null) return 'PARTICIPO';
+  return escalonPorDistancia(maxRonda - peor);
+}
+
+export function escalonDePareja(torneo: Torneo, parejaId: string): Escalon {
+  if (torneo.partidosLlave && torneo.partidosLlave.length > 0) {
+    return escalonEnLlave(torneo.partidosLlave, parejaId);
+  }
+  // sin llave: solo tiene sentido "campeon" en grupo unico terminado
+  if (torneo.formato !== 'individual' && torneo.grupos.length === 1) {
+    const tabla = calcularTabla(torneo.grupos[0].parejaIds, torneo.partidosGrupo);
+    const pos = tabla.find((f) => f.parejaId === parejaId)?.posicion;
+    if (pos === 1) return 'CAMPEON';
+    if (pos === 2) return 'FINALISTA';
+  }
+  return 'PARTICIPO';
+}
+
+export function torneoAporta(t: Torneo): boolean {
+  return t.fase === 'terminado' && t.cuentaParaRanking !== false && (t.categoria === 'A' || t.categoria === 'B');
+}
+
+export type AporteRanking = { torneoId: string; torneoNombre: string; categoria: 'A' | 'B'; escalon: Escalon; puntos: number };
+export type FilaRanking = { jugadorId: string; nombre: string; puntos: number; torneosJugados: number; aportes: AporteRanking[] };
+
+// Torneos que aportan, ordenados por puntos. filtro por creadoEl (ISO, comparacion lexicografica).
+export function calcularRanking(
+  torneos: Torneo[],
+  jugadores: Jugador[],
+  config: ConfigPuntos,
+  filtro?: { desde?: string; hasta?: string },
+): FilaRanking[] {
+  const nombreDe = new Map(jugadores.map((j) => [j.id, j.nombre]));
+  const porJugador = new Map<string, FilaRanking>();
+  for (const t of torneos) {
+    if (!torneoAporta(t)) continue;
+    if (filtro?.desde && t.creadoEl < filtro.desde) continue;
+    if (filtro?.hasta && t.creadoEl > filtro.hasta) continue;
+    const categoria = t.categoria as 'A' | 'B';
+    for (const pareja of t.parejas) {
+      const ids = pareja.jugadorIds;
+      if (!ids || ids.length === 0) continue;
+      const escalon = escalonDePareja(t, pareja.id);
+      const puntos = puntosDe(escalon, categoria, config);
+      const aporte: AporteRanking = { torneoId: t.id, torneoNombre: t.nombre, categoria, escalon, puntos };
+      for (const jid of ids) {
+        let fila = porJugador.get(jid);
+        if (!fila) {
+          fila = { jugadorId: jid, nombre: nombreDe.get(jid) ?? pareja.nombre, puntos: 0, torneosJugados: 0, aportes: [] };
+          porJugador.set(jid, fila);
+        }
+        fila.puntos += puntos;
+        fila.aportes.push(aporte);
+      }
+    }
+  }
+  const filas = [...porJugador.values()];
+  for (const f of filas) f.torneosJugados = new Set(f.aportes.map((a) => a.torneoId)).size;
+  filas.sort((a, b) => b.puntos - a.puntos || b.torneosJugados - a.torneosJugados || a.nombre.localeCompare(b.nombre));
+  return filas;
+}
+
+// Fusiona dos personas del padron: el absorbido desaparece y sus nombres pasan a alias del que queda.
+export function unirJugadores(jugadores: Jugador[], idQueda: string, idAbsorbido: string): Jugador[] {
+  if (idQueda === idAbsorbido) return jugadores;
+  const abs = jugadores.find((j) => j.id === idAbsorbido);
+  if (!abs) return jugadores;
+  return jugadores
+    .filter((j) => j.id !== idAbsorbido)
+    .map((j) =>
+      j.id === idQueda
+        ? { ...j, alias: [...new Set([...(j.alias ?? []), abs.nombre, ...(abs.alias ?? [])])] }
+        : j,
+    );
+}
+
+// Reescribe un jugadorId por otro en todas las parejas (para cuando se fusionan personas).
+export function reasignarJugador(torneos: Torneo[], deId: string, aId: string): Torneo[] {
+  return torneos.map((t) => ({
+    ...t,
+    parejas: t.parejas.map((p) =>
+      p.jugadorIds && p.jugadorIds.includes(deId)
+        ? { ...p, jugadorIds: p.jugadorIds.map((id) => (id === deId ? aId : id)) }
+        : p,
+    ),
+  }));
+}
