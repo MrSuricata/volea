@@ -1,4 +1,5 @@
 import type { LedgerEntry, SocioMove, SocioName } from '../types';
+import { esCuotaFutura } from './socios';
 
 const TZ = 'America/Montevideo';
 const NAVY = 'FF1F3557';
@@ -103,19 +104,30 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
     if (socios && socios.length > 0) {
       ws.addRow([]);
       const uyu = socios.filter(m => m.moneda === 'UYU');
-      const sHead = ws.addRow(['Cuentas entre socios (UYU)', 'Saldo ($)', '', '', '', 'positivo = debe al grupo · negativo = a favor']);
+      const sHead = ws.addRow(['Cuentas entre socios (UYU)', 'Al día de hoy ($)', 'Cuotas futuras ($)', 'Total ($)', '', 'positivo = debe al grupo · negativo = a favor']);
       sHead.eachCell(c => { c.font = { name: 'Arial', size: 10, bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } }; });
-      const saldos: Record<SocioName, number> = {
-        brian: uyu.reduce((s, m) => s + m.impBrian, 0),
-        paula: uyu.reduce((s, m) => s + m.impPaula, 0),
-        gaston: uyu.reduce((s, m) => s + m.impGaston, 0),
-      };
-      (Object.keys(saldos) as SocioName[]).forEach(k => {
-        const row = ws.addRow([NOMBRES[k], Math.round(saldos[k] * 100) / 100, '', '', '',
-          saldos[k] > 0.5 ? 'le debe al grupo' : saldos[k] < -0.5 ? 'el grupo le debe' : 'al día']);
-        row.getCell(2).numFmt = MONEY;
+      const ceros = () => ({ brian: 0, paula: 0, gaston: 0 } as Record<SocioName, number>);
+      const alDia = ceros(), futuras = ceros();
+      let futMonto = 0, futN = 0;
+      for (const m of uyu) {
+        const dest = esCuotaFutura(m, hoy) ? futuras : alDia;
+        dest.brian += m.impBrian; dest.paula += m.impPaula; dest.gaston += m.impGaston;
+        if (dest === futuras) { futMonto += m.monto; futN++; }
+      }
+      (Object.keys(alDia) as SocioName[]).forEach(k => {
+        const total = alDia[k] + futuras[k];
+        const row = ws.addRow([NOMBRES[k],
+          Math.round(alDia[k] * 100) / 100,
+          Math.round(futuras[k] * 100) / 100,
+          Math.round(total * 100) / 100, '',
+          total > 0.5 ? 'le debe al grupo' : total < -0.5 ? 'el grupo le debe' : 'al día']);
+        for (let i = 2; i <= 4; i++) row.getCell(i).numFmt = MONEY;
         row.getCell(1).font = { name: 'Arial', size: 10, bold: true };
+        row.getCell(4).font = { name: 'Arial', size: 10, bold: true };
       });
+      if (futN > 0) {
+        ws.addRow([`"Cuotas futuras" = ${futN} cuotas por $ ${futMonto.toLocaleString('es-UY', { minimumFractionDigits: 2 })} que vencen después de este mes.`]);
+      }
       const ars = socios.filter(m => m.moneda === 'ARS');
       if (ars.length > 0) {
         const arsB = ars.reduce((s, m) => s + m.impBrian, 0);
@@ -227,16 +239,18 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
       { header: 'Quién', width: 26 }, { header: 'Moneda', width: 8 },
       { header: 'Monto', width: 12 }, { header: 'Imp. Brian', width: 12 },
       { header: 'Imp. Paula', width: 12 }, { header: 'Imp. Gastón', width: 12 },
+      { header: 'Cuota futura', width: 11 },
     ];
     for (const m of socios) {
       const row = ws.addRow([
         cuandoSocio(m), AREA_LBL[m.area] || m.area, TIPO_LBL[m.tipo] || m.tipo,
         m.descripcion, quienSocio(m), m.moneda, m.monto,
         Math.round(m.impBrian * 100) / 100, Math.round(m.impPaula * 100) / 100, Math.round(m.impGaston * 100) / 100,
+        esCuotaFutura(m, hoy) ? 'Sí' : '',
       ]);
       for (let i = 7; i <= 10; i++) row.getCell(i).numFmt = MONEY;
     }
-    ws.autoFilter = { from: 'A1', to: `J${socios.length + 1}` };
+    ws.autoFilter = { from: 'A1', to: `K${socios.length + 1}` };
     styleHeader(ws);
     baseFont(ws);
   }

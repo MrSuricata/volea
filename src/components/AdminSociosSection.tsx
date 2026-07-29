@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Users, Plus, Trash2, Check, X, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SocioMove, SocioMoveInput, SocioName } from '../types';
+import { esCuotaFutura } from '../utils/socios';
 
 const NOMBRES: Record<SocioName, string> = { brian: 'Brian', paula: 'Paula', gaston: 'Gastón' };
 const SOCIOS: SocioName[] = ['brian', 'paula', 'gaston'];
@@ -84,15 +85,30 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(FORM_INICIAL);
+  const [modo, setModo] = useState<'hoy' | 'total'>('hoy');
 
-  const saldos = useMemo(() => {
-    const s: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
+  const cortes = useMemo(() => {
+    const hoy: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
+    const total: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
+    let futurasMonto = 0, futurasN = 0;
+    const ahora = new Date();
     for (const m of moves || []) {
       if (m.moneda !== 'UYU') continue;
-      s.brian += m.impBrian; s.paula += m.impPaula; s.gaston += m.impGaston;
+      total.brian += m.impBrian; total.paula += m.impPaula; total.gaston += m.impGaston;
+      if (esCuotaFutura(m, ahora)) {
+        futurasMonto += m.monto; futurasN++;
+      } else {
+        hoy.brian += m.impBrian; hoy.paula += m.impPaula; hoy.gaston += m.impGaston;
+      }
     }
-    return s;
+    return { hoy, total, futurasMonto, futurasN };
   }, [moves]);
+
+  const saldos = modo === 'hoy' ? cortes.hoy : cortes.total;
+  const saldosOtro = modo === 'hoy' ? cortes.total : cortes.hoy;
+
+  const miniSaldo = (v: number) =>
+    v > 0.5 ? `debe ${money(v)}` : v < -0.5 ? `a favor ${money(-v)}` : 'al día';
 
   const arsSaldos = useMemo(() => {
     const ars = (moves || []).filter(m => m.moneda === 'ARS');
@@ -184,7 +200,8 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
         <p>
           Historial importado del Excel de gastos + lo que carguen acá. Reparto estándar:
           {' '}<b>Brian 50% · Paula 25% · Gastón 25%</b>. Saldo positivo = le debe al grupo;
-          negativo = el grupo le debe. Incluye las cuotas futuras ya comprometidas, igual que el Excel.
+          negativo = el grupo le debe. <b>Al día de hoy</b> cuenta solo las cuotas ya vencidas;
+          {' '}<b>Total comprometido</b> incluye también las cuotas que faltan vencer.
         </p>
       </div>
 
@@ -197,6 +214,28 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
 
       {moves !== null && (
         <>
+          {/* Modo de saldo: solo vencido vs todo lo comprometido */}
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <div className="flex bg-white rounded-lg border border-gray-200 p-1">
+              {([['hoy', 'Al día de hoy'], ['total', 'Total comprometido']] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setModo(id)}
+                  className={`px-4 py-2 rounded-md text-sm font-display font-semibold transition-colors ${
+                    modo === id ? 'bg-navy-700 text-white' : 'text-gray-500 hover:text-navy-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {modo === 'hoy' && cortes.futurasN > 0 && (
+              <span className="text-xs text-gray-400">
+                Sin contar {money(cortes.futurasMonto)} en {cortes.futurasN} cuotas que todavía no vencieron.
+              </span>
+            )}
+          </div>
+
           {/* Saldos */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             {SOCIOS.map(s => {
@@ -211,6 +250,9 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {debe ? 'le debe al grupo' : favor ? 'el grupo le debe' : 'al día'}
+                  </p>
+                  <p className="text-[11px] text-gray-400/80 mt-1 border-t border-gray-50 pt-1">
+                    {modo === 'hoy' ? 'Comprometido' : 'Al día de hoy'}: {miniSaldo(saldosOtro[s])}
                   </p>
                 </div>
               );
@@ -293,6 +335,9 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                     <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-2.5 text-sm text-gray-500 whitespace-nowrap">
                         {m.fecha ? fmtFecha(m.fecha) : <span className="text-xs">{m.periodo || '—'}</span>}
+                        {esCuotaFutura(m) && (
+                          <span className="block text-[10px] font-semibold text-amber-600">cuota futura</span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-sm text-gray-500 hidden sm:table-cell">{AREA_LBL[m.area]}</td>
                       <td className="px-4 py-2.5">
