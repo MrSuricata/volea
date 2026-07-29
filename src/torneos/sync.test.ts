@@ -16,6 +16,7 @@ describe('mergeTorneos', () => {
       locales: [t('t1', 'Viejo local')],
       remotos: [remoto(t('t1', 'Nuevo server'), '2026-07-29T12:00:00.000Z')],
       sucios: new Set(),
+      borrados: new Set(),
       base: { t1: '2026-07-29T11:00:00.000Z' },
     });
     expect(r.torneos[0].nombre).toBe('Nuevo server');
@@ -28,6 +29,7 @@ describe('mergeTorneos', () => {
       locales: [t('t1', 'Editado local')],
       remotos: [remoto(t('t1', 'Base server'), '2026-07-29T11:00:00.000Z')],
       sucios: new Set(['t1']),
+      borrados: new Set(),
       base: { t1: '2026-07-29T11:00:00.000Z' },
     });
     expect(r.torneos[0].nombre).toBe('Editado local');
@@ -39,6 +41,7 @@ describe('mergeTorneos', () => {
       locales: [t('t1', 'Editado local')],
       remotos: [remoto(t('t1', 'Otro admin'), '2026-07-29T13:00:00.000Z')],
       sucios: new Set(['t1']),
+      borrados: new Set(),
       base: { t1: '2026-07-29T11:00:00.000Z' },
     });
     expect(r.conflictos).toEqual(['t1']);
@@ -50,6 +53,7 @@ describe('mergeTorneos', () => {
       locales: [t('nuevoLocal', 'Recien creado aca')],
       remotos: [remoto(t('nuevoRemoto', 'Creado en otra maquina'), '2026-07-29T12:00:00.000Z')],
       sucios: new Set(['nuevoLocal']),
+      borrados: new Set(),
       base: {},
     });
     const ids = r.torneos.map((x) => x.id).sort();
@@ -61,9 +65,34 @@ describe('mergeTorneos', () => {
       locales: [t('limpio', 'x'), t('sucio', 'y')],
       remotos: [],
       sucios: new Set(['sucio']),
+      borrados: new Set(),
       base: { limpio: '2026-07-29T11:00:00.000Z', sucio: '2026-07-29T11:00:00.000Z' },
     });
     expect(r.torneos.map((x) => x.id)).toEqual(['sucio']);
     expect(r.base.limpio).toBeUndefined();
+  });
+
+  it('borrado localmente (tombstone) pero el server todavia lo tiene: NO resucita; sin entrada en base', () => {
+    const r = mergeTorneos({
+      locales: [],
+      remotos: [remoto(t('borradoAca', 'Ya no deberia estar'), '2026-07-29T12:00:00.000Z')],
+      sucios: new Set(),
+      borrados: new Set(['borradoAca']),
+      base: { borradoAca: '2026-07-29T11:00:00.000Z' },
+    });
+    expect(r.torneos.map((x) => x.id)).not.toContain('borradoAca');
+    expect(r.base.borradoAca).toBeUndefined();
+  });
+
+  it('sucio sin base conocida (nunca sincronizado) y el server ya tiene una version: CONFLICTO, no pisa en silencio', () => {
+    const r = mergeTorneos({
+      locales: [t('t1', 'Editado local sin base')],
+      remotos: [remoto(t('t1', 'Version del server'), '2026-07-29T09:00:00.000Z')],
+      sucios: new Set(['t1']),
+      borrados: new Set(),
+      base: {},
+    });
+    expect(r.conflictos).toEqual(['t1']);
+    expect(r.torneos[0].nombre).toBe('Editado local sin base');
   });
 });
