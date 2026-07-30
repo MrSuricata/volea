@@ -52,6 +52,12 @@ const cacheLimpia = () => ({
 });
 
 describe('limpiarCacheTorneosSiSincronizada', () => {
+  // Nota: la guarda NO mira `conflictos`, y es a proposito: un conflicto sin resolver esta
+  // SIEMPRE tambien en `sucios` (mergeTorneos solo marca conflicto sobre ids sucios,
+  // reconciliarPostPush mantiene sucios a los conflictuados, y resolverConflicto('local')
+  // re-agrega a sucios) — la preservacion de conflictos viaja en el chequeo de `sucios`.
+  // Si alguien "simplifica" esa relacion en el hook, tiene que venir a ampliar la guarda.
+
   // (a)
   it('sucio via `sucios`: preserva la cache intacta y devuelve false', () => {
     guardar({ ...cacheLimpia(), sucios: ['t1'] });
@@ -119,5 +125,22 @@ describe('limpiarCacheTorneosSiSincronizada', () => {
     });
     expect(limpiarCacheTorneosSiSincronizada()).toBe(true);
     expect(stub.getItem(CLAVE_CACHE)).toBeNull();
+  });
+
+  // (i)
+  it('forma legacy sin `borrados` pero sucia via `sucios`: preserva y devuelve false', () => {
+    guardar({
+      estado: { torneos: [], jugadores: [] },
+      base: {},
+      sucios: ['t1'],
+      // sin 'borrados': la dimension ausente no blanquea a las presentes
+      jugadoresBase: [],
+      jugadoresSucios: false,
+      configSucia: false,
+      conflictos: [],
+    });
+    const antes = stub.getItem(CLAVE_CACHE);
+    expect(limpiarCacheTorneosSiSincronizada()).toBe(false);
+    expect(stub.getItem(CLAVE_CACHE)).toBe(antes);
   });
 });

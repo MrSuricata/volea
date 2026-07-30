@@ -45,8 +45,10 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   const [estadoSync, setEstadoSync] = useState<EstadoSync>('pendiente');
   const [conflictos, setConflictos] = useState<string[]>([]);
   // Espejo sincronico de `cache.conflictos`, para que push() los excluya sin esperar un
-  // render. UN SOLO escritor: el effect de persistencia/derivacion, de abajo, cada vez
-  // que `cache` cambia (garantizado post-commit, no una lectura inmediata tras setCache).
+  // render. Escritor autoritativo: el effect de persistencia/derivacion, de abajo, cada
+  // vez que `cache` cambia (post-commit). pull() ademas lo adelanta de forma optimista en
+  // su propio tick (junto con cacheRef, ANTES de encadenar push(): ver aplicarPull); el
+  // effect despues lo pisa con la verdad commiteada, que para entonces coincide.
   const conflictosRef = useRef<Set<string>>(new Set());
   const timerPush = useRef<number | null>(null);
   const cacheRef = useRef(cache);
@@ -77,9 +79,11 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   // Nunca corre dentro de un updater de setCache (evita el anti-patron de leer un ref de
   // resultado justo despues de llamar setCache, que dependia de la evaluacion eager de
   // updaters - una optimizacion de React, no parte de su contrato). `conflictos` vive en
-  // `cache.conflictos` (lo escribe el merge del pull, o resolverConflicto); este effect es
-  // el UNICO que propaga eso al estado React `conflictos` y al espejo sincronico `conflictosRef`,
-  // y el UNICO que deriva `estadoSync` a partir de las banderas sucias del cache.
+  // `cache.conflictos` (lo escribe el merge del pull, o resolverConflicto); este effect
+  // los propaga al estado React `conflictos` y al espejo `conflictosRef` como ULTIMO
+  // escritor (pull() adelanta ese espejo en su propio tick para que el push encadenado no
+  // lea conflictos viejos, y push() adelanta cacheRef igual — este effect pisa ambos con
+  // lo commiteado), y es el UNICO que deriva `estadoSync` de las banderas sucias del cache.
   useEffect(() => {
     try {
       localStorage.setItem(CLAVE_CACHE, JSON.stringify(cache));
@@ -353,6 +357,10 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       // nuevo dispara un push que todavia lee conflictosRef desactualizado (sin el id nuevo) y
       // sube igual el torneo en conflicto, pisando al server - exactamente lo que el conflicto
       // debia impedir.
+      // Mismo limite que el persist directo de push() (arriba): cacheRef.current es el ultimo
+      // estado COMMITEADO — un setEstado encolado pero sin renderear no se ve aca, asi que el
+      // push encadenado puede saltearse esa edicion. Se auto-cura: el debounce de ese mismo
+      // setEstado sigue pendiente, y React re-aplica el updater sobre aplicarPull al commitear.
       const cacheNuevo = aplicarPull(cacheRef.current);
       cacheRef.current = cacheNuevo;
       conflictosRef.current = new Set(cacheNuevo.conflictos);
