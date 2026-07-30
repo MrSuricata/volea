@@ -4,7 +4,7 @@ import type { EstadoTorneos } from './TorneosApp';
 import type { Torneo } from './engine/tipos';
 import { mergeTorneos } from './sync';
 
-const CLAVE_CACHE = 'volea-torneos:cache';
+export const CLAVE_CACHE = 'volea-torneos:cache';
 
 type Cache = {
   estado: EstadoTorneos;
@@ -17,7 +17,7 @@ type Cache = {
   conflictos: string[]; // ids con conflicto sin resolver; vive en el cache (no en un ref de resultado)
 };
 
-type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
+export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
 
 function cacheVacia(): Cache {
   return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false, conflictos: [] };
@@ -233,9 +233,18 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       }
 
       // ---- cleanup: solo lo que efectivamente se confirmo, y con base como DELTA ----
-      // Updater puro: sin refs de resultado ni otros side effects adentro. `estadoSync`
-      // se deriva del `cache` resultante en el effect de persistencia (unica fuente).
-      setCache((prev) => {
+      // Funcion pura: la comparte el setCache de abajo (estado React, para cuando el
+      // componente sigue montado) CON la persistencia directa a localStorage que sigue
+      // (para cuando ya no lo esta). Sin esa segunda parte, un push que termina despues de
+      // que el tab de Torneos se desmonto (p.ej. el admin cambia de pestaña mientras el
+      // upsert todavia esta en vuelo) pierde su bookkeeping: setCache pasa a ser un no-op
+      // post-desmontaje y el effect de persistencia (que solo corre en reaccion a un cambio
+      // de `cache`) nunca llega a ejecutarse. localStorage se queda con `sucios`/`base`
+      // viejos aunque el server ya tenga los datos nuevos, y el proximo mount hace un pull,
+      // ve dirty + base desalineada contra el remoto, y levanta un conflicto FALSO contra el
+      // propio push que recien confirmamos (con el riesgo de que "La del server" descarte
+      // trabajo mas nuevo del mismo admin).
+      const reconciliarPostPush = (prev: Cache): Cache => {
         const suciosRestantes = prev.sucios.filter((id) => {
           if (conflictoSet.has(id)) return true; // excluido del push: sigue sucio
           if (!idsSubidos.has(id)) return true; // invalido o fallo la subida: sigue sucio
@@ -258,14 +267,32 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           configSucia: configSuciaRestante,
           jugadoresBase: jugadoresBaseNueva,
         };
-      });
+      };
+
+      // Persistencia directa: corre SIEMPRE (montado o no), calculada sobre cacheRef.current
+      // (el reflejo sincronico mas fresco disponible aca - lo mismo que ya usa el resto de
+      // este archivo). Tambien actualizamos el ref in-place para que un push reentrante
+      // (pedidoReentrada, mas abajo) que llegue a correr despues de un desmontaje no lea
+      // bookkeeping viejo. Si el componente sigue montado, el setCache de mas abajo hace
+      // ademas el camino normal (estado React + su effect, que vuelve a escribir el mismo
+      // resultado en localStorage - redundante pero inofensivo).
+      const cachePersistido = reconciliarPostPush(cacheRef.current);
+      cacheRef.current = cachePersistido;
+      try {
+        localStorage.setItem(CLAVE_CACHE, JSON.stringify(cachePersistido));
+      } catch (e) {
+        console.error('[torneos sync] no se pudo persistir bookkeeping post-push en localStorage', e);
+        avisarLimitado('No se pudieron guardar los cambios en este navegador (almacenamiento lleno o bloqueado).');
+      }
+      setCache(reconciliarPostPush);
 
       if (huboErrorGeneral) {
         ultimoPushFallo.current = true;
         avisarLimitado('No se pudo sincronizar todo con la nube. Se reintenta solo; tus cambios siguen guardados en este navegador.');
       }
-      // exito limpio (sin huboErrorGeneral): nada mas que hacer aca, la derivacion la
-      // hace el effect de persistencia en reaccion al `cache` que acabamos de setear.
+      // exito limpio (sin huboErrorGeneral): nada mas que hacer aca, la derivacion la hace el
+      // effect de persistencia en reaccion al `cache` que acabamos de setear (si el
+      // componente sigue montado) o ya quedo escrita arriba a mano (si no).
     } catch (err) {
       console.error('[torneos sync] push fallo', err);
       ultimoPushFallo.current = true;
@@ -402,7 +429,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     return () => {
       window.removeEventListener('online', onOnline);
       window.clearInterval(intervalo);
-      if (timerPush.current !== null) window.clearTimeout(timerPush.current);
+      if (timerPush.current !== null) {
+        // Flush en vez de solo cancelar: si no, una edicion recien debounceada se queda
+        // esperando un remount que puede no llegar nunca (el admin no tiene por que volver
+        // a la pestaña Torneos). push() sigue corriendo aunque este componente ya se haya
+        // desmontado - es un closure sobre refs, no depende del ciclo de vida de React - y
+        // su propia persistencia directa a localStorage (mas arriba) evita que el
+        // bookkeeping se pierda cuando termine.
+        window.clearTimeout(timerPush.current);
+        timerPush.current = null;
+        void push();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
