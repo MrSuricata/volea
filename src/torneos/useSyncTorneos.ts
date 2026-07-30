@@ -168,6 +168,12 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
               baseDelta[f.id] = ahora;
               idsSubidos.add(f.id);
             } else {
+              // sin esto, un torneo que nunca logra subir (p.ej. sin conexion) deja
+              // ultimoPushFallo en false: el effect de persistencia ve `sucios` no vacio
+              // y muestra 'pendiente' (Sincronizando...) para siempre en vez de 'sinConexion'
+              // (Sin conexion - trabajando local), el estado real. Mismo tratamiento que
+              // ya reciben los fallos de borrados/jugadores/config mas abajo.
+              huboErrorGeneral = true;
               console.error('[torneos sync] fila de torneo fallo', f.id, e2);
               avisarLimitado(`No se pudo sincronizar el torneo "${f.nombre}".`, `fila:${f.id}`);
             }
