@@ -56,10 +56,19 @@ export function torneoAporta(t: Torneo): boolean {
   return t.fase === 'terminado' && t.cuentaParaRanking !== false && (t.categoria === 'A' || t.categoria === 'B');
 }
 
-export type AporteRanking = { torneoId: string; torneoNombre: string; categoria: 'A' | 'B'; escalon: Escalon; puntos: number };
+export type AporteRanking = {
+  torneoId: string;
+  torneoNombre: string;
+  categoria: 'A' | 'B';
+  escalon: Escalon;
+  puntos: number;
+  descartadoPorEvento?: boolean; // otro torneo del mismo evento paga mas: este no suma (se muestra igual en el detalle)
+};
 export type FilaRanking = { jugadorId: string; nombre: string; puntos: number; torneosJugados: number; aportes: AporteRanking[] };
 
 // Torneos que aportan, ordenados por puntos. filtro por creadoEl (ISO, comparacion lexicografica).
+// Reglas de suma: en individuales, PARTICIPO no paga (solo pagan las instancias de llave);
+// y entre torneos de PAREJAS que comparten `evento`, al jugador le cuenta solo el mejor.
 export function calcularRanking(
   torneos: Torneo[],
   jugadores: Jugador[],
@@ -68,30 +77,55 @@ export function calcularRanking(
 ): FilaRanking[] {
   const nombreDe = new Map(jugadores.map((j) => [j.id, j.nombre]));
   const porJugador = new Map<string, FilaRanking>();
+  // evento por torneo, solo para parejas (los individuales quedan siempre fuera del "max por evento")
+  const eventoDe = new Map<string, string>();
   for (const t of torneos) {
     if (!torneoAporta(t)) continue;
     if (filtro?.desde && t.creadoEl < filtro.desde) continue;
     if (filtro?.hasta && t.creadoEl > filtro.hasta) continue;
     const categoria = t.categoria as 'A' | 'B';
+    const individual = (t.formato ?? 'grupos') === 'individual';
+    const evento = individual ? undefined : t.evento?.trim() || undefined;
+    if (evento) eventoDe.set(t.id, evento);
     for (const pareja of t.parejas) {
       const ids = pareja.jugadorIds;
       if (!ids || ids.length === 0) continue;
       const escalon = escalonDePareja(t, pareja.id);
-      const puntos = puntosDe(escalon, categoria, config);
-      const aporte: AporteRanking = { torneoId: t.id, torneoNombre: t.nombre, categoria, escalon, puntos };
+      const puntos = individual && escalon === 'PARTICIPO' ? 0 : puntosDe(escalon, categoria, config);
       for (const jid of ids) {
         let fila = porJugador.get(jid);
         if (!fila) {
           fila = { jugadorId: jid, nombre: nombreDe.get(jid) ?? pareja.nombre, puntos: 0, torneosJugados: 0, aportes: [] };
           porJugador.set(jid, fila);
         }
-        fila.puntos += puntos;
-        fila.aportes.push(aporte);
+        // copia por jugador: descartadoPorEvento se decide fila por fila (los companieros
+        // de pareja pueden tener eventos distintos entre si por sus OTROS torneos)
+        fila.aportes.push({ torneoId: t.id, torneoNombre: t.nombre, categoria, escalon, puntos });
       }
     }
   }
   const filas = [...porJugador.values()];
-  for (const f of filas) f.torneosJugados = new Set(f.aportes.map((a) => a.torneoId)).size;
+  for (const f of filas) {
+    // max por evento: de los aportes de parejas que comparten evento, cuenta solo el mejor
+    const mejorPorEvento = new Map<string, AporteRanking>();
+    for (const a of f.aportes) {
+      const evento = eventoDe.get(a.torneoId);
+      if (!evento) continue;
+      const actual = mejorPorEvento.get(evento);
+      // empate de puntos (ej. campeon B = finalista A con el default): queda el mejor escalon,
+      // para que el detalle no muestre un "Campeon" tachado mientras cuenta un "Finalista"
+      const gana = !actual
+        || a.puntos > actual.puntos
+        || (a.puntos === actual.puntos && ESCALONES.indexOf(a.escalon) < ESCALONES.indexOf(actual.escalon));
+      if (gana) mejorPorEvento.set(evento, a);
+    }
+    for (const a of f.aportes) {
+      const evento = eventoDe.get(a.torneoId);
+      if (evento && mejorPorEvento.get(evento) !== a) a.descartadoPorEvento = true;
+    }
+    f.puntos = f.aportes.reduce((s, a) => s + (a.descartadoPorEvento ? 0 : a.puntos), 0);
+    f.torneosJugados = new Set(f.aportes.map((a) => a.torneoId)).size;
+  }
   filas.sort((a, b) => b.puntos - a.puntos || b.torneosJugados - a.torneosJugados || a.nombre.localeCompare(b.nombre));
   return filas;
 }

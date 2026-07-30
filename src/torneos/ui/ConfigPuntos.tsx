@@ -42,7 +42,12 @@ export default function ConfigPuntos({ config, setConfig, onVolver }: Props) {
             </tbody>
           </table>
         </div>
-        <button className="boton secundario" style={{ marginTop: 14 }} onClick={() => setConfig({ ...CONFIG_PUNTOS_DEFAULT })}>Volver al default</button>
+        <p style={{ marginTop: 14, opacity: 0.85 }}>
+          Reglas fijas: en torneos <strong>individuales</strong> (One Point Challenge) participar no da puntos — pagan solo
+          las instancias de llave. Y si dos torneos de parejas comparten <strong>Evento</strong> (ej. la A y la B del mismo
+          día), a cada jugador le cuenta solo el mejor de los dos.
+        </p>
+        <button className="boton secundario" style={{ marginTop: 4 }} onClick={() => setConfig({ ...CONFIG_PUNTOS_DEFAULT })}>Volver al default</button>
       </div>
     </main>
   );

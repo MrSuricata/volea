@@ -75,8 +75,10 @@ export default function PantallaRanking({ torneos, jugadores, config, onVincular
                     <tr>
                       <td colSpan={4} style={{ textAlign: 'left', background: 'var(--navy-1)' }}>
                         {f.aportes.map((a, k) => (
-                          <div key={k} style={{ padding: '2px 0' }}>
-                            {a.torneoNombre} <span className="chip">Cat {a.categoria}</span> {NOMBRE_ESCALON[a.escalon]} → <strong>{a.puntos}</strong>
+                          <div key={k} style={{ padding: '2px 0', opacity: a.descartadoPorEvento ? 0.55 : 1 }}>
+                            {a.torneoNombre} <span className="chip">Cat {a.categoria}</span> {NOMBRE_ESCALON[a.escalon]} →{' '}
+                            <strong style={a.descartadoPorEvento ? { textDecoration: 'line-through' } : undefined}>{a.puntos}</strong>
+                            {a.descartadoPorEvento ? ' (no cuenta: ya suma el mejor del mismo evento)' : ''}
                           </div>
                         ))}
                       </td>

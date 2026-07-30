@@ -128,7 +128,7 @@ describe('calcularRanking', () => {
     ];
     const ranking = calcularRanking([torneoA, torneoB], jugadores, cfg);
     const fila = (id: string) => ranking.find((f) => f.jugadorId === id)!;
-    expect(fila('jA').puntos).toBe(140); // campeon A (100) + participo B (40)
+    expect(fila('jA').puntos).toBe(100); // campeon A (100) + participo individual (0: en individuales participar no paga)
     expect(fila('jB').puntos).toBe(100);
     expect(fila('jC').puntos).toBe(86); // finalista A
     expect(fila('jA').torneosJugados).toBe(2);
@@ -147,6 +147,97 @@ describe('calcularRanking', () => {
     const js: Jugador[] = [{ id: 'jA', nombre: 'Ana' }, { id: 'jB', nombre: 'Bea' }];
     expect(calcularRanking([viejo], js, cfg)).toHaveLength(2); // sin filtro, suma
     expect(calcularRanking([viejo], js, cfg, { desde: '2026-01-01T00:00:00.000Z' })).toHaveLength(0);
+  });
+});
+
+describe('evento (max A/B por evento) e individuales sin puntos por participar', () => {
+  // final directa entre dos parejas de UN jugador cada una; gana la primera
+  function torneoFinalDirecta(over: Partial<Torneo> & { id: string }, jGanador: string, jPerdedor: string): Torneo {
+    let ps = armarLlave(seeds(['pw', 'pl']), false);
+    ps = cargarResultadoLlave(ps, ps[0].id, 11, 6).partidos; // gana pw
+    return torneoBase({
+      partidosLlave: ps,
+      parejas: [
+        { id: 'pw', nombre: jGanador, jugadorIds: [jGanador] },
+        { id: 'pl', nombre: jPerdedor, jugadorIds: [jPerdedor] },
+      ],
+      ...over,
+    });
+  }
+  const js = (...ids: string[]): Jugador[] => ids.map((id) => ({ id, nombre: id }));
+
+  it('individual: PARTICIPO vale 0; desde las instancias de llave para arriba paga normal', () => {
+    let ps = armarLlave(seeds(['x1', 'x2', 'x3', 'x4']), false);
+    const r1 = ps.filter((p) => p.ronda === 1);
+    ps = cargarResultadoLlave(ps, r1[0].id, 1, 0).partidos;
+    ps = cargarResultadoLlave(ps, r1[1].id, 1, 0).partidos;
+    ps = cargarResultadoLlave(ps, ps.find((p) => p.ronda === 2)!.id, 1, 0).partidos;
+    const opc = torneoBase({
+      id: 'opc', categoria: 'A', formato: 'individual', partidosLlave: ps,
+      parejas: [
+        { id: 'x1', nombre: 'j1', jugadorIds: ['j1'] },
+        { id: 'x2', nombre: 'j2', jugadorIds: ['j2'] },
+        { id: 'x3', nombre: 'j3', jugadorIds: ['j3'] },
+        { id: 'x4', nombre: 'j4', jugadorIds: ['j4'] },
+        { id: 'x5', nombre: 'j5', jugadorIds: ['j5'] }, // quedo afuera de la llave: participo
+      ],
+    });
+    const ranking = calcularRanking([opc], js('j1', 'j2', 'j3', 'j4', 'j5'), cfg);
+    const fila = (id: string) => ranking.find((f) => f.jugadorId === id)!;
+    expect(fila('j1').puntos).toBe(100); // campeon
+    expect(fila('j2').puntos).toBe(86); // finalista
+    expect(fila('j3').puntos).toBe(72); // semi
+    expect(fila('j5').puntos).toBe(0); // participo: en individuales no paga
+    expect(fila('j5').torneosJugados).toBe(1); // pero jugo
+  });
+
+  it('parejas: PARTICIPO sigue valiendo el piso de la escalera (40)', () => {
+    const t = torneoFinalDirecta({ id: 't1', categoria: 'A' }, 'jA', 'jB');
+    t.parejas.push({ id: 'px', nombre: 'jX', jugadorIds: ['jX'] }); // no clasifico a la llave
+    const ranking = calcularRanking([t], js('jA', 'jB', 'jX'), cfg);
+    expect(ranking.find((f) => f.jugadorId === 'jX')!.puntos).toBe(40);
+  });
+
+  it('dos torneos de parejas con el MISMO evento: al jugador le cuenta solo el mejor', () => {
+    const tB = torneoFinalDirecta({ id: 'tB', categoria: 'B', evento: '26/7' }, 'jA', 'jB'); // jA campeon B = 86
+    const tA = torneoFinalDirecta({ id: 'tA', categoria: 'A', evento: '26/7' }, 'jC', 'jA'); // jA finalista A = 86, jC campeon = 100
+    // tA primero a proposito: en el empate 86-86 debe quedar el CAMPEON, no el primero de la lista
+    const ranking = calcularRanking([tA, tB], js('jA', 'jB', 'jC'), cfg);
+    const fila = (id: string) => ranking.find((f) => f.jugadorId === id)!;
+    expect(fila('jA').puntos).toBe(86); // max(86, 86), NO 172
+    expect(fila('jA').torneosJugados).toBe(2); // jugo los dos igual
+    expect(fila('jA').aportes).toHaveLength(2); // el detalle muestra ambos
+    expect(fila('jA').aportes.filter((a) => a.descartadoPorEvento).length).toBe(1); // uno marcado como no-cuenta
+    expect(fila('jA').aportes.find((a) => !a.descartadoPorEvento)!.escalon).toBe('CAMPEON'); // empate: queda el mejor escalon
+    expect(fila('jB').puntos).toBe(72); // finalista B, un solo torneo: nada que descartar
+    expect(fila('jC').puntos).toBe(100);
+  });
+
+  it('sin evento o con eventos distintos: suma todo como siempre', () => {
+    const tB = torneoFinalDirecta({ id: 'tB', categoria: 'B', evento: '26/7' }, 'jA', 'jB');
+    const tA = torneoFinalDirecta({ id: 'tA', categoria: 'A', evento: '2/8' }, 'jC', 'jA');
+    const fila = (r: ReturnType<typeof calcularRanking>, id: string) => r.find((f) => f.jugadorId === id)!;
+    expect(fila(calcularRanking([tB, tA], js('jA', 'jB', 'jC'), cfg), 'jA').puntos).toBe(172); // eventos distintos
+    const sinEvento1 = torneoFinalDirecta({ id: 's1', categoria: 'B' }, 'jA', 'jB');
+    const sinEvento2 = torneoFinalDirecta({ id: 's2', categoria: 'A' }, 'jC', 'jA');
+    expect(fila(calcularRanking([sinEvento1, sinEvento2], js('jA', 'jB', 'jC'), cfg), 'jA').puntos).toBe(172); // sin evento
+  });
+
+  it('individual con el mismo evento: queda fuera del maximo y suma aparte', () => {
+    const tB = torneoFinalDirecta({ id: 'tB', categoria: 'B', evento: '26/7' }, 'jA', 'jB'); // jA campeon B = 86
+    let ps = armarLlave(seeds(['y1', 'y2']), false);
+    ps = cargarResultadoLlave(ps, ps[0].id, 1, 0).partidos;
+    const opc = torneoBase({
+      id: 'opc', categoria: 'A', formato: 'individual', evento: '26/7', partidosLlave: ps,
+      parejas: [
+        { id: 'y1', nombre: 'jA', jugadorIds: ['jA'] },
+        { id: 'y2', nombre: 'jB', jugadorIds: ['jB'] },
+      ],
+    });
+    const ranking = calcularRanking([tB, opc], js('jA', 'jB'), cfg);
+    const fila = (id: string) => ranking.find((f) => f.jugadorId === id)!;
+    expect(fila('jA').puntos).toBe(186); // 86 (parejas B) + 100 (campeon OPC cat A) — el OPC no entra al max
+    expect(fila('jA').aportes.some((a) => a.descartadoPorEvento)).toBe(false);
   });
 });
 

@@ -199,6 +199,7 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
                   <span>
                     {new Date(t.creadoEl).toLocaleDateString('es-UY')} · {t.parejas.length} {(t.formato ?? 'grupos') === 'individual' ? 'jugadores' : 'parejas'} · {ETIQUETA_FORMATO[t.formato ?? 'grupos']} · {ETIQUETA_FASE[t.fase]}
                     {t.categoria ? ` · Cat ${t.categoria}` : ' · sin categoría'}
+                    {t.evento && (t.formato ?? 'grupos') !== 'individual' ? ` · Evento ${t.evento}` : ''}
                     {t.visible === false ? ' · 🔒 oculto' : ''}
                   </span>
                 </button>
@@ -234,6 +235,18 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
             <option value="B">B</option>
           </select>
         </label>
+        {(torneo.formato ?? 'grupos') !== 'individual' && (
+          <label title="Torneos de parejas con el mismo evento (ej. la A y la B del mismo día): al jugador le cuenta solo el mejor resultado de ese evento.">
+            Evento:{' '}
+            <input
+              type="text"
+              value={torneo.evento ?? ''}
+              placeholder="ej. 26/7"
+              style={{ width: 110 }}
+              onChange={(e) => actualizarTorneo(torneo.id, (t) => ({ ...t, evento: e.target.value.trim() === '' ? undefined : e.target.value }))}
+            />
+          </label>
+        )}
         <label>
           <input
             type="checkbox"

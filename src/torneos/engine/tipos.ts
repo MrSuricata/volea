@@ -55,6 +55,7 @@ export type Torneo = {
   categoria?: 'A' | 'B'; // categoria del torneo para el ranking; ausente => no cuenta hasta asignarla
   cuentaParaRanking?: boolean; // undefined => cuenta; false => excluido (torneos de prueba)
   visible?: boolean; // interruptor "lo ve el publico" (default true); la web lo denormaliza a la columna rk_torneos.visible
+  evento?: string; // torneos de parejas con el MISMO evento (ej. "26/7"): al jugador le cuenta solo el mejor de ellos
 };
 
 export function nuevoId(): string {
