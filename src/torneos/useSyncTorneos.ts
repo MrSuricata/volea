@@ -4,17 +4,7 @@ import type { EstadoTorneos } from './TorneosApp';
 import type { Torneo } from './engine/tipos';
 import { mergeTorneos } from './sync';
 import { CLAVE_CACHE } from './cacheTorneos';
-
-type Cache = {
-  estado: EstadoTorneos;
-  base: Record<string, string>; // torneoId -> updated_at visto del server
-  sucios: string[]; // torneos con contenido editado localmente, pendientes de push
-  borrados: string[]; // ids de torneos borrados localmente, pendientes de delete en el server
-  jugadoresBase: string[]; // ids de jugadores que sabemos que existen en el server (para poder borrar los que ya no estan)
-  jugadoresSucios: boolean;
-  configSucia: boolean;
-  conflictos: string[]; // ids con conflicto sin resolver; vive en el cache (no en un ref de resultado)
-};
+import type { Cache } from './cacheTorneos';
 
 export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
 

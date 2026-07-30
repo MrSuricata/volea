@@ -4,14 +4,29 @@
 // AdminTorneosTab) - si importara aunque sea una sola cosa de useSyncTorneos.ts, Rollup arrastra
 // el modulo entero (y sus imports) de vuelta al chunk de entrada, rompiendo el split lazy. Este
 // archivo es la unica superficie que App.tsx puede tocar de forma estatica sin ese efecto.
+//
+// El tipo `Cache` vive ACA (y no en useSyncTorneos.ts, que lo importa con `import type`) por la
+// misma razon: TypeScript borra los `import type` por completo en runtime (cero costo para el
+// chunk publico), pero asi limpiarCacheTorneosSiSincronizada tipa su valor parseado contra la
+// forma REAL del cache (via `Partial<Cache>`) en vez de un mirror a mano. Si el dia de mañana se
+// agrega una nueva dimension de "sucio" a Cache, el compilador señala ESTE archivo (el shape ya
+// no calza) en vez de dejar que el logout siga confiando en un mirror desactualizado y borre
+// trabajo sin sincronizar en silencio. `EstadoTorneos` (de TorneosApp.tsx) tambien entra solo
+// como `import type` - ya se borraba en runtime antes de este cambio; ver el grep de build en el
+// commit para confirmar que el chunk de entrada sigue sin ninguna de las dos cosas.
+import type { EstadoTorneos } from './TorneosApp';
 
 export const CLAVE_CACHE = 'volea-torneos:cache';
 
-type CachePendiente = {
-  sucios?: unknown[];
-  borrados?: unknown[];
-  jugadoresSucios?: boolean;
-  configSucia?: boolean;
+export type Cache = {
+  estado: EstadoTorneos;
+  base: Record<string, string>; // torneoId -> updated_at visto del server
+  sucios: string[]; // torneos con contenido editado localmente, pendientes de push
+  borrados: string[]; // ids de torneos borrados localmente, pendientes de delete en el server
+  jugadoresBase: string[]; // ids de jugadores que sabemos que existen en el server (para poder borrar los que ya no estan)
+  jugadoresSucios: boolean;
+  configSucia: boolean;
+  conflictos: string[]; // ids con conflicto sin resolver; vive en el cache (no en un ref de resultado)
 };
 
 /**
@@ -50,7 +65,7 @@ export function limpiarCacheTorneosSiSincronizada(): boolean {
     return true;
   }
 
-  const c = parsed as CachePendiente;
+  const c = parsed as Partial<Cache>;
   const sucios = Array.isArray(c.sucios) ? c.sucios : [];
   const borrados = Array.isArray(c.borrados) ? c.borrados : [];
   const hayPendiente = sucios.length > 0 || borrados.length > 0 || c.jugadoresSucios === true || c.configSucia === true;
