@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
@@ -36,7 +36,19 @@ import { AdminSociosTab } from './components/AdminSociosTab';
 import { AdminOrderModal } from './components/AdminOrderModal';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
-import { AdminTorneosTab } from './components/AdminTorneosTab';
+import { CLAVE_CACHE as CLAVE_CACHE_TORNEOS } from './torneos/useSyncTorneos';
+
+// Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
+// (critical path) no lo cargue nunca; el chunk se pide recien al entrar a la pestaña Torneos.
+const AdminTorneosTab = lazy(() =>
+  import('./components/AdminTorneosTab').then((m) => ({ default: m.AdminTorneosTab })),
+);
+// Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
+// JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
+// avisarLimitado -> push -> pull (todos useCallback encadenados) y dispara el effect de
+// persistencia de cache de nuevo aunque `cache` no haya cambiado (JSON.stringify + write a
+// localStorage en cada render del admin, no solo cuando hay algo que sincronizar).
+const avisarTorneos = (mensaje: string) => toast.error(mensaje);
 
 // ─── 1. Utility Functions ────────────────────────────────────────────────────
 
@@ -548,6 +560,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     setCurrentAdmin(null);
     setIsAdmin(false);
     sessionStorage.removeItem('volea_admin');
+    // roster/resultados de torneos: no dejar que persistan en localStorage en una compu compartida
+    localStorage.removeItem(CLAVE_CACHE_TORNEOS);
   }, []);
 
   if (!loaded) return (
@@ -3648,10 +3662,12 @@ function AdminPage() {
           </div>
         )}
 
-        {/* Torneos Tab (gestor de torneos con sync local-first a Supabase) */}
+        {/* Torneos Tab (gestor de torneos con sync local-first a Supabase; lazy, ver import) */}
         {activeTab === 'torneos' && (
           <div className="fade-in">
-            <AdminTorneosTab avisar={(m) => toast.error(m)} />
+            <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando gestor de torneos…</div>}>
+              <AdminTorneosTab avisar={avisarTorneos} />
+            </Suspense>
           </div>
         )}
 
