@@ -323,8 +323,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       if (rt.error) throw rt.error;
       if (rj.error) throw rj.error;
       if (rc.error) throw rc.error;
-      setCache((prev) => {
-        const remotos = (rt.data ?? []).map((f) => ({ torneo: f.data as Torneo, updatedAt: f.updated_at as string }));
+      const remotos = (rt.data ?? []).map((f) => ({ torneo: f.data as Torneo, updatedAt: f.updated_at as string }));
+      const jugadoresDelServer = (rj.data ?? []).map((f) => ({ id: f.id as string, nombre: f.nombre as string, alias: (f.alias as string[]) ?? [] }));
+      // Funcion pura (mismo patron que reconciliarPostPush en push(), mas abajo): se llama DOS
+      // veces - una directa sobre cacheRef.current (para escribir cacheRef/conflictosRef de
+      // forma sincronica, YA) y otra como updater de setCache (para el estado React, si el
+      // componente sigue montado).
+      const aplicarPull = (prev: Cache): Cache => {
         const m = mergeTorneos({
           locales: prev.estado.torneos,
           remotos,
@@ -332,12 +337,8 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           borrados: new Set(prev.borrados),
           base: prev.base,
         });
-        const jugadoresDelServer = (rj.data ?? []).map((f) => ({ id: f.id as string, nombre: f.nombre as string, alias: (f.alias as string[]) ?? [] }));
         const jugadores = prev.jugadoresSucios ? prev.estado.jugadores : jugadoresDelServer;
         const configPuntos = prev.configSucia ? prev.estado.configPuntos : ((rc.data?.data as EstadoTorneos['configPuntos']) ?? prev.estado.configPuntos);
-        // updater puro: `conflictos` que computa el merge se escribe DIRECTO en el cache
-        // resultante (no en un ref leido inmediatamente despues del setCache). El effect
-        // de persistencia es quien despues propaga cache.conflictos a `conflictos`/`conflictosRef`.
         return {
           ...prev,
           estado: { torneos: m.torneos, jugadores, configPuntos },
@@ -345,7 +346,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           jugadoresBase: jugadoresDelServer.map((j) => j.id), // siempre la verdad del server
           conflictos: m.conflictos,
         };
-      });
+      };
+      // Mirror sincronico ANTES de push() (linea de abajo, mismo tick): push() se dispara sin
+      // esperar el render+effect de React que normalmente actualiza cacheRef/conflictosRef (ver
+      // comentario de conflictosRef, arriba). Sin esto, un pull que recien detecta un conflicto
+      // nuevo dispara un push que todavia lee conflictosRef desactualizado (sin el id nuevo) y
+      // sube igual el torneo en conflicto, pisando al server - exactamente lo que el conflicto
+      // debia impedir.
+      const cacheNuevo = aplicarPull(cacheRef.current);
+      cacheRef.current = cacheNuevo;
+      conflictosRef.current = new Set(cacheNuevo.conflictos);
+      setCache(aplicarPull);
       setEstadoSync((s) => (s === 'sinConexion' ? 'pendiente' : s));
       void push(); // si habia sucios, empujarlos ahora
     } catch (err) {
