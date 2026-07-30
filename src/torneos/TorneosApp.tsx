@@ -243,8 +243,18 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
               value={torneo.evento ?? ''}
               placeholder="ej. 26/7"
               style={{ width: 110 }}
+              list="rk-eventos-usados"
               onChange={(e) => actualizarTorneo(torneo.id, (t) => ({ ...t, evento: e.target.value.trim() === '' ? undefined : e.target.value }))}
+              onBlur={(e) => {
+                const limpio = e.target.value.trim();
+                if (limpio !== e.target.value) actualizarTorneo(torneo.id, (t) => ({ ...t, evento: limpio === '' ? undefined : limpio }));
+              }}
             />
+            <datalist id="rk-eventos-usados">
+              {[...new Set(estado.torneos.map((x) => x.evento?.trim()).filter((ev): ev is string => !!ev))].map((ev) => (
+                <option key={ev} value={ev} />
+              ))}
+            </datalist>
           </label>
         )}
         <label>

@@ -85,7 +85,10 @@ export function calcularRanking(
     if (filtro?.hasta && t.creadoEl > filtro.hasta) continue;
     const categoria = t.categoria as 'A' | 'B';
     const individual = (t.formato ?? 'grupos') === 'individual';
-    const evento = individual ? undefined : t.evento?.trim() || undefined;
+    // clave normalizada (trim + minusculas): "Sabado " y "sabado" son el MISMO evento — un typo
+    // de mayusculas no puede duplicar puntos en silencio. typeof: un import editado a mano con
+    // evento no-string se ignora en vez de tirar la pantalla abajo. La UI muestra el texto crudo.
+    const evento = individual || typeof t.evento !== 'string' ? undefined : t.evento.trim().toLowerCase() || undefined;
     if (evento) eventoDe.set(t.id, evento);
     for (const pareja of t.parejas) {
       const ids = pareja.jugadorIds;

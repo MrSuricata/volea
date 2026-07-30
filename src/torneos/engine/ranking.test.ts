@@ -107,7 +107,7 @@ describe('torneoAporta', () => {
 });
 
 describe('calcularRanking', () => {
-  it('dobles: los dos integrantes suman; A y B; acumula entre torneos', () => {
+  it('dobles: los dos integrantes suman; A y B; el individual PARTICIPO no paga', () => {
     let ps = armarLlave(seeds(['pa', 'pb']), false); // final directa
     ps = cargarResultadoLlave(ps, ps[0].id, 11, 6).partidos; // gana pa
     const torneoA = torneoBase({
@@ -211,6 +211,16 @@ describe('evento (max A/B por evento) e individuales sin puntos por participar',
     expect(fila('jA').aportes.find((a) => !a.descartadoPorEvento)!.escalon).toBe('CAMPEON'); // empate: queda el mejor escalon
     expect(fila('jB').puntos).toBe(72); // finalista B, un solo torneo: nada que descartar
     expect(fila('jC').puntos).toBe(100);
+  });
+
+  it('el evento agrupa sin importar mayusculas ni espacios; y un evento no-string no rompe', () => {
+    const tB = torneoFinalDirecta({ id: 'tB', categoria: 'B', evento: 'Sabado ' }, 'jA', 'jB'); // jA campeon B = 86
+    const tA = torneoFinalDirecta({ id: 'tA', categoria: 'A', evento: 'sabado' }, 'jC', 'jA'); // jA finalista A = 86
+    const ranking = calcularRanking([tB, tA], js('jA', 'jB', 'jC'), cfg);
+    expect(ranking.find((f) => f.jugadorId === 'jA')!.puntos).toBe(86); // 'Sabado ' y 'sabado' son el mismo evento
+    // evento no-string (import editado a mano): se ignora, no tira la pantalla abajo
+    const roto = torneoFinalDirecta({ id: 'tR', categoria: 'A', evento: 7 as unknown as string }, 'jA', 'jB');
+    expect(calcularRanking([roto], js('jA', 'jB'), cfg).find((f) => f.jugadorId === 'jA')!.puntos).toBe(100);
   });
 
   it('sin evento o con eventos distintos: suma todo como siempre', () => {
