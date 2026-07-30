@@ -36,6 +36,7 @@ import { AdminSociosTab } from './components/AdminSociosTab';
 import { AdminOrderModal } from './components/AdminOrderModal';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
+import { AdminTorneosTab } from './components/AdminTorneosTab';
 
 // ─── 1. Utility Functions ────────────────────────────────────────────────────
 
@@ -2928,6 +2929,7 @@ function AdminPage() {
     { id: 'categories', label: 'Categorías', icon: <Tag size={18} /> },
     { id: 'clubs', label: 'Clubes', icon: <Map size={18} /> },
     { id: 'announcements', label: 'Anuncios', icon: <Megaphone size={18} /> },
+    { id: 'torneos', label: 'Torneos', icon: <Trophy size={18} /> },
   ];
 
   // Stock metrics (nativo: calculado desde los productos de Supabase)
@@ -3643,6 +3645,13 @@ function AdminPage() {
               onSave={saveStanding}
               onDelete={removeStanding}
             />
+          </div>
+        )}
+
+        {/* Torneos Tab (gestor de torneos con sync local-first a Supabase) */}
+        {activeTab === 'torneos' && (
+          <div className="fade-in">
+            <AdminTorneosTab avisar={(m) => toast.error(m)} />
           </div>
         )}
 
