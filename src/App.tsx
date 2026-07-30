@@ -36,7 +36,13 @@ import { AdminSociosTab } from './components/AdminSociosTab';
 import { AdminOrderModal } from './components/AdminOrderModal';
 import { AdminStandingsTab } from './components/AdminStandingsTab';
 import { ProductEditor } from './components/ProductEditor';
-import { CLAVE_CACHE as CLAVE_CACHE_TORNEOS } from './torneos/useSyncTorneos';
+// NOTA sobre './torneos/cacheTorneos': no se importa arriba a proposito (ver logout, mas
+// abajo, que lo importa dinamicamente). Es un modulo hoja sin imports de React/Supabase/el
+// hook, pero aun un import ESTATICO de una sola constante desde aca alcanzaria para que
+// quede en el chunk de entrada; con dynamic import ni siquiera eso - se pide solo al cerrar
+// sesion. Importar cualquier cosa de useSyncTorneos.ts aca (no solo de cacheTorneos.ts)
+// seria mucho peor: arrastra el hook entero (supabase, mergeTorneos, etc.) de vuelta al
+// chunk de entrada y rompe el split lazy de AdminTorneosTab de abajo.
 
 // Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
 // (critical path) no lo cargue nunca; el chunk se pide recien al entrar a la pestaña Torneos.
@@ -560,8 +566,19 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     setCurrentAdmin(null);
     setIsAdmin(false);
     sessionStorage.removeItem('volea_admin');
-    // roster/resultados de torneos: no dejar que persistan en localStorage en una compu compartida
-    localStorage.removeItem(CLAVE_CACHE_TORNEOS);
+    // roster/resultados de torneos: no dejar que persistan en localStorage en una compu
+    // compartida - PERO solo si ya se sincronizaron. El gestor promete "tus cambios quedan
+    // guardados en este navegador y se reintenta solo"; si hay push pendiente (mala señal,
+    // recien cerro el tab de Torneos) borrar incondicionalmente lo perdería para siempre.
+    // Import dinamico a proposito (no estatico arriba): asi ni el string de la clave de
+    // cache queda en el chunk de entrada - se pide solo en este momento puntual (logout no
+    // es un path sensible a latencia). Si falla (offline, etc.) no bloquea el logout en si.
+    try {
+      const { limpiarCacheTorneosSiSincronizada } = await import('./torneos/cacheTorneos');
+      limpiarCacheTorneosSiSincronizada();
+    } catch (e) {
+      console.error('[logout] no se pudo revisar la cache de torneos', e);
+    }
   }, []);
 
   if (!loaded) return (

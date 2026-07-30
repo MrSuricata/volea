@@ -3,8 +3,7 @@ import { supabase } from '../services/supabaseClient';
 import type { EstadoTorneos } from './TorneosApp';
 import type { Torneo } from './engine/tipos';
 import { mergeTorneos } from './sync';
-
-export const CLAVE_CACHE = 'volea-torneos:cache';
+import { CLAVE_CACHE } from './cacheTorneos';
 
 type Cache = {
   estado: EstadoTorneos;
@@ -276,6 +275,11 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       // bookkeeping viejo. Si el componente sigue montado, el setCache de mas abajo hace
       // ademas el camino normal (estado React + su effect, que vuelve a escribir el mismo
       // resultado en localStorage - redundante pero inofensivo).
+      // Limite conocido y acotado: cacheRef.current es el ULTIMO estado COMMITEADO (se
+      // reasigna al tope del render), no necesariamente el resultado de un setEstado que ya
+      // se encolo pero todavia no rendereo. Ese caso lo corrige el effect de persistencia
+      // milisegundos despues, apenas React haga ese render pendiente; solo un cierre del
+      // navegador exactamente en esa ventana microscopica podria perder esa UNA edicion.
       const cachePersistido = reconciliarPostPush(cacheRef.current);
       cacheRef.current = cachePersistido;
       try {
@@ -388,7 +392,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       };
     });
     if (timerPush.current !== null) window.clearTimeout(timerPush.current);
-    timerPush.current = window.setTimeout(() => { void push(); }, 1500);
+    timerPush.current = window.setTimeout(() => {
+      // Limpiar la ref ANTES de empujar: asi timerPush.current !== null significa "hay un
+      // debounce pendiente de disparar" (lo que el cleanup de desmontaje necesita para decidir
+      // si hace falta flushear), no "se edito en algun momento de este mount".
+      timerPush.current = null;
+      void push();
+    }, 1500);
   }, [push]);
 
   // ---- resolver conflicto: 'local' re-empuja lo mio; 'server' trae lo del server ----
