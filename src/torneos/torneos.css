@@ -126,3 +126,20 @@
 
 /* Ranking */
 .rk tr[style*="cursor"]:hover td { background: rgba(204, 255, 0, 0.06); }
+
+/* Público (Etapa 2): indicador "en vivo" y puntaje de solo lectura en la llave */
+.rk .en-vivo {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--lima-suave); border: 1px solid var(--lima); color: var(--lima);
+  padding: 4px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+}
+.rk .en-vivo .punto-vivo {
+  width: 8px; height: 8px; border-radius: 999px; background: var(--lima);
+  animation: rk-pulso 1.4s ease-in-out infinite;
+}
+@keyframes rk-pulso {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+.rk .puntaje-llave { font-size: 1.15rem; font-weight: 800; min-width: 26px; text-align: center; }
