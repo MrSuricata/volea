@@ -198,6 +198,10 @@ function useParallax(distance = 80) {
 // ─── 3. StoreContext & StoreProvider ─────────────────────────────────────────
 
 interface StoreContextType {
+  // false mientras los datos de la nube siguen viajando. La web se muestra a los 4s
+  // pase lo que pase (ver techoSplash), así que sin esta bandera una tienda todavía
+  // vacía diría "no encontramos productos", que es mentira: aún no llegaron.
+  datosListos: boolean;
   products: Product[];
   setProducts: (p: Product[]) => void;
   refreshProducts: () => Promise<void>;
@@ -289,8 +293,22 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [datosListos, setDatosListos] = useState(false);
 
   useEffect(() => {
+    let vivo = true;
+    // TECHO DURO DEL SPLASH. Antes la web entera esperaba a que terminaran el probe de
+    // salud y las 8 consultas iniciales, sin timeout ni catch: un solo pedido colgado
+    // (red mala, Supabase frío, refresh del token del admin reteniendo el navigator lock
+    // que necesitan todas las queries) dejaba "Cargando..." para siempre y la única
+    // salida era F5. Ahora a los 4s se muestra la web pase lo que pase; los datos que
+    // lleguen tarde entran solos cuando llegan (cada _set* dispara su render).
+    const techoSplash = setTimeout(() => {
+      if (!vivo) return;
+      console.warn('[arranque] los datos tardaron más de 4s: muestro la web igual y sigo esperándolos');
+      setLoaded(true);
+    }, 4000);
+
     const loadData = async () => {
       // Wait for Supabase health probe (max 2.5s); falls back on failure.
       await supabaseReady;
@@ -368,9 +386,20 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       _setCart(refreshedCart);
       StorageService.setCart(refreshedCart);
-      setLoaded(true);
     };
-    loadData();
+    // `finally` (no solo el camino feliz): si loadData falla a mitad —una query que
+    // rechaza, un dato con forma inesperada— la web se muestra igual. Antes el throw
+    // se perdía en una promesa sin catch y el splash quedaba colgado para siempre.
+    loadData()
+      .catch((e) => console.error('[arranque] falló la carga inicial; muestro la web con lo que haya', e))
+      .finally(() => {
+        if (!vivo) return;
+        clearTimeout(techoSplash);
+        setLoaded(true);
+        setDatosListos(true);
+      });
+
+    return () => { vivo = false; clearTimeout(techoSplash); };
   }, []);
 
   const setProducts = useCallback((p: Product[]) => {
@@ -595,6 +624,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StoreContext.Provider value={{
+      datosListos,
       products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, orders, setOrders, addOrder,
       posts, savePost, removePost, standings, saveStanding, removeStanding,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
@@ -1433,7 +1463,7 @@ function HomePage() {
 // ─── 8. ShopPage ─────────────────────────────────────────────────────────────
 
 function ShopPage() {
-  const { products, categories, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory } = useStore();
+  const { products, categories, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory, datosListos } = useStore();
   const [searchParams] = useSearchParams();
   const [sort, setSort] = useState('recent');
   usePageMeta({
@@ -1513,8 +1543,18 @@ function ShopPage() {
       {/* Product Grid */}
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
-          <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
-          <p className="font-display text-lg">No encontramos productos con esa búsqueda. Probá otra categoría.</p>
+          {!datosListos && products.length === 0 ? (
+            // Los datos siguen viajando (red lenta): decir "no hay" acá sería mentira.
+            <>
+              <Package size={64} strokeWidth={1} className="mx-auto mb-4 animate-pulse" />
+              <p className="font-display text-lg">Cargando la colección…</p>
+            </>
+          ) : (
+            <>
+              <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
+              <p className="font-display text-lg">No encontramos productos con esa búsqueda. Probá otra categoría.</p>
+            </>
+          )}
         </div>
       ) : (
         <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
