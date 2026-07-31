@@ -71,7 +71,9 @@ export default function RankingPage() {
           // No se pudo leer la escalera de puntos del server y se calculó con la default.
           // Si alguien la editó, estos números no son los del gestor: mejor decirlo que
           // mostrar un ranking equivocado con cara de oficial.
-          <p className="vacio" style={{ marginBottom: 12 }}>
+          // `aviso`, no `vacio`: este último es el gris apagado de "acá no hay nada" y hacía
+          // que la advertencia se leyera como texto de relleno en vez de como advertencia.
+          <p className="aviso" style={{ marginBottom: 12 }}>
             ⚠ No pudimos confirmar la tabla de puntos con el servidor, así que estos puntajes
             podrían estar desactualizados. Probá recargar en un rato.
           </p>

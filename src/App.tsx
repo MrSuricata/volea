@@ -18,6 +18,7 @@ import {
 import { StorageService } from './services/storageService';
 import { SupabaseService } from './services/supabaseService';
 import { isSupabaseConnected, supabaseReady } from './services/supabaseClient';
+import { conLimite } from './utils/arranque';
 import {
   sendMagicLink,
   signInWithPassword,
@@ -325,7 +326,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       // productos/categorías y localStorage para el resto.
       let loadedProducts: Product[];
       if (isSupabaseConnected()) {
-        const [p, c, e, o, cl, an, po, st] = await Promise.all([
+        // Techo también acá, no solo en el splash. Las 8 consultas son `await` pelados
+        // (supabaseService no tiene ni un timeout), así que si UNA no responde nunca,
+        // Promise.all no resuelve, el .finally() de abajo no corre y `datosListos` queda
+        // en false PARA SIEMPRE: la web se muestra a los 4s pero tienda, checkout y ficha
+        // se quedan girando eternamente. Con el techo, a los 10s se sigue con el respaldo
+        // (snapshot para productos/categorías, INITIAL_* para el resto) y las páginas
+        // pueden decir la verdad en vez de un "cargando" infinito.
+        const respaldo: [Product[] | null, Category[] | null, Event[], Order[], Club[], Announcement[], Post[], StandingEntry[]] =
+          [null, null, [], [], [], [], [], []];
+        const [p, c, e, o, cl, an, po, st] = await conLimite(Promise.all([
           SupabaseService.getProducts(),
           SupabaseService.getCategories(),
           SupabaseService.getEvents(),
@@ -334,7 +344,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
           SupabaseService.getAnnouncements(),
           SupabaseService.getPosts(),
           SupabaseService.getStandings(),
-        ]);
+        ]), 10000, respaldo);
         // null = fetch falló → snapshot legacy; [] = catálogo vacío a propósito.
         loadedProducts = p ?? getProductsAsInternal();
         _setProducts(loadedProducts);

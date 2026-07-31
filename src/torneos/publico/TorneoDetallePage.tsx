@@ -81,6 +81,8 @@ export default function TorneoDetallePage({ onNombre }: Props) {
         if (r.torneo) {
           setTorneo(r.torneo);
           onNombreRef.current?.(r.torneo.nombre);
+        } else if (r.error) {
+          console.error('[torneos publico] fallo el refresco al volver a la pestaña', r.error);
         }
       })();
     };
