@@ -49,6 +49,12 @@ import { ProductEditor } from './components/ProductEditor';
 const AdminTorneosTab = lazy(() =>
   import('./components/AdminTorneosTab').then((m) => ({ default: m.AdminTorneosTab })),
 );
+// Paginas publicas de Torneos (Etapa 2): mismo motivo que AdminTorneosTab arriba - cargan
+// el motor de torneos + torneos.css (.rk) que la tienda publica (critical path) no
+// necesita. Se piden recien cuando alguien navega a /ranking, /torneos o /torneos/:id.
+const RankingPageLazy = lazy(() => import('./torneos/publico/RankingPage'));
+const TorneosListaPageLazy = lazy(() => import('./torneos/publico/TorneosListaPage'));
+const TorneoDetallePageLazy = lazy(() => import('./torneos/publico/TorneoDetallePage'));
 // Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
 // JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
 // avisarLimitado -> push -> pull (todos useCallback encadenados) y dispara el effect de
@@ -669,6 +675,7 @@ function Navbar() {
     { to: '/tienda', label: 'Tienda' },
     { to: '/blog', label: 'Blog' },
     { to: '/clasificacion', label: 'Clasificación' },
+    { to: '/ranking', label: 'Ranking' },
     { to: '/eventos', label: 'Eventos' },
     { to: '/mapa', label: 'Mapa' },
     { to: '/contacto', label: 'Contacto' },
@@ -4476,6 +4483,47 @@ function StandingsRoute() {
   return <StandingsPage standings={standings} />;
 }
 
+// Torneos online (Etapa 2, público): ranking VOLEA + lista de torneos + detalle en vivo.
+// Cada wrapper llama usePageMeta acá (mismo patrón que los de arriba) y suspende el chunk
+// lazy con un fallback en clases Tailwind (torneos.css todavía no cargó en ese instante).
+function TorneosCargando() {
+  return <div className="max-w-5xl mx-auto px-4 py-16 text-center text-navy-500 text-sm">Cargando…</div>;
+}
+function RankingRoute() {
+  usePageMeta({
+    title: 'Ranking',
+    description: 'Ranking oficial de pickleball de VOLEA Uruguay: puntos por torneo, categorías A y B, actualizado después de cada fecha.',
+  });
+  return (
+    <Suspense fallback={<TorneosCargando />}>
+      <RankingPageLazy />
+    </Suspense>
+  );
+}
+function TorneosListaRoute() {
+  usePageMeta({
+    title: 'Torneos',
+    description: 'Torneos de pickleball organizados por VOLEA en Uruguay: grupos, llaves y resultados.',
+  });
+  return (
+    <Suspense fallback={<TorneosCargando />}>
+      <TorneosListaPageLazy />
+    </Suspense>
+  );
+}
+function TorneoDetalleRoute() {
+  const [nombre, setNombre] = useState<string | undefined>(undefined);
+  usePageMeta({
+    title: nombre ?? 'Torneo',
+    description: 'Resultados en vivo del torneo: grupos, llave y podio. VOLEA pickleball Uruguay.',
+  });
+  return (
+    <Suspense fallback={<TorneosCargando />}>
+      <TorneoDetallePageLazy onNombre={setNombre} />
+    </Suspense>
+  );
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
   // Sin AnimatePresence: con framer-motion 12 + React 19, mode="wait" deja la
@@ -4489,6 +4537,9 @@ function AnimatedRoutes() {
       <Route path="/blog" element={<PageTransition><BlogListRoute /></PageTransition>} />
       <Route path="/blog/:slug" element={<PageTransition><BlogPostRoute /></PageTransition>} />
       <Route path="/clasificacion" element={<PageTransition><StandingsRoute /></PageTransition>} />
+      <Route path="/ranking" element={<PageTransition><RankingRoute /></PageTransition>} />
+      <Route path="/torneos" element={<PageTransition><TorneosListaRoute /></PageTransition>} />
+      <Route path="/torneos/:id" element={<PageTransition><TorneoDetalleRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
       <Route path="/mapa" element={<PageTransition><MapPage /></PageTransition>} />
       <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />
