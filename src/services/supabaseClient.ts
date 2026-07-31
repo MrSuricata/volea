@@ -82,8 +82,12 @@ export const supabaseReady: Promise<boolean> = (async () => {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
-      const res = await fetch(`${supabaseUrl}/rest/v1/`, {
-        method: 'HEAD',
+      // /auth/v1/health en vez de HEAD a /rest/v1/: aquel respondía 401 (esperado: la raíz
+      // REST no es un endpoint público) y el navegador lo loguea como error en CADA carga,
+      // ensuciando la consola de producción y tapando errores de verdad. Este devuelve 200
+      // y no depende de que exista ninguna tabla. Sirve igual: lo que se mide es que el
+      // DNS resuelva y el servidor conteste, no el contenido.
+      const res = await fetch(`${supabaseUrl}/auth/v1/health`, {
         headers: { apikey: supabaseAnonKey },
         signal: ctrl.signal,
       });

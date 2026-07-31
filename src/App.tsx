@@ -825,12 +825,25 @@ function CartDrawer() {
                         <Minus size={14} />
                       </button>
                       <span className="font-semibold text-sm w-6 text-center">{item.quantity}</span>
-                      <button
-                        onClick={() => updateCartQuantity(item.product.id, item.selectedSize, item.selectedColor, item.quantity + 1)}
-                        className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors"
-                      >
-                        <Plus size={14} />
-                      </button>
+                      {(() => {
+                        // updateCartQuantity ya topea con el stock, pero el botón no lo
+                        // mostraba: al llegar al tope se podía seguir clickeando sin que
+                        // pasara nada y sin explicación. Mismo estado deshabilitado que ya
+                        // usa el control de la ficha de producto.
+                        const clave = item.selectedColor ? `${item.selectedSize}|${item.selectedColor}` : item.selectedSize;
+                        const disponible = item.product.stockBySize[clave] || 0;
+                        const enElTope = item.quantity >= disponible;
+                        return (
+                          <button
+                            onClick={() => updateCartQuantity(item.product.id, item.selectedSize, item.selectedColor, item.quantity + 1)}
+                            disabled={enElTope}
+                            title={enElTope ? `No hay más stock (${disponible} disponible${disponible === 1 ? '' : 's'})` : undefined}
+                            className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                   <button
@@ -1596,8 +1609,18 @@ function ProductDetailPage() {
 
   useEffect(() => {
     if (product) {
-      if (product.sizes.length > 0) setSelectedSize(product.sizes[0]);
-      if (product.colors.length > 0) setSelectedColor(product.colors[0].name);
+      // Preseleccionar una combinación QUE SE PUEDA COMPRAR. Antes se tomaba siempre
+      // colors[0]/sizes[0]: si ese color estaba agotado en todos los talles, el producto
+      // abría en un callejón sin salida — los botones de talle se veían disponibles y
+      // recién al tocarlos decía "Sin stock". Si ningún color tiene stock, se cae al
+      // comportamiento viejo (el primero) y la ficha muestra "Agotado", que es honesto.
+      const stockDe = (talle: string, color: string) =>
+        product.stockBySize[color ? `${talle}|${color}` : talle] || 0;
+      const colorComprable = product.colors.find((c) => product.sizes.some((s) => stockDe(s, c.name) > 0));
+      const color = colorComprable?.name ?? product.colors[0]?.name ?? '';
+      const talleComprable = product.sizes.find((s) => stockDe(s, color) > 0);
+      if (product.colors.length > 0) setSelectedColor(color);
+      if (product.sizes.length > 0) setSelectedSize(talleComprable ?? product.sizes[0]);
       setMainImg(0);
       setQty(1);
       setAdded(false);
@@ -2125,7 +2148,10 @@ function MapPage() {
                 <p className="flex items-center gap-2"><Phone size={14} className="flex-shrink-0" /> {club.phone}</p>
               )}
               {club.instagram && (
-                <p className="flex items-center gap-2"><Instagram size={14} className="flex-shrink-0" /> @{club.instagram}</p>
+                // El dato puede venir con o sin "@" (los clubes de constants.ts lo traen;
+                // los que se carguen a mano quizá no). Se saca el que venga y lo pone la
+                // vista: si no, quedaba "@@pickleballcity.uy" en casi todas las tarjetas.
+                <p className="flex items-center gap-2"><Instagram size={14} className="flex-shrink-0" /> @{club.instagram.replace(/^@+/, '')}</p>
               )}
             </div>
             <p className="text-gray-500 text-sm line-clamp-3 mb-4">{club.description}</p>
@@ -4350,7 +4376,9 @@ function Footer() {
               span.textContent = 'VOLEA';
               e.currentTarget.parentElement?.appendChild(span);
             }} />
-            <p className="text-gray-400 text-sm mt-4 leading-relaxed">
+            {/* gray-600, no gray-400: sobre blanco el 400 daba 2.54:1, debajo del minimo AA
+                de 4.5:1 — se lee mal en el celular al sol, que es como mira casi todo el publico. */}
+            <p className="text-gray-600 text-sm mt-4 leading-relaxed">
               La primera marca de indumentaria de pickleball de Uruguay. Evolucionamos distinto. Jugamos distinto.
             </p>
           </div>
