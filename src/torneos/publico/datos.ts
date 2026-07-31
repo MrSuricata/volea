@@ -74,20 +74,27 @@ export async function listarJugadoresPublicos(): Promise<JugadoresResultado> {
   return conLimite(cargarJugadores(supabase), TIMEOUT_MS, { jugadores: [], error: MSG_SIN_SERVICIO });
 }
 
-async function cargarConfig(client: SupabaseClient): Promise<ConfigPuntos> {
+// `confiable: false` = no se pudo leer la config del server y se está usando el default.
+// Importa porque si algún día se edita la escalera desde el admin, calcular con el default
+// daría puntajes DISTINTOS a los del gestor, presentados con total seguridad bajo el título
+// "Ranking VOLEA". El que muestra decide qué hacer con esa duda (hoy: avisar).
+export type ConfigResultado = { config: ConfigPuntos; confiable: boolean };
+
+async function cargarConfig(client: SupabaseClient): Promise<ConfigResultado> {
   const { data: fila, error } = await client.from('rk_config').select('data').eq('id', 1).maybeSingle();
-  if (error || !fila) return CONFIG_PUNTOS_DEFAULT;
+  if (error) return { config: CONFIG_PUNTOS_DEFAULT, confiable: false };
+  // Sin fila: el server no tiene config propia y el default ES la verdad (mismo caso que
+  // el gestor arrancando de cero). Eso sí es confiable, a diferencia de un fetch fallido.
+  if (!fila) return { config: CONFIG_PUNTOS_DEFAULT, confiable: true };
   const cfg = fila.data as Partial<ConfigPuntos> | null;
   if (!cfg || !Array.isArray(cfg.escalera) || cfg.escalera.length !== 6 || typeof cfg.offsetB !== 'number') {
-    return CONFIG_PUNTOS_DEFAULT;
+    return { config: CONFIG_PUNTOS_DEFAULT, confiable: false }; // fila corrupta: no sabemos con qué se calculó
   }
-  return cfg as ConfigPuntos;
+  return { config: cfg as ConfigPuntos, confiable: true };
 }
 
-// Nunca falla "hacia afuera": sin fila en el server (sin conexión, o timeout), cae al
-// default de la app (el mismo que usa el gestor cuando arranca de cero). Así el ranking
-// público siempre puede calcularse con algo razonable en vez de quedar bloqueado por la config.
-export async function obtenerConfigPublico(): Promise<ConfigPuntos> {
-  if (!supabase) return CONFIG_PUNTOS_DEFAULT;
-  return conLimite(cargarConfig(supabase), TIMEOUT_MS, CONFIG_PUNTOS_DEFAULT);
+export async function obtenerConfigPublico(): Promise<ConfigResultado> {
+  const respaldo: ConfigResultado = { config: CONFIG_PUNTOS_DEFAULT, confiable: false };
+  if (!supabase) return respaldo;
+  return conLimite(cargarConfig(supabase), TIMEOUT_MS, respaldo);
 }

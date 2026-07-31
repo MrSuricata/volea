@@ -20,6 +20,7 @@ export default function RankingPage() {
   const [torneos, setTorneos] = useState<Torneo[]>([]);
   const [jugadores, setJugadores] = useState<Jugador[]>([]);
   const [config, setConfig] = useState<ConfigPuntos | null>(null);
+  const [configDudosa, setConfigDudosa] = useState(false);
   const [historico, setHistorico] = useState(false);
   const [abierto, setAbierto] = useState<string | null>(null);
   const anio = new Date().getFullYear();
@@ -34,7 +35,8 @@ export default function RankingPage() {
     }
     setTorneos(rt.torneos);
     setJugadores(rj.jugadores);
-    setConfig(cfg);
+    setConfig(cfg.config);
+    setConfigDudosa(!cfg.confiable);
     setEstado('ok');
   }, []);
 
@@ -64,6 +66,16 @@ export default function RankingPage() {
           <button className={`boton ${historico ? 'secundario' : ''}`} onClick={() => setHistorico(false)}>{anio}</button>
           <button className={`boton ${historico ? '' : 'secundario'}`} onClick={() => setHistorico(true)}>Histórico</button>
         </div>
+
+        {configDudosa && filas.length > 0 && (
+          // No se pudo leer la escalera de puntos del server y se calculó con la default.
+          // Si alguien la editó, estos números no son los del gestor: mejor decirlo que
+          // mostrar un ranking equivocado con cara de oficial.
+          <p className="vacio" style={{ marginBottom: 12 }}>
+            ⚠ No pudimos confirmar la tabla de puntos con el servidor, así que estos puntajes
+            podrían estar desactualizados. Probá recargar en un rato.
+          </p>
+        )}
 
         {filas.length === 0 ? (
           <p className="vacio">Todavía no hay puntos cargados{historico ? '' : ` en ${anio}`}. Volvé después del próximo torneo.</p>

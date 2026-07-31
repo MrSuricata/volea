@@ -7,7 +7,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet
+  Globe, Navigation, Newspaper, Wallet, Loader2
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
@@ -316,7 +316,9 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     }, 4000);
 
     const loadData = async () => {
-      // Wait for Supabase health probe (max 2.5s); falls back on failure.
+      // Espera el probe de salud de Supabase: hasta ~12s (2 intentos × 6s de abort, ver
+      // supabaseClient.ts), NO 2.5s como decía este comentario. Por eso existe el techo de
+      // arriba: sin él, esos 12s del peor caso son 12s de splash antes de siquiera pedir datos.
       await supabaseReady;
 
       // Supabase es la fuente de verdad de todo. Fallback: snapshot legacy para
@@ -940,7 +942,7 @@ function ProductCard({ product }: { product: Product }) {
 // ─── 7. HomePage ─────────────────────────────────────────────────────────────
 
 function HomePage() {
-  const { products, categories, posts, standings, announcements } = useStore();
+  const { products, categories, posts, standings, announcements, datosListos } = useStore();
   const heroBgY = useParallax(120);
   const heroTextY = useParallax(-40);
 
@@ -1114,6 +1116,10 @@ function HomePage() {
       </section>
 
       {/* ── 3. Destacados ───────────────────────────────────────────────── */}
+      {/* Con la web mostrándose a los 4s, esta sección podía quedar como un título con una
+          grilla vacía debajo — lo primero que ve alguien que entra con mala red, y parece
+          rota. Si todavía no hay nada que destacar, no se dibuja. */}
+      {(featured.length > 0 || datosListos) && (
       <section className="py-20 bg-gradient-to-b from-white to-gray-50">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
@@ -1142,6 +1148,7 @@ function HomePage() {
           </Reveal>
         </div>
       </section>
+      )}
 
       {/* ── 4. Categorías ───────────────────────────────────────────────── */}
       <section className="bg-gray-50 py-20">
@@ -1593,7 +1600,7 @@ function ShopPage() {
 
 function ProductDetailPage() {
   const { id } = useParams();
-  const { products, categories, addToCart, setCartOpen } = useStore();
+  const { products, categories, addToCart, setCartOpen, datosListos } = useStore();
   const navigate = useNavigate();
   const product = products.find(p => p.id === id);
   usePageMeta({
@@ -1626,6 +1633,18 @@ function ProductDetailPage() {
       setAdded(false);
     }
   }, [product]);
+
+  // Link compartido (Instagram) + red lenta: los productos todavía no llegaron, así que
+  // buscarlo da undefined. Decir "no existe" ahí es mentira y espanta justo a quien vino
+  // por el link. Recién cuando la carga terminó se puede afirmar que no está.
+  if (!product && !datosListos) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <Package size={64} strokeWidth={1} className="mx-auto text-gray-300 mb-4 animate-pulse" />
+        <h1 className="font-display text-2xl font-bold text-navy-700">Cargando el producto…</h1>
+      </div>
+    );
+  }
 
   if (!product) {
     return (
@@ -1875,7 +1894,7 @@ function ProductDetailPage() {
 // ─── 10. EventsPage ──────────────────────────────────────────────────────────
 
 function EventsPage() {
-  const { events } = useStore();
+  const { events, datosListos } = useStore();
   const [filter, setFilter] = useState<string>('all');
   usePageMeta({
     title: 'Eventos y torneos de pickleball',
@@ -2008,7 +2027,11 @@ function EventsPage() {
         </div>
       )}
 
-      {filtered.length === 0 && (
+      {filtered.length === 0 && !datosListos && events.length === 0 && (
+        <SeccionCargando texto="Cargando los eventos…" />
+      )}
+
+      {filtered.length === 0 && (datosListos || events.length > 0) && (
         <div className="text-center py-20 text-gray-400">
           <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4" />
           <p className="font-display text-lg">Por ahora no hay eventos agendados</p>
@@ -2023,7 +2046,7 @@ function EventsPage() {
 declare const L: any;
 
 function MapPage() {
-  const { clubs } = useStore();
+  const { clubs, datosListos } = useStore();
   usePageMeta({
     title: 'Clubes y canchas de pickleball',
     description: 'Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil. Mapa de clubes y canchas actualizado.',
@@ -2172,7 +2195,11 @@ function MapPage() {
         ))}
       </div>
 
-      {filteredClubs.length === 0 && (
+      {filteredClubs.length === 0 && !datosListos && clubs.length === 0 && (
+        <SeccionCargando texto="Cargando los clubes…" />
+      )}
+
+      {filteredClubs.length === 0 && (datosListos || clubs.length > 0) && (
         <div className="text-center py-20 text-gray-400">
           <MapPin size={64} strokeWidth={1} className="mx-auto mb-4" />
           <p className="font-display text-lg">No se encontraron clubes</p>
@@ -2324,7 +2351,7 @@ function ContactPage() {
 // ─── 12. CheckoutPage ────────────────────────────────────────────────────────
 
 function CheckoutPage() {
-  const { cart, clearCart, addOrder } = useStore();
+  const { cart, clearCart, addOrder, datosListos } = useStore();
   usePageMeta({
     title: 'Finalizar pedido',
     description: 'Completá tus datos y enviá tu pedido: te contactamos por WhatsApp para coordinar la entrega y el pago.',
@@ -2335,6 +2362,19 @@ function CheckoutPage() {
   const [success, setSuccess] = useState(false);
 
   const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+
+  // El carrito se rehidrata al final de la carga inicial, y la web ahora se muestra a los
+  // 4s aunque los datos no hayan llegado. Sin esta guarda, quien vuelve al checkout
+  // después de coordinar por WhatsApp (el flujo normal de esta tienda) con la red mala se
+  // encontraba con "Tu carrito está vacío" y un link para IRSE. Mentira y en el peor lugar.
+  if (cart.length === 0 && !success && !datosListos) {
+    return (
+      <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
+        <ShoppingCart size={64} strokeWidth={1} className="mx-auto text-gray-300 mb-4 animate-pulse" />
+        <h1 className="font-display text-2xl font-bold text-navy-700">Cargando tu carrito…</h1>
+      </div>
+    );
+  }
 
   if (cart.length === 0 && !success) {
     return (
@@ -4483,16 +4523,29 @@ function Footer() {
 // ─── 17. Main App Component ──────────────────────────────────────────────────
 
 // Wrappers: conectan las páginas nuevas (componentes puros) con el store.
+// Placeholder para el hueco entre que la web se muestra (techo de 4s) y que llegan los
+// datos: sin esto, estas páginas afirman "no hay nada" cuando la verdad es "todavía no
+// llegó". Va en los wrappers y no adentro de las páginas para no cambiarles la firma.
+function SeccionCargando({ texto }: { texto: string }) {
+  return (
+    <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center text-gray-400">
+      <Loader2 size={48} className="mx-auto mb-4 animate-spin" />
+      <p className="font-display text-lg">{texto}</p>
+    </div>
+  );
+}
+
 function BlogListRoute() {
-  const { posts } = useStore();
+  const { posts, datosListos } = useStore();
   usePageMeta({
     title: 'Blog',
     description: 'Novedades del pickleball en Uruguay, la comunidad y todo lo que pasa en VOLEA.',
   });
+  if (!datosListos && posts.length === 0) return <SeccionCargando texto="Cargando el blog…" />;
   return <BlogListPage posts={posts} />;
 }
 function BlogPostRoute() {
-  const { posts } = useStore();
+  const { posts, datosListos } = useStore();
   const { slug } = useParams<{ slug: string }>();
   const post = posts.find(p => p.published && p.slug === slug);
   usePageMeta({
@@ -4500,14 +4553,16 @@ function BlogPostRoute() {
     description: post?.excerpt,
     image: post?.coverUrl,
   });
+  if (!post && !datosListos) return <SeccionCargando texto="Cargando la publicación…" />;
   return <BlogPostPage posts={posts} />;
 }
 function StandingsRoute() {
-  const { standings } = useStore();
+  const { standings, datosListos } = useStore();
   usePageMeta({
     title: 'Clasificación — Camino al Mundial',
     description: 'Ranking de jugadores de pickleball rumbo al Mundial, actualizado por el equipo VOLEA después de cada torneo.',
   });
+  if (!datosListos && standings.length === 0) return <SeccionCargando texto="Cargando la clasificación…" />;
   return <StandingsPage standings={standings} />;
 }
 

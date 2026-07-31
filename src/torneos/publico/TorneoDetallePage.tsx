@@ -54,6 +54,9 @@ export default function TorneoDetallePage({ onNombre }: Props) {
   useEffect(() => {
     if (!id || estado !== 'ok' || !torneo || torneo.fase === 'terminado') return;
     const intervalo = window.setInterval(() => {
+      // Pestaña en segundo plano: no gastar datos del celular refrescando algo que nadie
+      // está mirando. Al volver al frente, el listener de abajo refresca una vez enseguida.
+      if (document.visibilityState !== 'visible') return;
       void (async () => {
         const r = await obtenerTorneoPublico(id);
         if (r.torneo) {
@@ -68,7 +71,25 @@ export default function TorneoDetallePage({ onNombre }: Props) {
         // vivo. Se deja el último estado conocido en pantalla en vez de un "no encontrado" abrupto.
       })();
     }, POLL_MS);
-    return () => window.clearInterval(intervalo);
+
+    // Al volver a la pestaña, refrescar YA en vez de esperar hasta 15s: quien vuelve a
+    // mirar el torneo quiere el resultado de ahora, no el de cuando se fue.
+    const alVolver = () => {
+      if (document.visibilityState !== 'visible') return;
+      void (async () => {
+        const r = await obtenerTorneoPublico(id);
+        if (r.torneo) {
+          setTorneo(r.torneo);
+          onNombreRef.current?.(r.torneo.nombre);
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+
+    return () => {
+      window.clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- torneo se lee fresco vía closure en cada tick; solo id/estado/fase deciden si el intervalo debe (re)armarse.
   }, [id, estado, torneo?.fase]);
 
