@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS announcements (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tabla de pedidos (consultas por WhatsApp desde el checkout; los pagos
--- online reales viven en Shopify)
+-- Tabla de pedidos: checkout anónimo coordinado por WhatsApp y/o pagado online
+-- con Mercado Pago (el webhook escribe payment_status con service role).
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   customer_name TEXT DEFAULT '',
@@ -78,6 +78,13 @@ CREATE TABLE IF NOT EXISTS orders (
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
   total NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled')),
+  -- Pago online con Mercado Pago (2026-08-05). null = flujo WhatsApp puro.
+  payment_status TEXT,
+  payment_provider TEXT,
+  mp_preference_id TEXT,
+  mp_payment_id TEXT,
+  paid_at TIMESTAMPTZ,
+  paid_amount NUMERIC,
   source TEXT DEFAULT 'whatsapp' CHECK (source IN ('whatsapp', 'shopify', 'web')),
   shopify_order_gid TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
