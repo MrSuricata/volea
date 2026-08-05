@@ -59,8 +59,9 @@ const TorneosListaPageLazy = lazy(() => import('./torneos/publico/TorneosListaPa
 const TorneoDetallePageLazy = lazy(() => import('./torneos/publico/TorneoDetallePage'));
 // Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
 // los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
-// entra a /galeria. Su módulo de datos (src/galeria/datos.ts) tampoco se importa en ningún
-// otro lado del entry chunk.
+// entra a /galeria. OJO: solo la PÁGINA se separa del entry; su módulo de datos
+// (src/galeria/datos.ts) SÍ viaja en el entry porque AdminGaleriaTab (import estático,
+// como el resto de las pestañas del admin salvo Torneos) lo importa. Son ~12 KB.
 const GaleriaPageLazy = lazy(() => import('./galeria/GaleriaPage'));
 // Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
 // JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
@@ -692,7 +693,9 @@ function Navbar() {
     { to: '/', label: 'Inicio' },
     { to: '/tienda', label: 'Tienda' },
     { to: '/blog', label: 'Blog' },
-    { to: '/clasificacion', label: 'Clasificación' },
+    // 'Clasificación' (Camino al Mundial) fuera del menú por pedido de Brian (2026-08-05,
+    // "quitalo por ahora"): la ruta /clasificacion y la pestaña del admin siguen vivas;
+    // para volverla a mostrar alcanza con re-agregar la entrada acá y MOSTRAR_CAMINO_MUNDIAL.
     { to: '/ranking', label: 'Ranking' },
     { to: '/galeria', label: 'Galería' },
     { to: '/eventos', label: 'Eventos' },
@@ -709,7 +712,9 @@ function Navbar() {
         </Link>
 
         {/* Desktop nav */}
-        <div className="hidden md:flex items-center gap-5 lg:gap-7">
+        {/* lg (no md): con 8 links la fila necesita ~880px y desbordaba en tablet vertical
+            (768-950px) — en esa franja manda la hamburguesa, que ya la cubría hasta 767. */}
+        <div className="hidden lg:flex items-center gap-5 lg:gap-7">
           {navLinks.map(link => (
             <NavLink
               key={link.to}
@@ -743,7 +748,7 @@ function Navbar() {
           </button>
           <button
             onClick={() => setMobileOpen(true)}
-            className="md:hidden text-white hover:text-lime-400 transition-colors"
+            className="lg:hidden text-white hover:text-lime-400 transition-colors"
           >
             <Menu size={24} />
           </button>
@@ -752,7 +757,7 @@ function Navbar() {
 
       {/* Mobile menu overlay */}
       {mobileOpen && (
-        <div className="fixed inset-0 md:hidden" style={{zIndex: 9999}}>
+        <div className="fixed inset-0 lg:hidden" style={{zIndex: 9999}}>
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <div className="absolute left-0 top-0 h-full w-72 bg-navy-800 slide-in-left">
             <div className="flex items-center justify-between p-4 border-b border-navy-600">
@@ -977,6 +982,8 @@ function HomePage() {
     .slice(0, 3);
 
   const topStandings = [...standings].sort((a, b) => a.position - b.position).slice(0, 3);
+  // "Camino al Mundial" pausada (Brian, 2026-08-05). true = vuelve la sección de la home.
+  const MOSTRAR_CAMINO_MUNDIAL = false;
 
   const activeAnnouncements = announcements.filter(a => a.active);
 
@@ -1067,10 +1074,10 @@ function HomePage() {
                 Ver la colección <ArrowRight size={20} />
               </Link>
               <Link
-                to="/clasificacion"
+                to="/ranking"
                 className="inline-flex items-center justify-center gap-2 border-2 border-white/30 hover:border-lime-400 text-white hover:text-lime-400 font-display font-bold py-4 px-10 rounded-lg text-lg transition-colors"
               >
-                <Trophy size={20} /> Camino al Mundial
+                <Trophy size={20} /> Ranking VOLEA
               </Link>
             </div>
           </div>
@@ -1257,6 +1264,9 @@ function HomePage() {
       )}
 
       {/* ── 6. Camino al Mundial ────────────────────────────────────────── */}
+      {/* Oculta por pedido de Brian (2026-08-05, "quitalo por ahora"). Para revivirla:
+          MOSTRAR_CAMINO_MUNDIAL = true y devolver 'Clasificación' al array del nav. */}
+      {MOSTRAR_CAMINO_MUNDIAL && (
       <section className="relative py-20 bg-navy-700 overflow-hidden">
         <div
           className="absolute inset-0 opacity-5"
@@ -1333,6 +1343,7 @@ function HomePage() {
           )}
         </div>
       </section>
+      )}
 
       {/* ── 7. VOLEA en acción ──────────────────────────────────────────── */}
       <section className="py-20 bg-white">

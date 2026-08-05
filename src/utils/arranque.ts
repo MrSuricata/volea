@@ -25,7 +25,9 @@ export async function conReintento<T>(intentar: () => Promise<T>, esFallo: (r: T
   return intentar();
 }
 
-export function conLimite<T>(promesa: Promise<T>, ms: number, valorPorDefecto: T): Promise<T> {
+// PromiseLike (no Promise): los query builders de supabase-js son thenables sin
+// catch/finally, y acá solo se usa .then(onOk, onError) — alcanza y sobra.
+export function conLimite<T>(promesa: PromiseLike<T>, ms: number, valorPorDefecto: T): Promise<T> {
   return new Promise<T>((resolver) => {
     let listo = false;
     const terminar = (valor: T) => {

@@ -69,15 +69,27 @@ export async function listarAlbumes(): Promise<ListaAlbumesResultado> {
 }
 
 // ── Escritura (admin; RLS exige is_admin() = true del lado del server) ──────
+// Con techo de 15s cada una: sin él, una conexión trabada dejaba el botón
+// "Guardando…"/"Eliminando…" girando para siempre (la misma clase de cuelgue
+// que ya se arregló en subida de fotos y login). Al cortar, la UI muestra su
+// toast de error y lo tipeado no se pierde (el modal queda abierto).
+
+const ESCRITURA_TIMEOUT_MS = 15000;
+type ResultadoEscritura = { error: { message: string } | null };
+const ESCRITURA_TARDO: ResultadoEscritura = { error: new Error('La operación tardó demasiado (conexión trabada)') };
 
 export async function crearAlbum(input: AlbumInput): Promise<boolean> {
   if (!supabase) return false;
-  const { error } = await supabase.from('gallery_albums').insert({
-    title: input.title,
-    event_date: input.eventDate,
-    cover_url: input.coverUrl,
-    album_url: input.albumUrl,
-  });
+  const { error } = await conLimite<ResultadoEscritura>(
+    supabase.from('gallery_albums').insert({
+      title: input.title,
+      event_date: input.eventDate,
+      cover_url: input.coverUrl,
+      album_url: input.albumUrl,
+    }),
+    ESCRITURA_TIMEOUT_MS,
+    ESCRITURA_TARDO,
+  );
   if (error) {
     console.error('[galeria] no se pudo crear el álbum', error);
     return false;
@@ -87,15 +99,19 @@ export async function crearAlbum(input: AlbumInput): Promise<boolean> {
 
 export async function actualizarAlbum(id: string, input: AlbumInput): Promise<boolean> {
   if (!supabase) return false;
-  const { error } = await supabase
-    .from('gallery_albums')
-    .update({
-      title: input.title,
-      event_date: input.eventDate,
-      cover_url: input.coverUrl,
-      album_url: input.albumUrl,
-    })
-    .eq('id', id);
+  const { error } = await conLimite<ResultadoEscritura>(
+    supabase
+      .from('gallery_albums')
+      .update({
+        title: input.title,
+        event_date: input.eventDate,
+        cover_url: input.coverUrl,
+        album_url: input.albumUrl,
+      })
+      .eq('id', id),
+    ESCRITURA_TIMEOUT_MS,
+    ESCRITURA_TARDO,
+  );
   if (error) {
     console.error('[galeria] no se pudo actualizar el álbum', error);
     return false;
@@ -105,7 +121,11 @@ export async function actualizarAlbum(id: string, input: AlbumInput): Promise<bo
 
 export async function eliminarAlbum(id: string): Promise<boolean> {
   if (!supabase) return false;
-  const { error } = await supabase.from('gallery_albums').delete().eq('id', id);
+  const { error } = await conLimite<ResultadoEscritura>(
+    supabase.from('gallery_albums').delete().eq('id', id),
+    ESCRITURA_TIMEOUT_MS,
+    ESCRITURA_TARDO,
+  );
   if (error) {
     console.error('[galeria] no se pudo eliminar el álbum', error);
     return false;
