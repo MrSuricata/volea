@@ -14,6 +14,17 @@
  * silencio: el respaldo ya se entregó y en el navegador quedaría como
  * "Uncaught (in promise)" en la consola).
  */
+/**
+ * Ejecuta `intentar()`; si `esFallo(resultado)` da true, lo intenta UNA vez más y devuelve
+ * ese segundo resultado (bueno o malo). Para conexiones que se traban: el segundo intento
+ * abre un socket nuevo y suele andar. `intentar` no debe rechazar (combinar con conLimite).
+ */
+export async function conReintento<T>(intentar: () => Promise<T>, esFallo: (r: T) => boolean): Promise<T> {
+  const primero = await intentar();
+  if (!esFallo(primero)) return primero;
+  return intentar();
+}
+
 export function conLimite<T>(promesa: Promise<T>, ms: number, valorPorDefecto: T): Promise<T> {
   return new Promise<T>((resolver) => {
     let listo = false;

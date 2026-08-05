@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
+import { conLimite } from '../utils/arranque';
 
 export interface AdminUser {
   email: string;
@@ -48,7 +49,17 @@ export async function sendMagicLink(email: string): Promise<{ success: boolean; 
  * Sign in with email + password (Supabase Auth). Same allowlist as the magic
  * link: only emails present in `admins` can get in.
  */
-export async function signInWithPassword(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+// Techo del login: son 3 idas al servidor (chequeo de conexión + allowlist + credenciales)
+// y ninguna tenía límite — con la red trabada el botón quedaba en "cargando" infinito.
+// 15s cubre de sobra un servidor lento de verdad; pasado eso, mensaje claro y reintentar.
+const LOGIN_TIMEOUT_MS = 15000;
+const LOGIN_TARDO = { success: false, error: 'El servidor está tardando en responder. Esperá unos segundos y probá de nuevo.' };
+
+export function signInWithPassword(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+  return conLimite(signInConPasswordInterno(email, password), LOGIN_TIMEOUT_MS, LOGIN_TARDO);
+}
+
+async function signInConPasswordInterno(email: string, password: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase || !isSupabaseConnected()) {
     return { success: false, error: 'Servicio de autenticación no disponible' };
   }

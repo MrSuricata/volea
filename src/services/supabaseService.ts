@@ -1,4 +1,6 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
+import { comprimirImagen } from '../utils/imagenes';
+import { conLimite } from '../utils/arranque';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
 
 function orderToRow(o: Order) {
@@ -340,13 +342,20 @@ export const SupabaseService = {
   // ── Storage: subida de imágenes (bucket product-images, requiere sesión admin) ──
   async uploadImage(file: File, folder = 'uploads'): Promise<string | null> {
     if (!supabase) return null;
-    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    // Foto del celular (4-12 MB) → JPEG 1600px (~200-400 KB): sube 10-30× más rápido y
+    // no come el 1 GB total del plan gratis. Si no se puede comprimir, va la original.
+    const liviana = await comprimirImagen(file);
+    const ext = (liviana.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error } = await supabase.storage.from('product-images').upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-    });
-    if (error) { console.error('Error uploading image:', error); return null; }
+    // Techo de 45s: sin él, una conexión trabada dejaba "Subiendo..." infinito sin aviso.
+    // Con compresión una subida real tarda ~1-3s; si esto salta es un cuelgue de verdad
+    // y el editor muestra su toast de error para que el usuario reintente.
+    const resultado = await conLimite(
+      supabase.storage.from('product-images').upload(path, liviana, { cacheControl: '3600', upsert: false }),
+      45000,
+      { error: new Error('La subida tardó demasiado (conexión trabada)') } as Awaited<ReturnType<ReturnType<typeof supabase.storage.from>['upload']>>,
+    );
+    if (resultado.error) { console.error('Error uploading image:', resultado.error); return null; }
     const { data } = supabase.storage.from('product-images').getPublicUrl(path);
     return data.publicUrl;
   },

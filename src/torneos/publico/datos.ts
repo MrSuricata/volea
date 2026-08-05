@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '../../services/supabaseClient';
-import { conLimite } from '../../utils/arranque';
+import { conLimite, conReintento } from '../../utils/arranque';
 import type { ConfigPuntos, Jugador, Torneo } from '../engine/tipos';
 import { CONFIG_PUNTOS_DEFAULT } from '../engine/tipos';
 
@@ -21,6 +21,9 @@ export type JugadoresResultado = { jugadores: Jugador[]; error: string | null };
 // usado para el techo de 4s del arranque general): un pedido colgado (Supabase frío, red
 // mala) NUNCA deja la página pública en "Cargando…" para siempre — a los TIMEOUT_MS se
 // resuelve con un resultado de error, visible y accionable (botón "Reintentar").
+// Y ANTES de mostrar ese error se reintenta UNA vez solo (conReintento): una conexión
+// trabada suele andar al segundo intento con socket nuevo — visto en la práctica en la
+// PC del trabajo de Brian, donde la primera tanda de consultas a veces se queda muda.
 
 async function cargarTorneos(client: SupabaseClient): Promise<ListaTorneosResultado> {
   const { data: filas, error } = await client.from('rk_torneos').select('id, data, updated_at');
@@ -35,8 +38,12 @@ async function cargarTorneos(client: SupabaseClient): Promise<ListaTorneosResult
 }
 
 export async function listarTorneosPublicos(): Promise<ListaTorneosResultado> {
-  if (!supabase) return { torneos: [], error: MSG_SIN_SERVICIO };
-  return conLimite(cargarTorneos(supabase), TIMEOUT_MS, { torneos: [], error: MSG_SIN_SERVICIO });
+  const sb = supabase;
+  if (!sb) return { torneos: [], error: MSG_SIN_SERVICIO };
+  return conReintento(
+    () => conLimite(cargarTorneos(sb), TIMEOUT_MS, { torneos: [], error: MSG_SIN_SERVICIO }),
+    (r) => r.error !== null,
+  );
 }
 
 async function cargarTorneo(client: SupabaseClient, id: string): Promise<TorneoResultado> {
@@ -51,8 +58,12 @@ async function cargarTorneo(client: SupabaseClient, id: string): Promise<TorneoR
 }
 
 export async function obtenerTorneoPublico(id: string): Promise<TorneoResultado> {
-  if (!supabase) return { torneo: null, updatedAt: null, error: MSG_SIN_SERVICIO };
-  return conLimite(cargarTorneo(supabase, id), TIMEOUT_MS, { torneo: null, updatedAt: null, error: MSG_SIN_SERVICIO });
+  const sb = supabase;
+  if (!sb) return { torneo: null, updatedAt: null, error: MSG_SIN_SERVICIO };
+  return conReintento(
+    () => conLimite(cargarTorneo(sb, id), TIMEOUT_MS, { torneo: null, updatedAt: null, error: MSG_SIN_SERVICIO }),
+    (r) => r.error !== null,
+  );
 }
 
 async function cargarJugadores(client: SupabaseClient): Promise<JugadoresResultado> {
@@ -70,8 +81,12 @@ async function cargarJugadores(client: SupabaseClient): Promise<JugadoresResulta
 }
 
 export async function listarJugadoresPublicos(): Promise<JugadoresResultado> {
-  if (!supabase) return { jugadores: [], error: MSG_SIN_SERVICIO };
-  return conLimite(cargarJugadores(supabase), TIMEOUT_MS, { jugadores: [], error: MSG_SIN_SERVICIO });
+  const sb = supabase;
+  if (!sb) return { jugadores: [], error: MSG_SIN_SERVICIO };
+  return conReintento(
+    () => conLimite(cargarJugadores(sb), TIMEOUT_MS, { jugadores: [], error: MSG_SIN_SERVICIO }),
+    (r) => r.error !== null,
+  );
 }
 
 // `confiable: false` = no se pudo leer la config del server y se está usando el default.
@@ -95,6 +110,10 @@ async function cargarConfig(client: SupabaseClient): Promise<ConfigResultado> {
 
 export async function obtenerConfigPublico(): Promise<ConfigResultado> {
   const respaldo: ConfigResultado = { config: CONFIG_PUNTOS_DEFAULT, confiable: false };
-  if (!supabase) return respaldo;
-  return conLimite(cargarConfig(supabase), TIMEOUT_MS, respaldo);
+  const sb = supabase;
+  if (!sb) return respaldo;
+  return conReintento(
+    () => conLimite(cargarConfig(sb), TIMEOUT_MS, respaldo),
+    (r) => !r.confiable,
+  );
 }

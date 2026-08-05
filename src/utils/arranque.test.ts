@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { conLimite } from './arranque';
+import { conLimite, conReintento } from './arranque';
 
 // Helpers: promesas que tardan / fallan / no resuelven nunca.
 const enMs = <T>(ms: number, valor: T) => new Promise<T>((r) => setTimeout(() => r(valor), ms));
@@ -40,6 +40,36 @@ describe('conLimite', () => {
     } finally {
       process.off('unhandledRejection', alRechazar);
     }
+  });
+
+  it('reintenta UNA vez si el primer intento falla, y devuelve el segundo', async () => {
+    let intentos = 0;
+    const r = await conReintento(
+      async () => { intentos++; return intentos === 1 ? { error: 'trabado' as string | null } : { error: null as string | null, valor: 42 }; },
+      (x) => x.error !== null,
+    );
+    expect(intentos).toBe(2);
+    expect(r).toEqual({ error: null, valor: 42 });
+  });
+
+  it('si el primer intento sale bien, NO reintenta', async () => {
+    let intentos = 0;
+    const r = await conReintento(
+      async () => { intentos++; return { error: null as string | null }; },
+      (x) => x.error !== null,
+    );
+    expect(intentos).toBe(1);
+    expect(r).toEqual({ error: null });
+  });
+
+  it('si los dos intentos fallan, devuelve el segundo fallo (no revienta)', async () => {
+    let intentos = 0;
+    const r = await conReintento(
+      async () => { intentos++; return { error: 'sigue trabado ' + intentos as string | null }; },
+      (x) => x.error !== null,
+    );
+    expect(intentos).toBe(2);
+    expect(r.error).toBe('sigue trabado 2');
   });
 
   it('no espera el limite completo si la promesa resuelve antes (no retrasa el arranque)', async () => {
