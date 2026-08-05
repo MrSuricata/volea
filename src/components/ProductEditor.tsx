@@ -2,6 +2,7 @@ import { useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from '
 import { X, ChevronLeft, ChevronRight, Trash2, Plus, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Product, Category, ProductColor } from '../types';
+import { sesionAdminVencida } from '../services/authService';
 
 const formatPrice = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
 
@@ -84,6 +85,8 @@ export function ProductEditor({ product, categories, onSave, onClose, uploadImag
         const url = await uploadImage(file);
         if (url) {
           setImages(prev => [...prev, url]);
+        } else if (await sesionAdminVencida()) {
+          toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar para poder subir la imagen.');
         } else {
           toast.error(`No se pudo subir "${file.name}"`);
         }

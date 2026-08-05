@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { conLimite } from '../utils/arranque';
+import { tokenVencido } from '../utils/sesion';
 
 export interface AdminUser {
   email: string;
@@ -122,6 +123,21 @@ export async function getCurrentAdmin(): Promise<AdminUser | null> {
 
   if (error || !data) return null;
   return data as AdminUser;
+}
+
+/**
+ * True si hay una sesión guardada pero su access token ya venció (el refresh
+ * puede estar colgado por la conexión trabada: en ese estado NO llega ningún
+ * evento SIGNED_OUT y la UI sigue mostrando el panel como si nada).
+ * getSession() lee de memoria/storage: no cuelga aunque la red esté trabada.
+ * OJO: llamar solo desde caminos de error de acciones admin — en el sitio
+ * público "no hay sesión" es lo normal y esto daría true sin sentido.
+ */
+export async function sesionAdminVencida(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return true; // había panel admin visible pero no hay sesión: vencida/limpiada
+  return tokenVencido(session.expires_at, Date.now());
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   listarAlbumes, crearAlbum, actualizarAlbum, eliminarAlbum, esLinkAlbumValido,
   type AlbumInput, type GalleryAlbum,
 } from '../galeria/datos';
+import { sesionAdminVencida } from '../services/authService';
 
 const inputClass =
   'w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors';
@@ -48,6 +49,8 @@ function AlbumModal({
     setUploading(false);
     if (url) {
       setForm(f => ({ ...f, coverUrl: url }));
+    } else if (await sesionAdminVencida()) {
+      toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar para poder subir la imagen.');
     } else {
       toast.error('No se pudo subir la imagen. Probá de nuevo.');
     }

@@ -344,7 +344,9 @@ export const SupabaseService = {
     if (!supabase) return null;
     // Foto del celular (4-12 MB) → JPEG 1600px (~200-400 KB): sube 10-30× más rápido y
     // no come el 1 GB total del plan gratis. Si no se puede comprimir, va la original.
-    const liviana = await comprimirImagen(file);
+    // La compresión también con techo: un decode colgado (HEIC raro, tab sin foco
+    // con rAF frenado) dejaba el spinner infinito sin toast. Si no llega, va la original.
+    const liviana = await conLimite(comprimirImagen(file), 20000, file);
     const ext = (liviana.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     // Techo de 45s: sin él, una conexión trabada dejaba "Subiendo..." infinito sin aviso.
