@@ -2896,7 +2896,17 @@ function AdminPage() {
   // (el SMTP built-in de Supabase tiene límite de ~2 mails/hora).
   const [authMode, setAuthMode] = useState<'password' | 'magiclink'>('password');
   const [signingIn, setSigningIn] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // Arranca en la pestaña que haya dejado la barra de admin flotante (atajo desde la
+  // web pública) y consume el hint para que una visita manual a /admin siga cayendo
+  // en el dashboard como siempre.
+  const [activeTab, setActiveTab] = useState(() => {
+    const atajo = sessionStorage.getItem(ATAJO_TAB_ADMIN);
+    if (atajo) {
+      sessionStorage.removeItem(ATAJO_TAB_ADMIN);
+      return atajo;
+    }
+    return 'dashboard';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const useSupabaseAuth = isSupabaseConnected();
 
@@ -4425,6 +4435,67 @@ function FloatingWhatsApp() {
   );
 }
 
+// ─── 15b. Barra de admin persistente ─────────────────────────────────────────
+// Pedido de Brian (2026-08-05): seguir viendo el menú de admin mientras navega la
+// web pública. Con sesión de admin y FUERA de /admin, aparece una píldora fija
+// abajo a la IZQUIERDA (la derecha es del botón de WhatsApp) que expande accesos
+// directos a las pestañas más usadas. Cada acceso deja la pestaña destino en
+// sessionStorage y navega a /admin, que la lee al montar (ver activeTab).
+const ATAJO_TAB_ADMIN = 'volea_admin_tab';
+
+function BarraAdmin() {
+  const { isAdmin } = useStore();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const [abierta, setAbierta] = useState(false);
+
+  // cerrar el menú al navegar (si quedó abierto en la página anterior)
+  useEffect(() => { setAbierta(false); }, [pathname]);
+
+  if (!isAdmin || pathname.startsWith('/admin')) return null;
+
+  const irA = (tab: string) => {
+    sessionStorage.setItem(ATAJO_TAB_ADMIN, tab);
+    setAbierta(false);
+    navigate('/admin');
+  };
+
+  const atajos: { tab: string; label: string; icon: React.ReactNode }[] = [
+    { tab: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={16} /> },
+    { tab: 'products', label: 'Productos', icon: <Package size={16} /> },
+    { tab: 'orders', label: 'Pedidos', icon: <ShoppingCart size={16} /> },
+    { tab: 'torneos', label: 'Torneos', icon: <Trophy size={16} /> },
+    { tab: 'galeria', label: 'Galería', icon: <Images size={16} /> },
+    { tab: 'blog', label: 'Blog', icon: <Newspaper size={16} /> },
+  ];
+
+  return (
+    <div className="fixed bottom-6 left-4 z-40 flex flex-col-reverse items-start gap-2">
+      <button
+        onClick={() => setAbierta(a => !a)}
+        aria-expanded={abierta}
+        className="flex items-center gap-2 bg-navy-700 hover:bg-navy-800 text-white border-2 border-lime-400 font-display font-bold text-sm py-2.5 px-4 rounded-full shadow-lg transition-all hover:scale-105"
+      >
+        <Settings size={16} className="text-lime-400" /> Admin
+        <ChevronDown size={14} className={`transition-transform ${abierta ? '' : 'rotate-180'}`} />
+      </button>
+      {abierta && (
+        <div className="bg-navy-700 border border-navy-600 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 min-w-[180px]">
+          {atajos.map(a => (
+            <button
+              key={a.tab}
+              onClick={() => irA(a.tab)}
+              className="flex items-center gap-3 text-white hover:bg-navy-800 hover:text-lime-400 font-display font-semibold text-sm py-2 px-3 rounded-lg transition-colors text-left"
+            >
+              <span className="text-lime-400">{a.icon}</span> {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── 16. Footer ──────────────────────────────────────────────────────────────
 
 function Footer() {
@@ -4715,6 +4786,7 @@ export default function App() {
           </main>
           <Footer />
           <FloatingWhatsApp />
+          <BarraAdmin />
         </div>
       </StoreProvider>
     </HashRouter>
