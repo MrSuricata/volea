@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS orders (
   mp_payment_id TEXT,
   paid_at TIMESTAMPTZ,
   paid_amount NUMERIC,
-  source TEXT DEFAULT 'whatsapp' CHECK (source IN ('whatsapp', 'shopify', 'web')),
+  source TEXT DEFAULT 'whatsapp' CHECK (source IN ('whatsapp', 'shopify', 'web', 'telegram')),
   shopify_order_gid TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -129,6 +129,30 @@ CREATE POLICY "announcements_admin_all" ON announcements FOR ALL USING (is_admin
 -- orders: cualquiera puede crear (checkout anónimo), solo admins leen/editan
 CREATE POLICY "orders_anon_insert" ON orders FOR INSERT WITH CHECK (true);
 CREATE POLICY "orders_admin_all" ON orders FOR ALL USING (is_admin()) WITH CHECK (is_admin());
+
+-- Valores válidos de payment_status (existentes son NULL: la constraint valida igual)
+ALTER TABLE orders ADD CONSTRAINT orders_payment_status_check
+  CHECK (payment_status IS NULL OR payment_status IN ('iniciado','aprobado','pendiente','rechazado','devuelto'));
+
+-- Nadie que no sea el service role (webhook) puede insertar un pedido "ya pagado":
+-- a los inserts de anon/authenticated se les clampa el estado a lo sumo 'iniciado'
+-- y se les anulan los campos de acreditación.
+CREATE OR REPLACE FUNCTION orders_clamp_pago() RETURNS trigger AS $$
+BEGIN
+  IF coalesce(auth.role(), 'anon') <> 'service_role' THEN
+    IF NEW.payment_status IS NOT NULL THEN
+      NEW.payment_status := 'iniciado';
+    END IF;
+    NEW.mp_payment_id := NULL;
+    NEW.paid_at := NULL;
+    NEW.paid_amount := NULL;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER orders_clamp_pago_insert
+  BEFORE INSERT ON orders
+  FOR EACH ROW EXECUTE FUNCTION orders_clamp_pago();
 
 -- Seed de admins (allowlist del panel)
 INSERT INTO admins (email, name, role) VALUES
