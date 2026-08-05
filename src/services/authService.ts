@@ -11,7 +11,13 @@ export interface AdminUser {
  * Send a magic link to the user's email. Only emails present in the `admins`
  * table will be able to access /admin after authentication (RLS enforces this).
  */
-export async function sendMagicLink(email: string): Promise<{ success: boolean; error?: string }> {
+// Mismo techo que el login con contraseña: este es justamente el camino de RESCATE
+// cuando aquel anda mal — dejarlo sin límite era conservar el spinner infinito acá.
+export function sendMagicLink(email: string): Promise<{ success: boolean; error?: string }> {
+  return conLimite(sendMagicLinkInterno(email), LOGIN_TIMEOUT_MS, LOGIN_TARDO);
+}
+
+async function sendMagicLinkInterno(email: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase || !isSupabaseConnected()) {
     return { success: false, error: 'Servicio de autenticación no disponible' };
   }

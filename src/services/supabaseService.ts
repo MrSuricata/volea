@@ -350,10 +350,12 @@ export const SupabaseService = {
     // Techo de 45s: sin él, una conexión trabada dejaba "Subiendo..." infinito sin aviso.
     // Con compresión una subida real tarda ~1-3s; si esto salta es un cuelgue de verdad
     // y el editor muestra su toast de error para que el usuario reintente.
-    const resultado = await conLimite(
+    // Tipo explícito acotado a lo único que se consume (error): sin casts a los tipos
+    // internos de supabase-js, que además mentirían sobre la forma del respaldo.
+    const resultado = await conLimite<{ error: { message: string } | null }>(
       supabase.storage.from('product-images').upload(path, liviana, { cacheControl: '3600', upsert: false }),
       45000,
-      { error: new Error('La subida tardó demasiado (conexión trabada)') } as Awaited<ReturnType<ReturnType<typeof supabase.storage.from>['upload']>>,
+      { error: new Error('La subida tardó demasiado (conexión trabada)') },
     );
     if (resultado.error) { console.error('Error uploading image:', resultado.error); return null; }
     const { data } = supabase.storage.from('product-images').getPublicUrl(path);

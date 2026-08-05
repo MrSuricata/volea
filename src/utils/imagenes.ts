@@ -40,18 +40,25 @@ export async function comprimirImagen(archivo: File): Promise<File> {
   try {
     // from-image: respeta la orientación EXIF (fotos de celular sacadas "de costado")
     const bitmap = await createImageBitmap(archivo, { imageOrientation: 'from-image' });
-    const { ancho, alto } = dimensionesDestino(bitmap.width, bitmap.height, LADO_MAXIMO);
-    const canvas = document.createElement('canvas');
-    canvas.width = ancho;
-    canvas.height = alto;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return archivo;
-    ctx.drawImage(bitmap, 0, 0, ancho, alto);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', CALIDAD_JPEG));
-    if (!blob || blob.size >= archivo.size) return archivo; // no mejoró: original
-    return new File([blob], cambiarExtension(archivo.name, 'jpg'), { type: 'image/jpeg' });
+    try {
+      const { ancho, alto } = dimensionesDestino(bitmap.width, bitmap.height, LADO_MAXIMO);
+      const canvas = document.createElement('canvas');
+      canvas.width = ancho;
+      canvas.height = alto;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return archivo;
+      // Fondo BLANCO antes de dibujar: JPEG no tiene transparencia y sin esto un PNG
+      // recortado (fondo transparente, típico de foto de catálogo) queda sobre NEGRO.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, ancho, alto);
+      ctx.drawImage(bitmap, 0, 0, ancho, alto);
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', CALIDAD_JPEG));
+      if (!blob || blob.size >= archivo.size) return archivo; // no mejoró: original
+      return new File([blob], cambiarExtension(archivo.name, 'jpg'), { type: 'image/jpeg' });
+    } finally {
+      bitmap.close(); // liberar YA la decodificación (puede ser enorme), pase lo que pase
+    }
   } catch {
-    return archivo; // decodificación falló: comportamiento de siempre
+    return archivo; // decodificación falló (p.ej. HEIC fuera de Safari): comportamiento de siempre
   }
 }
