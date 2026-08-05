@@ -63,6 +63,58 @@ git commit -m "feat: columnas de pago MP en orders (migracion orders_pago_mp apl
 
 ---
 
+### Task 1b: Defensa anti-fraude en la DB (hallazgo del review de Task 1)
+
+El INSERT anónimo de `orders` (`WITH CHECK (true)`) dejaría a cualquiera fabricar un pedido con `payment_status='aprobado'` y `paid_amount` inventado, que el admin mostraría como "💳 Pagado (MP)". Se cierra en la DB, invisible para la UX.
+
+**Files:**
+- Modify: `supabase-schema.sql` (bloque nuevo después de las policies de orders + CHECK de source actualizado)
+
+- [ ] **Step 1: Migración `orders_pago_guardas`** en volea-web vía MCP `apply_migration`:
+
+```sql
+-- Valores válidos de payment_status (existentes son NULL: la constraint valida igual)
+ALTER TABLE orders ADD CONSTRAINT orders_payment_status_check
+  CHECK (payment_status IS NULL OR payment_status IN ('iniciado','aprobado','pendiente','rechazado','devuelto'));
+
+-- Nadie que no sea el service role (webhook) puede insertar un pedido "ya pagado":
+-- a los inserts de anon/authenticated se les clampa el estado a lo sumo 'iniciado'
+-- y se les anulan los campos de acreditación.
+CREATE OR REPLACE FUNCTION orders_clamp_pago() RETURNS trigger AS $$
+BEGIN
+  IF coalesce(auth.role(), 'anon') <> 'service_role' THEN
+    IF NEW.payment_status IS NOT NULL THEN
+      NEW.payment_status := 'iniciado';
+    END IF;
+    NEW.mp_payment_id := NULL;
+    NEW.paid_at := NULL;
+    NEW.paid_amount := NULL;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER orders_clamp_pago_insert
+  BEFORE INSERT ON orders
+  FOR EACH ROW EXECUTE FUNCTION orders_clamp_pago();
+```
+
+(El webhook hace UPDATE, no INSERT, así que el trigger no lo toca; el upsert del admin no manda columnas de pago, así que tampoco. Solo bloquea pedidos fabricados.)
+
+- [ ] **Step 2: Verificar**: insertar por SQL `SET ROLE` no hace falta — alcanza con `execute_sql`:
+  - `SELECT conname FROM pg_constraint WHERE conrelid='orders'::regclass AND conname='orders_payment_status_check';` → 1 fila.
+  - `SELECT tgname FROM pg_trigger WHERE tgrelid='orders'::regclass AND tgname='orders_clamp_pago_insert';` → 1 fila.
+
+- [ ] **Step 3: `supabase-schema.sql`**: agregar el mismo bloque (constraint + función + trigger) después de las policies de orders, con los mismos comentarios. Aprovechar y corregir el drift preexistente del CHECK de source en el DDL: `CHECK (source IN ('whatsapp', 'shopify', 'web'))` → `CHECK (source IN ('whatsapp', 'shopify', 'web', 'telegram'))` (la DB viva ya incluye 'telegram' desde el bot).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add supabase-schema.sql
+git commit -m "feat: guardas anti-fraude de pago en orders (clamp de insert anonimo + CHECK)"
+```
+
+---
+
 ### Task 2: Helpers puros de MP con TDD
 
 **Files:**
@@ -687,7 +739,10 @@ export interface Order {
     if (o.paymentStatus) {
       row.payment_status = o.paymentStatus;
       row.payment_provider = o.paymentProvider ?? 'mp';
-      row.source = 'web-mp';
+      // 'web' y no 'web-mp': el CHECK orders_source_check de la DB viva solo
+      // admite whatsapp/shopify/web/telegram. El pago se distingue por
+      // payment_provider, no por source.
+      row.source = 'web';
     }
     const { error } = await supabase.from('orders').insert(row);
     if (error) { console.error('Error inserting order:', error); return false; }

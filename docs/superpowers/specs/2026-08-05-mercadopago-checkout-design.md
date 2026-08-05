@@ -70,6 +70,7 @@ ALTER TABLE orders
 ```
 
 - RLS no cambia: anon solo INSERT (los campos de pago iniciales entran en ese insert), admins todo, el webhook escribe con service role (bypassa RLS).
+- **Guarda anti-fraude (agregada tras el review de implementación)**: como el INSERT anónimo es abierto, un trigger `BEFORE INSERT` clampa los campos de pago de cualquier insert que no venga del service role (`payment_status` a lo sumo `'iniciado'`; `mp_payment_id`/`paid_at`/`paid_amount` en NULL) + CHECK de valores válidos de `payment_status`. Sin esto, cualquiera podía fabricarse un pedido "ya pagado" por la API pública y el admin lo mostraría como 💳 Pagado. El webhook (UPDATE con service role) no se ve afectado.
 - El DDL de `supabase-schema.sql` se actualiza en el mismo commit (lección pendiente de rk_*: el schema del repo tiene que reflejar la DB real).
 
 ## Frontend
