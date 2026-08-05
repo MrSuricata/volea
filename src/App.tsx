@@ -7,7 +7,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
@@ -32,6 +32,7 @@ import { getProductsAsInternal, getCategoriesAsInternal } from './services/shopi
 import { BlogListPage, BlogPostPage } from './components/BlogPages';
 import { StandingsPage } from './components/StandingsPage';
 import { AdminBlogTab } from './components/AdminBlogTab';
+import { AdminGaleriaTab } from './components/AdminGaleriaTab';
 import { AdminCajaTab } from './components/AdminCajaTab';
 import { AdminSociosTab } from './components/AdminSociosTab';
 import { AdminOrderModal } from './components/AdminOrderModal';
@@ -56,6 +57,11 @@ const AdminTorneosTab = lazy(() =>
 const RankingPageLazy = lazy(() => import('./torneos/publico/RankingPage'));
 const TorneosListaPageLazy = lazy(() => import('./torneos/publico/TorneosListaPage'));
 const TorneoDetallePageLazy = lazy(() => import('./torneos/publico/TorneoDetallePage'));
+// Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
+// los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
+// entra a /galeria. Su módulo de datos (src/galeria/datos.ts) tampoco se importa en ningún
+// otro lado del entry chunk.
+const GaleriaPageLazy = lazy(() => import('./galeria/GaleriaPage'));
 // Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
 // JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
 // avisarLimitado -> push -> pull (todos useCallback encadenados) y dispara el effect de
@@ -688,6 +694,7 @@ function Navbar() {
     { to: '/blog', label: 'Blog' },
     { to: '/clasificacion', label: 'Clasificación' },
     { to: '/ranking', label: 'Ranking' },
+    { to: '/galeria', label: 'Galería' },
     { to: '/eventos', label: 'Eventos' },
     { to: '/mapa', label: 'Mapa' },
     { to: '/contacto', label: 'Contacto' },
@@ -3078,6 +3085,7 @@ function AdminPage() {
     { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
     { id: 'socios', label: 'Socios', icon: <Users size={18} /> },
     { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
+    { id: 'galeria', label: 'Galería', icon: <Images size={18} /> },
     { id: 'standings', label: 'Clasificación', icon: <Trophy size={18} /> },
     { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
     { id: 'categories', label: 'Categorías', icon: <Tag size={18} /> },
@@ -3787,6 +3795,15 @@ function AdminPage() {
               onSave={savePost}
               onDelete={removePost}
               uploadImage={(f) => SupabaseService.uploadImage(f, 'blog')}
+            />
+          </div>
+        )}
+
+        {/* Galería Tab (álbumes de fotos, cada uno un link de salida a Drive/Photos) */}
+        {activeTab === 'galeria' && (
+          <div className="fade-in">
+            <AdminGaleriaTab
+              uploadImage={(f) => SupabaseService.uploadImage(f, 'gallery')}
             />
           </div>
         )}
@@ -4617,6 +4634,23 @@ function TorneoDetalleRoute() {
   );
 }
 
+// Galería (público): álbumes de fotos de torneos, cada uno un link de salida a un Google
+// Drive/Photos externo. Mismo patrón que los wrappers de arriba (usePageMeta acá, Suspense
+// alrededor del chunk lazy) pero con fallback en Tailwind (SeccionCargando) en vez de
+// TorneosCargando: la Galería no es parte del motor de torneos, es una página del sitio
+// principal con su propio módulo de datos (src/galeria/datos.ts).
+function GaleriaRoute() {
+  usePageMeta({
+    title: 'Galería',
+    description: 'Álbumes de fotos de los torneos VOLEA: elegí un torneo y mirá las fotos en Google Drive o Google Photos.',
+  });
+  return (
+    <Suspense fallback={<SeccionCargando texto="Cargando la galería…" />}>
+      <GaleriaPageLazy />
+    </Suspense>
+  );
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
   // Sin AnimatePresence: con framer-motion 12 + React 19, mode="wait" deja la
@@ -4631,6 +4665,7 @@ function AnimatedRoutes() {
       <Route path="/blog/:slug" element={<PageTransition><BlogPostRoute /></PageTransition>} />
       <Route path="/clasificacion" element={<PageTransition><StandingsRoute /></PageTransition>} />
       <Route path="/ranking" element={<PageTransition><RankingRoute /></PageTransition>} />
+      <Route path="/galeria" element={<PageTransition><GaleriaRoute /></PageTransition>} />
       <Route path="/torneos" element={<PageTransition><TorneosListaRoute /></PageTransition>} />
       <Route path="/torneos/:id" element={<PageTransition><TorneoDetalleRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />

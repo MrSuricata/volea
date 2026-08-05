@@ -150,3 +150,25 @@ ON CONFLICT (email) DO NOTHING;
 -- solo admins autenticados.
 -- El DDL completo está aplicado como migración "native_ecommerce_schema" en el
 -- proyecto volea-web (ver Dashboard > Database > Migrations).
+
+-- ============================================
+-- v5 (2026-08-04): Galería (álbumes de fotos de torneos)
+-- ============================================
+-- Cada álbum es un link de salida a un Google Drive/Photos externo (las fotos
+-- viven ahí; esta tabla es solo el índice con marca VOLEA). Migración aplicada:
+-- "gallery_albums" en el proyecto volea-web.
+
+CREATE TABLE IF NOT EXISTS public.gallery_albums (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  event_date DATE,
+  cover_url TEXT,
+  album_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.gallery_albums ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gallery_public_read ON public.gallery_albums FOR SELECT USING (true);
+CREATE POLICY gallery_admin_write ON public.gallery_albums FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+-- Storage: portadas subidas al bucket product-images, carpeta gallery/ (mismo
+-- bucket que blog/ y products/; escritura solo admins autenticados via RLS de storage).
