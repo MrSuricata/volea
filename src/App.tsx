@@ -2955,6 +2955,25 @@ function StockProductRow({
 
 // ─── 13. AdminPage ───────────────────────────────────────────────────────────
 
+// Badge del estado de pago online de un pedido (null = flujo WhatsApp puro).
+function BadgePagoMP({ order }: { order: Order }) {
+  if (!order.paymentStatus) return null;
+  const cfg: Record<string, { texto: string; clases: string }> = {
+    aprobado:  { texto: '💳 Pagado (MP)',  clases: 'bg-green-100 text-green-700' },
+    pendiente: { texto: 'MP en proceso',   clases: 'bg-yellow-100 text-yellow-700' },
+    iniciado:  { texto: 'MP sin terminar', clases: 'bg-gray-100 text-gray-500' },
+    rechazado: { texto: 'MP rechazado',    clases: 'bg-red-100 text-red-600' },
+    devuelto:  { texto: 'MP devuelto',     clases: 'bg-orange-100 text-orange-600' },
+  };
+  const c = cfg[order.paymentStatus];
+  if (!c) return null;
+  return (
+    <span className={`text-xs font-semibold rounded-full px-2 py-1 whitespace-nowrap ${c.clases}`}>
+      {c.texto}
+    </span>
+  );
+}
+
 function AdminPage() {
   const store = useStore();
   const {
@@ -3567,6 +3586,7 @@ function AdminPage() {
                           <span className="text-sm text-gray-500 hidden sm:inline">{order.customer.name}</span>
                           <span className="text-sm text-gray-500 hidden md:inline">{order.items.length} items</span>
                           <span className="font-display font-bold text-navy-700 text-sm">{formatPrice(order.total)}</span>
+                          <BadgePagoMP order={order} />
                           <select
                             value={order.status}
                             onChange={(e) => {
@@ -3617,6 +3637,17 @@ function AdminPage() {
                                 ))}
                               </div>
                             </div>
+                            {order.paymentStatus && (
+                              <div>
+                                <h4 className="font-display font-semibold text-navy-700 mb-2">Pago online</h4>
+                                <div className="space-y-1 text-sm text-gray-600">
+                                  <p><strong>Estado:</strong> <BadgePagoMP order={order} /></p>
+                                  {order.mpPaymentId && <p><strong>ID de pago MP:</strong> {order.mpPaymentId}</p>}
+                                  {order.paidAt && <p><strong>Pagado:</strong> {new Date(order.paidAt).toLocaleString('es-UY')}</p>}
+                                  {order.paidAmount != null && <p><strong>Monto acreditado:</strong> {formatPrice(order.paidAmount)}</p>}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
