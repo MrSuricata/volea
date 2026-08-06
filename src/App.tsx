@@ -2391,7 +2391,8 @@ function CheckoutPage() {
   const [success, setSuccess] = useState(false);
 
   // El botón de MP aparece solo si el server dice que hay credenciales
-  // cargadas. En dev local (Vite, sin /api) el fetch falla y queda oculto.
+  // cargadas. En dev local (Vite, sin /api) la respuesta es el index.html y
+  // el json() falla → queda oculto.
   const [mpDisponible, setMpDisponible] = useState(false);
   const [pagandoMP, setPagandoMP] = useState(false);
   useEffect(() => {
@@ -2399,6 +2400,14 @@ function CheckoutPage() {
       .then(r => r.json())
       .then(d => setMpDisponible(Boolean(d?.disponible)))
       .catch(() => setMpDisponible(false));
+  }, []);
+  // Si el cliente vuelve con "Atrás" desde la pantalla de MP, el navegador
+  // restaura esta página desde la bfcache con el estado congelado: sin esto,
+  // los botones quedaban deshabilitados para siempre.
+  useEffect(() => {
+    const h = (e: PageTransitionEvent) => { if (e.persisted) setPagandoMP(false); };
+    window.addEventListener('pageshow', h);
+    return () => window.removeEventListener('pageshow', h);
   }, []);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -2502,6 +2511,7 @@ function CheckoutPage() {
   };
 
   const pagarConMP = async () => {
+    if (pagandoMP) return;
     const order = construirPedido();
     if (!order) return;
     order.paymentStatus = 'iniciado';
