@@ -15,6 +15,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ?? (typeof req.body?.data?.id !== 'undefined' ? String(req.body.data.id) : '');
   const tipo = uno(req.query['type'] as string | string[] | undefined) ?? String(req.body?.type ?? '');
 
+  // MP también manda notificaciones merchant_order/topic sin data.id a esta
+  // misma URL. Ignorarlas acá no lee ni escribe nada, así que no debilita
+  // nada saltear la firma en este camino: el único camino que escribe sigue
+  // exigiendo firma válida más abajo.
+  if (tipo !== 'payment' || !dataId) return res.status(200).json({ ignorado: true });
+
   const firma = validarFirmaWebhook({
     xSignature: req.headers['x-signature'] as string | undefined,
     xRequestId: req.headers['x-request-id'] as string | undefined,
@@ -25,11 +31,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.warn('Webhook MP con firma inválida:', firma.motivo);
     return res.status(401).end();
   }
-  if (tipo !== 'payment' || !dataId) return res.status(200).json({ ignorado: true });
 
-  const respMP = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-    headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
-  });
+  let respMP: Response;
+  try {
+    respMP = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
+      headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    return res.status(502).end(); // MP reintenta solo
+  }
   if (!respMP.ok) return res.status(502).end();
   const pago = await respMP.json();
 
@@ -48,7 +59,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const db = clienteAdmin(process.env.SUPABASE_SERVICE_ROLE_KEY!);
-  const { error } = await db.from('orders').update(patch).eq('id', orderId);
+  let q = db.from('orders').update(patch).eq('id', orderId);
+  if (estado === 'pendiente' || estado === 'rechazado') {
+    // Un reintento tardío de un pago viejo no puede pisar un pedido ya pagado/devuelto.
+    q = q.not('payment_status', 'in', '("aprobado","devuelto")');
+  }
+  const { error } = await q;
   if (error) {
     console.error('Webhook MP: no se pudo actualizar el pedido', orderId, error.message);
     return res.status(500).end();
