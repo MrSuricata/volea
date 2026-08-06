@@ -130,8 +130,9 @@ export async function getCurrentAdmin(): Promise<AdminUser | null> {
  * puede estar colgado por la conexión trabada: en ese estado NO llega ningún
  * evento SIGNED_OUT y la UI sigue mostrando el panel como si nada).
  * getSession() lee de memoria/storage: no cuelga aunque la red esté trabada.
- * OJO: llamar solo desde caminos de error de acciones admin — en el sitio
- * público "no hay sesión" es lo normal y esto daría true sin sentido.
+ * OJO: llamar solo desde acciones admin (pre-checks de guardado o caminos de
+ * error) — en el sitio público "no hay sesión" es lo normal y daría true sin
+ * sentido.
  */
 export async function sesionAdminVencida(): Promise<boolean> {
   if (!supabase) return false;

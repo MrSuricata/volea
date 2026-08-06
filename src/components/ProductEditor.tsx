@@ -178,7 +178,14 @@ export function ProductEditor({ product, categories, onSave, onClose, uploadImag
   );
 
   // ── Guardar ────────────────────────────────────────────────────────────────
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Pre-check: si la sesión ya venció, avisar ANTES del "guardado" optimista
+    // (el guardado local + toast de éxito con la nube muerta era una mentira).
+    // sesionAdminVencida lee la sesión de memoria: no puede colgarse.
+    if (await sesionAdminVencida()) {
+      toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. El cambio NO se guardó.');
+      return;
+    }
     const cleanName = name.trim();
     if (!cleanName) {
       toast.error('Completá el nombre del producto');

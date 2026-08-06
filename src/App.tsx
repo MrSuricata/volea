@@ -3568,7 +3568,13 @@ function AdminPage() {
               <AdminOrderModal
                 products={products}
                 onClose={() => setOrderModal(false)}
-                onSave={(o) => {
+                onSave={async (o) => {
+                  // Pre-check: sesión vencida → avisar ANTES del toast optimista
+                  // (mismo criterio que el guardado en ProductEditor).
+                  if (await sesionAdminVencida()) {
+                    toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. El pedido NO se guardó.');
+                    return;
+                  }
                   addOrder(o);
                   setOrderModal(false);
                   setExpandedOrder(o.id);
@@ -4003,7 +4009,14 @@ function AdminPage() {
             title="¿Eliminar producto?"
             message="Se borra de la tienda y del catálogo. Esta acción no se puede deshacer."
             onCancel={() => setDeleteConfirm(null)}
-            onConfirm={() => {
+            onConfirm={async () => {
+              // Pre-check: sesión vencida → no borrar ni local ni nube, avisar claro
+              // (mismo criterio que el guardado en ProductEditor).
+              if (await sesionAdminVencida()) {
+                setDeleteConfirm(null);
+                toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. El producto NO se eliminó.');
+                return;
+              }
               removeProduct(deleteConfirm);
               setDeleteConfirm(null);
               toast.success('Producto eliminado');
