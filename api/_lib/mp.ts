@@ -30,6 +30,11 @@ export interface FirmaInput {
 // Validación de firma según el esquema de MP: HMAC-SHA256 en hex del manifest
 // `id:<data.id en minúscula>;request-id:<x-request-id>;ts:<ts>;`. No usa el
 // body crudo. El ts puede venir en segundos o milisegundos según la versión.
+// TODO: cuando Brian tenga credenciales de sandbox, capturar una tripleta real
+// x-signature/x-request-id/data.id de un webhook de prueba y fijarla como
+// fixture: hoy el test arma el manifest con la misma lógica que esta función,
+// así que no detectaría una plantilla equivocada (esta vez se verificó contra
+// la doc oficial de MP a mano, por afuera de los tests).
 export function validarFirmaWebhook(i: FirmaInput): { ok: boolean; motivo?: string } {
   if (!i.xSignature || !i.xRequestId || !i.dataId) return { ok: false, motivo: 'faltan cabeceras' };
   const partes: Record<string, string> = {};
@@ -85,15 +90,25 @@ export function armarItemsPreferencia(
   return items.map(it => {
     const prod = catalogo.find(p => p.id === it.product?.id);
     if (!prod) throw new Error(`El producto ${it.product?.id ?? '(sin id)'} ya no existe en el catálogo`);
-    const cantidad = Math.floor(it.quantity);
-    if (!Number.isFinite(cantidad) || cantidad < 1) {
+    // Un typo de admin (precio en 0 o negativo) no puede colar una preferencia
+    // de $0 que MP marque como "approved".
+    if (!Number.isFinite(prod.price) || prod.price <= 0) {
+      throw new Error(`Precio inválido en el catálogo para ${prod.name}`);
+    }
+    // Cantidad tiene que ser entera: truncar (Math.floor) dejaba pasar un
+    // 1.999 cobrando 1 mientras el pedido en la base queda con 1.999 — un
+    // desfasaje silencioso entre lo pagado y lo entregado.
+    if (!Number.isInteger(it.quantity) || it.quantity < 1) {
       throw new Error(`Cantidad inválida para ${prod.name}`);
     }
     const variante = [it.selectedSize, it.selectedColor].filter(Boolean).join('/');
+    const title = variante ? `${prod.name} (${variante})` : prod.name;
     return {
       id: prod.id,
-      title: variante ? `${prod.name} (${variante})` : prod.name,
-      quantity: cantidad,
+      // MP trunca el título del item a 256 caracteres; lo topeamos acá para
+      // no depender de qué hace su API con el sobrante.
+      title: title.slice(0, 250),
+      quantity: it.quantity,
       unit_price: prod.price,
       currency_id: 'UYU' as const,
     };

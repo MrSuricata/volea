@@ -92,6 +92,44 @@ describe('validarFirmaWebhook', () => {
     expect(validarFirmaWebhook({ xSignature: 'sin-formato', xRequestId: 'r', dataId: '1', secreto: SECRETO }).ok).toBe(false);
     expect(validarFirmaWebhook({ xSignature: 'ts=1,v1=abc', xRequestId: undefined, dataId: '1', secreto: SECRETO }).ok).toBe(false);
   });
+
+  it('rechaza v1 vacío', () => {
+    const ts = 1754400000;
+    const r = validarFirmaWebhook({
+      xSignature: `ts=${ts},v1=`,
+      xRequestId: 'req-1',
+      dataId: '12345',
+      secreto: SECRETO,
+      ahoraMs: ts * 1000,
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it('rechaza ts en el futuro fuera de la ventana de tolerancia', () => {
+    const ts = 1754400000;
+    const r = validarFirmaWebhook({
+      xSignature: firmar('12345', 'req-1', ts),
+      xRequestId: 'req-1',
+      dataId: '12345',
+      secreto: SECRETO,
+      ahoraMs: ts * 1000 - 11 * 60_000, // el ts queda 11 min en el futuro respecto a "ahora"
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it('acepta un data.id alfanumérico en mayúsculas (se compara en minúscula)', () => {
+    const ts = 1754400000;
+    const manifest = `id:ord01abc;request-id:req-1;ts:${ts};`;
+    const v1 = createHmac('sha256', SECRETO).update(manifest).digest('hex');
+    const r = validarFirmaWebhook({
+      xSignature: `ts=${ts},v1=${v1}`,
+      xRequestId: 'req-1',
+      dataId: 'ORD01ABC',
+      secreto: SECRETO,
+      ahoraMs: ts * 1000,
+    });
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('armarItemsPreferencia', () => {
@@ -125,6 +163,20 @@ describe('armarItemsPreferencia', () => {
     expect(() => armarItemsPreferencia([{ product: { id: 'p1' } as never, quantity: -2 }], catalogo)).toThrow();
   });
 
+  it('explota ante cantidad fraccionaria (no trunca, rechaza)', () => {
+    expect(() => armarItemsPreferencia([{ product: { id: 'p1' } as never, quantity: 1.5 }], catalogo)).toThrow();
+  });
+
+  it('explota si el pedido no trae items', () => {
+    expect(() => armarItemsPreferencia([], catalogo)).toThrow();
+  });
+
+  it('explota si el precio del catálogo es inválido (típico: admin dejó 0)', () => {
+    const catalogoMalo = [{ id: 'p1', name: 'Remera Classic', price: 0 }];
+    expect(() => armarItemsPreferencia([{ product: { id: 'p1' } as never, quantity: 1 }], catalogoMalo))
+      .toThrow(/[Pp]recio inválido/);
+  });
+
   it('totalItems suma precio×cantidad', () => {
     const items = armarItemsPreferencia(
       [
@@ -153,6 +205,12 @@ describe('armarUrlRetorno', () => {
   });
   it('sin datos → desconocido, sin params extra', () => {
     expect(armarUrlRetorno(BASE, {})).toBe('https://volea.vercel.app/#/pago/resultado?estado=desconocido');
+  });
+
+  it('escapa external_reference para que no inyecte params extra', () => {
+    const url = armarUrlRetorno(BASE, { status: 'approved', external_reference: 'VO-1&estado=aprobado' });
+    const veces = url.match(/estado=/g) || [];
+    expect(veces.length).toBe(1);
   });
 });
 
