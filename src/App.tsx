@@ -63,6 +63,10 @@ const TorneoDetallePageLazy = lazy(() => import('./torneos/publico/TorneoDetalle
 // (src/galeria/datos.ts) SÍ viaja en el entry porque AdminGaleriaTab (import estático,
 // como el resto de las pestañas del admin salvo Torneos) lo importa. Son ~12 KB.
 const GaleriaPageLazy = lazy(() => import('./galeria/GaleriaPage'));
+// Resultado del pago (aterrizaje de la vuelta de Mercado Pago, /pago/resultado): mismo
+// motivo que los lazy de arriba — la tienda pública no la necesita hasta que alguien vuelve
+// de MP. Vive en su propia carpeta src/pago/ porque el dominio "pago" va a crecer.
+const ResultadoPagoPageLazy = lazy(() => import('./pago/ResultadoPagoPage'));
 // Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
 // JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
 // avisarLimitado -> push -> pull (todos useCallback encadenados) y dispara el effect de
@@ -4813,6 +4817,21 @@ function GaleriaRoute() {
   );
 }
 
+// Resultado del pago (público): aterrizaje de la vuelta de Mercado Pago. Mismo patrón que
+// los wrappers de arriba (usePageMeta acá, Suspense alrededor del chunk lazy), pero además
+// lee clearCart del store y se lo pasa como prop a la página lazy — useStore no está
+// exportado de este archivo y ninguna página lazy lo importa directo, así que el wrapper es
+// quien conecta el store con el chunk.
+function ResultadoPagoRoute() {
+  const { clearCart } = useStore();
+  usePageMeta({ title: 'Resultado del pago', description: 'Resultado de tu pago con Mercado Pago.' });
+  return (
+    <Suspense fallback={<SeccionCargando texto="Cargando…" />}>
+      <ResultadoPagoPageLazy clearCart={clearCart} />
+    </Suspense>
+  );
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
   // Sin AnimatePresence: con framer-motion 12 + React 19, mode="wait" deja la
@@ -4834,6 +4853,7 @@ function AnimatedRoutes() {
       <Route path="/mapa" element={<PageTransition><MapPage /></PageTransition>} />
       <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />
       <Route path="/checkout" element={<PageTransition><CheckoutPage /></PageTransition>} />
+      <Route path="/pago/resultado" element={<PageTransition><ResultadoPagoRoute /></PageTransition>} />
       <Route path="/admin" element={<PageTransition><AdminPage /></PageTransition>} />
       <Route path="*" element={<PageTransition><NotFoundPage /></PageTransition>} />
     </Routes>
