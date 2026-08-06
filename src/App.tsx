@@ -10,7 +10,7 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus } from './types';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE, ADMIN_PASSWORD,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -2958,7 +2958,7 @@ function StockProductRow({
 // Badge del estado de pago online de un pedido (null = flujo WhatsApp puro).
 function BadgePagoMP({ order }: { order: Order }) {
   if (!order.paymentStatus) return null;
-  const cfg: Record<string, { texto: string; clases: string }> = {
+  const cfg: Record<PaymentStatus, { texto: string; clases: string }> = {
     aprobado:  { texto: '💳 Pagado (MP)',  clases: 'bg-green-100 text-green-700' },
     pendiente: { texto: 'MP en proceso',   clases: 'bg-yellow-100 text-yellow-700' },
     iniciado:  { texto: 'MP sin terminar', clases: 'bg-gray-100 text-gray-500' },
@@ -3586,7 +3586,8 @@ function AdminPage() {
                           <span className="text-sm text-gray-500 hidden sm:inline">{order.customer.name}</span>
                           <span className="text-sm text-gray-500 hidden md:inline">{order.items.length} items</span>
                           <span className="font-display font-bold text-navy-700 text-sm">{formatPrice(order.total)}</span>
-                          <BadgePagoMP order={order} />
+                          {/* en móvil el badge no entra (recortaba el select de estado); el detalle expandido muestra el pago igual */}
+                          <span className="hidden sm:inline"><BadgePagoMP order={order} /></span>
                           <select
                             value={order.status}
                             onChange={(e) => {
@@ -3643,7 +3644,7 @@ function AdminPage() {
                                 <div className="space-y-1 text-sm text-gray-600">
                                   <p><strong>Estado:</strong> <BadgePagoMP order={order} /></p>
                                   {order.mpPaymentId && <p><strong>ID de pago MP:</strong> {order.mpPaymentId}</p>}
-                                  {order.paidAt && <p><strong>Pagado:</strong> {new Date(order.paidAt).toLocaleString('es-UY')}</p>}
+                                  {order.paidAt && <p><strong>Pagado:</strong> {new Date(order.paidAt).toLocaleString('es-UY', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
                                   {order.paidAmount != null && <p><strong>Monto acreditado:</strong> {formatPrice(order.paidAmount)}</p>}
                                 </div>
                               </div>
