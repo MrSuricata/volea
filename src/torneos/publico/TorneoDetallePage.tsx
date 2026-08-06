@@ -10,7 +10,9 @@ import { obtenerTorneoPublico } from './datos';
 import { RkAviso, RkCargando, RkError } from './Estados';
 import '../torneos.css';
 
-const POLL_MS = 15000;
+// 30s de polling: sigue siendo "en vivo" para el ritmo de un torneo de pickleball y
+// gasta la mitad de egress de Supabase que los 15s originales con espectadores mirando.
+const POLL_MS = 30000;
 
 const ETIQUETA_FASE: Record<Torneo['fase'], string> = {
   parejas: 'Inscripción', grupos: 'Armando grupos', faseGrupos: 'Fase de grupos', llave: 'Llave en juego', terminado: 'Terminado',
@@ -21,7 +23,7 @@ type Estado = 'cargando' | 'ok' | 'no-encontrado' | 'error';
 type Props = { onNombre?: (nombre: string) => void };
 
 // Registro visual de un torneo: solo lectura (sin inputs, sin botones que muten nada).
-// Mientras el torneo no está terminado, refresca el documento cada ~15s (setInterval +
+// Mientras el torneo no está terminado, refresca el documento cada ~30s (setInterval +
 // refetch puntual) y lo corta al terminar o al desmontar.
 export default function TorneoDetallePage({ onNombre }: Props) {
   const { id } = useParams<{ id: string }>();
@@ -72,7 +74,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
       })();
     }, POLL_MS);
 
-    // Al volver a la pestaña, refrescar YA en vez de esperar hasta 15s: quien vuelve a
+    // Al volver a la pestaña, refrescar YA en vez de esperar hasta 30s: quien vuelve a
     // mirar el torneo quiere el resultado de ahora, no el de cuando se fue.
     const alVolver = () => {
       if (document.visibilityState !== 'visible') return;
@@ -109,9 +111,17 @@ export default function TorneoDetallePage({ onNombre }: Props) {
   }
 
   const individual = (torneo.formato ?? 'grupos') === 'individual';
-  const podio = podioDeTorneo(torneo);
+  // Defaults defensivos (auditoría pre-lanzamiento): el detalle se lee directo por id,
+  // SIN pasar por el filtro endurecido de la lista — si a una fila malformada de
+  // rk_torneos le falta algún array, se trata como vacío y se muestra lo que sí hay,
+  // en vez de reventar la página entera en blanco.
+  const parejas = torneo.parejas ?? [];
+  const grupos = torneo.grupos ?? [];
+  // podioDeTorneo lee grupos/partidosGrupo adentro (resultado.ts): se le pasa una
+  // copia con defaults para que un documento manco tampoco reviente ahí.
+  const podio = podioDeTorneo({ ...torneo, parejas, grupos, partidosGrupo: torneo.partidosGrupo ?? [] });
   const tieneLlave = !!torneo.partidosLlave && torneo.partidosLlave.length > 0;
-  const tieneGrupos = !individual && torneo.grupos.length > 0;
+  const tieneGrupos = !individual && grupos.length > 0;
 
   return (
     <div className="rk">
@@ -142,15 +152,15 @@ export default function TorneoDetallePage({ onNombre }: Props) {
           </div>
         )}
 
-        {tieneGrupos && torneo.grupos.map((g) => <GrupoPublico key={g.id} torneo={torneo} grupo={g} />)}
+        {tieneGrupos && grupos.map((g) => <GrupoPublico key={g.id} torneo={torneo} grupo={g} />)}
 
         {tieneLlave && <LlavePublica torneo={torneo} />}
 
         {!tieneGrupos && !tieneLlave && (
           <p className="vacio">
             {individual ? 'La llave todavía no se armó. ' : 'El torneo todavía no tiene grupos armados. '}
-            {torneo.parejas.length} {individual ? 'jugador' : 'pareja'}{torneo.parejas.length === 1 ? '' : 's'} anotad
-            {individual ? (torneo.parejas.length === 1 ? 'o' : 'os') : (torneo.parejas.length === 1 ? 'a' : 'as')}.
+            {parejas.length} {individual ? 'jugador' : 'pareja'}{parejas.length === 1 ? '' : 's'} anotad
+            {individual ? (parejas.length === 1 ? 'o' : 'os') : (parejas.length === 1 ? 'a' : 'as')}.
           </p>
         )}
       </main>
@@ -159,7 +169,9 @@ export default function TorneoDetallePage({ onNombre }: Props) {
 }
 
 function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
-  const partidos = torneo.partidosGrupo.filter((p) => p.grupoId === grupo.id);
+  // Default defensivo: un documento sin partidosGrupo muestra el grupo "sin partidos"
+  // en vez de tirar la página.
+  const partidos = (torneo.partidosGrupo ?? []).filter((p) => p.grupoId === grupo.id);
   const filas = calcularTabla(grupo.parejaIds, partidos);
   return (
     <div className="carta" style={{ marginTop: 12 }}>
@@ -212,8 +224,10 @@ function LlavePublica({ torneo }: { torneo: Torneo }) {
   // Procedencia "2º B" por pareja según la tabla actual de su grupo (solo formato grupos).
   const procedencia = new Map<string, string>();
   if (!individual) {
-    for (const g of torneo.grupos) {
-      const filas = calcularTabla(g.parejaIds, torneo.partidosGrupo.filter((p) => p.grupoId === g.id));
+    // Defaults defensivos: llave presente pero grupos/partidosGrupo ausentes en un
+    // documento malformado ⇒ sin procedencias, pero la llave se muestra igual.
+    for (const g of torneo.grupos ?? []) {
+      const filas = calcularTabla(g.parejaIds, (torneo.partidosGrupo ?? []).filter((p) => p.grupoId === g.id));
       for (const f of filas) procedencia.set(f.parejaId, `${f.posicion}º ${g.nombre}`);
     }
   }

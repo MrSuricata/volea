@@ -33,7 +33,13 @@ async function cargarTorneos(client: SupabaseClient): Promise<ListaTorneosResult
   }
   const torneos = (filas ?? [])
     .map((f) => f.data as Torneo)
-    .filter((t): t is Torneo => !!t && typeof t.id === 'string');
+    // Filtro endurecido: una fila malformada de rk_torneos (data null, sin id, sin
+    // creadoEl para ordenar o sin parejas) se descarta acá y sigue la lista con el
+    // resto — antes UNA fila rota alcanzaba para tirar /torneos entera al renderizar.
+    .filter(
+      (t): t is Torneo =>
+        !!t && typeof t.id === 'string' && typeof t.creadoEl === 'string' && Array.isArray(t.parejas),
+    );
   return { torneos, error: null };
 }
 

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Newspaper } from 'lucide-react';
 import type { Post } from '../types';
@@ -66,6 +66,23 @@ function CoverFallback() {
   );
 }
 
+// Cover de la tarjeta del grid con fallback: si el link del cover caducó o el host
+// bloquea el hotlink (típico de Drive/Photos), placa VOLEA en vez del ícono roto.
+function PostCover({ post }: { post: Post }) {
+  const [rota, setRota] = useState(false);
+  if (!post.coverUrl || rota) return <CoverFallback />;
+  return (
+    <div className="img-zoom h-48">
+      <img
+        src={post.coverUrl}
+        alt={post.title}
+        className="w-full h-48 object-cover"
+        onError={() => setRota(true)}
+      />
+    </div>
+  );
+}
+
 // ─── BlogListPage ────────────────────────────────────────────────────────────
 
 export function BlogListPage({ posts }: { posts: Post[] }) {
@@ -97,13 +114,7 @@ export function BlogListPage({ posts }: { posts: Post[] }) {
               to={`/blog/${post.slug}`}
               className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover-scale group flex flex-col"
             >
-              {post.coverUrl ? (
-                <div className="img-zoom h-48">
-                  <img src={post.coverUrl} alt={post.title} className="w-full h-48 object-cover" />
-                </div>
-              ) : (
-                <CoverFallback />
-              )}
+              <PostCover post={post} />
               <div className="p-5 flex flex-col flex-1">
                 <p className="text-xs text-gray-400 mb-2">{formatDate(postDate(post))}</p>
                 <h2 className="font-display text-lg font-bold text-navy-700 mb-2 group-hover:text-navy-500 transition-colors">
@@ -173,6 +184,8 @@ export function BlogPostPage({ posts }: { posts: Post[] }) {
             src={post.coverUrl}
             alt={post.title}
             className="rounded-2xl w-full max-h-96 object-cover mb-8"
+            // Cover que 404ea: se esconde y listo — el post se lee perfecto sin cover.
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         )}
         <p className="text-sm text-gray-400 mb-2">{formatDate(postDate(post))}</p>

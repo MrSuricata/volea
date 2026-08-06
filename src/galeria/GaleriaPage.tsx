@@ -23,6 +23,9 @@ function PortadaFallback() {
 }
 
 function AlbumCard({ album }: { album: GalleryAlbum }) {
+  // Las portadas vienen de Drive/Photos y esos links caducan o bloquean el hotlink:
+  // si la imagen 404ea, mostrar la placa VOLEA en vez del ícono roto del navegador.
+  const [rota, setRota] = useState(false);
   return (
     <a
       href={album.albumUrl}
@@ -30,9 +33,14 @@ function AlbumCard({ album }: { album: GalleryAlbum }) {
       rel="noopener noreferrer"
       className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover-scale group flex flex-col"
     >
-      {album.coverUrl ? (
+      {album.coverUrl && !rota ? (
         <div className="img-zoom h-48">
-          <img src={album.coverUrl} alt={album.title} className="w-full h-48 object-cover" />
+          <img
+            src={album.coverUrl}
+            alt={album.title}
+            className="w-full h-48 object-cover"
+            onError={() => setRota(true)}
+          />
         </div>
       ) : (
         <PortadaFallback />
