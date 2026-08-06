@@ -56,7 +56,7 @@ const METHOD_BADGE: Record<string, string> = {
 };
 
 const badgeClass = 'rounded-full px-2 py-0.5 font-semibold';
-const sectionTitleClass = 'mb-2 font-display text-sm font-extrabold uppercase tracking-wide text-gray-500';
+const sectionTitleClass = 'mb-2 font-display text-sm font-bold uppercase tracking-wide text-gray-500';
 
 export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
@@ -320,7 +320,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
               <div className="space-y-2">
                 {porCobrar.deudores.map(deudor => (
                   <div key={deudor.nombre} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-white px-3 py-2.5">
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 font-display font-extrabold text-amber-700">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 font-display font-bold text-amber-700">
                       {deudor.nombre.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">

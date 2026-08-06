@@ -28,17 +28,12 @@ import {
   signOut as authSignOut,
   type AdminUser,
 } from './services/authService';
-// Snapshot legacy de Shopify: solo como fallback si Supabase está caído.
-import { getProductsAsInternal, getCategoriesAsInternal } from './services/shopifyService';
+// NOTA: el snapshot legacy de Shopify (services/shopifyService + su JSON de 139 KB min)
+// ya no se importa acá arriba: se pide con import() dinámico solo si el fallback de
+// productos/categorías llega a correr (ver loadData). Antes viajaba en el entry y se
+// parseaba en cada arranque para no usarse casi nunca.
 import { BlogListPage, BlogPostPage } from './components/BlogPages';
 import { StandingsPage } from './components/StandingsPage';
-import { AdminBlogTab } from './components/AdminBlogTab';
-import { AdminGaleriaTab } from './components/AdminGaleriaTab';
-import { AdminCajaTab } from './components/AdminCajaTab';
-import { AdminSociosTab } from './components/AdminSociosTab';
-import { AdminOrderModal } from './components/AdminOrderModal';
-import { AdminStandingsTab } from './components/AdminStandingsTab';
-import { ProductEditor } from './components/ProductEditor';
 // NOTA sobre './torneos/cacheTorneos': no se importa arriba a proposito (ver logout, mas
 // abajo, que lo importa dinamicamente). Es un modulo hoja sin imports de React/Supabase/el
 // hook, pero aun un import ESTATICO de una sola constante desde aca alcanzaria para que
@@ -72,6 +67,36 @@ const lazyConRecarga = <T extends React.ComponentType<any>>(imp: () => Promise<{
 const AdminTorneosTab = lazyConRecarga(() =>
   import('./components/AdminTorneosTab').then((m) => ({ default: m.AdminTorneosTab })),
 );
+// Resto de las pestañas del admin: mismo motivo que AdminTorneosTab — las usa solo el
+// admin logueado, la tienda pública (critical path) no tiene por qué bajarlas. Cada
+// chunk se pide recién al entrar a su pestaña. Socios arrastra a su chunk
+// AdminSociosSection y AdminLiquidarCajaModal (solo los importa él).
+const AdminCajaTab = lazyConRecarga(() =>
+  import('./components/AdminCajaTab').then((m) => ({ default: m.AdminCajaTab })),
+);
+const AdminSociosTab = lazyConRecarga(() =>
+  import('./components/AdminSociosTab').then((m) => ({ default: m.AdminSociosTab })),
+);
+const AdminBlogTab = lazyConRecarga(() =>
+  import('./components/AdminBlogTab').then((m) => ({ default: m.AdminBlogTab })),
+);
+const AdminStandingsTab = lazyConRecarga(() =>
+  import('./components/AdminStandingsTab').then((m) => ({ default: m.AdminStandingsTab })),
+);
+const AdminGaleriaTab = lazyConRecarga(() =>
+  import('./components/AdminGaleriaTab').then((m) => ({ default: m.AdminGaleriaTab })),
+);
+// Modales del admin (editor de producto y pedido manual): también lazy, con fallback
+// null en su Suspense — se renderizan condicionalmente, así que el chunk baja recién
+// al abrirlos y el modal aparece apenas llega (sin placeholder que parpadee).
+const ProductEditor = lazyConRecarga(() =>
+  import('./components/ProductEditor').then((m) => ({ default: m.ProductEditor })),
+);
+const AdminOrderModal = lazyConRecarga(() =>
+  import('./components/AdminOrderModal').then((m) => ({ default: m.AdminOrderModal })),
+);
+// Fallback compartido de las pestañas lazy del admin (mismo look que el de Torneos).
+const cargandoTab = <div className="text-navy-500 text-sm py-8 text-center">Cargando…</div>;
 // Paginas publicas de Torneos (Etapa 2): mismo motivo que AdminTorneosTab arriba - cargan
 // el motor de torneos + torneos.css (.rk) que la tienda publica (critical path) no
 // necesita. Se piden recien cuando alguien navega a /ranking, /torneos o /torneos/:id.
@@ -80,9 +105,9 @@ const TorneosListaPageLazy = lazyConRecarga(() => import('./torneos/publico/Torn
 const TorneoDetallePageLazy = lazyConRecarga(() => import('./torneos/publico/TorneoDetallePage'));
 // Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
 // los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
-// entra a /galeria. OJO: solo la PÁGINA se separa del entry; su módulo de datos
-// (src/galeria/datos.ts) SÍ viaja en el entry porque AdminGaleriaTab (import estático,
-// como el resto de las pestañas del admin salvo Torneos) lo importa. Son ~12 KB.
+// entra a /galeria. Su módulo de datos (src/galeria/datos.ts, ~12 KB) también quedó fuera
+// del entry desde que AdminGaleriaTab pasó a lazy (arriba): al ser los dos únicos que lo
+// importan y ser los dos lazy, Rollup lo deja en un chunk compartido entre ambos.
 const GaleriaPageLazy = lazyConRecarga(() => import('./galeria/GaleriaPage'));
 // Resultado del pago (aterrizaje de la vuelta de Mercado Pago, /pago/resultado): mismo
 // motivo que los lazy de arriba — la tienda pública no la necesita hasta que alguien vuelve
@@ -396,9 +421,20 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
           SupabaseService.getStandings(),
         ]), 10000, respaldo);
         // null = fetch falló → snapshot legacy; [] = catálogo vacío a propósito.
-        loadedProducts = p ?? getProductsAsInternal();
-        _setProducts(loadedProducts);
-        _setCategories(c ?? getCategoriesAsInternal());
+        // El snapshot va con import() dinámico a propósito: son 139 KB minificados
+        // (shopifyService + shopify-catalog.json) que antes viajaban en el entry y se
+        // parseaban en cada arranque para no usarse casi nunca. El chunk baja solo
+        // cuando el fetch realmente falló; misma data y mismo camino que antes.
+        if (p === null || c === null) {
+          const { getProductsAsInternal, getCategoriesAsInternal } = await import('./services/shopifyService');
+          loadedProducts = p ?? getProductsAsInternal();
+          _setProducts(loadedProducts);
+          _setCategories(c ?? getCategoriesAsInternal());
+        } else {
+          loadedProducts = p;
+          _setProducts(loadedProducts);
+          _setCategories(c);
+        }
         _setEvents(e.length ? e : INITIAL_EVENTS);
         // Pedidos: acá va solo lo que haya en este dispositivo (el comprador ve los suyos).
         // La query real a Supabase se dispara recién cuando se confirma un admin (ver el
@@ -411,6 +447,9 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         _setPosts(po);
         _setStandings(st);
       } else {
+        // Sin Supabase configurado (dev local sin .env): catálogo desde el snapshot,
+        // con import() dinámico por el mismo motivo que arriba.
+        const { getProductsAsInternal, getCategoriesAsInternal } = await import('./services/shopifyService');
         loadedProducts = getProductsAsInternal();
         _setProducts(loadedProducts);
         _setCategories(getCategoriesAsInternal());
@@ -3564,22 +3603,24 @@ function AdminPage() {
               </button>
             </div>
             {orderModal && (
-              <AdminOrderModal
-                products={products}
-                onClose={() => setOrderModal(false)}
-                onSave={async (o) => {
-                  // Pre-check: sesión vencida → avisar ANTES del toast optimista
-                  // (mismo criterio que el guardado en ProductEditor).
-                  if (await sesionAdminVencida()) {
-                    toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. El pedido NO se guardó.');
-                    return;
-                  }
-                  addOrder(o);
-                  setOrderModal(false);
-                  setExpandedOrder(o.id);
-                  toast.success(`Pedido ${o.id} creado`);
-                }}
-              />
+              <Suspense fallback={null}>
+                <AdminOrderModal
+                  products={products}
+                  onClose={() => setOrderModal(false)}
+                  onSave={async (o) => {
+                    // Pre-check: sesión vencida → avisar ANTES del toast optimista
+                    // (mismo criterio que el guardado en ProductEditor).
+                    if (await sesionAdminVencida()) {
+                      toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. El pedido NO se guardó.');
+                      return;
+                    }
+                    addOrder(o);
+                    setOrderModal(false);
+                    setExpandedOrder(o.id);
+                    toast.success(`Pedido ${o.id} creado`);
+                  }}
+                />
+              </Suspense>
             )}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               {orders.length === 0 ? (
@@ -3927,55 +3968,65 @@ function AdminPage() {
         {/* Caja Tab (ventas/gastos del bot de Telegram) */}
         {activeTab === 'caja' && (
           <div className="fade-in">
-            <AdminCajaTab
-              loadLedger={loadLedger}
-              loadLedgerFull={loadLedgerFull}
-              revertEntry={revertLedgerEntry}
-              loadSocioMoves={SupabaseService.getSocioMoves}
-            />
+            <Suspense fallback={cargandoTab}>
+              <AdminCajaTab
+                loadLedger={loadLedger}
+                loadLedgerFull={loadLedgerFull}
+                revertEntry={revertLedgerEntry}
+                loadSocioMoves={SupabaseService.getSocioMoves}
+              />
+            </Suspense>
           </div>
         )}
 
         {/* Socios Tab (cuentas entre socios + números del negocio) */}
         {activeTab === 'socios' && (
-          <AdminSociosTab
-            loadLedgerFull={loadLedgerFull}
-            loadSocioMoves={SupabaseService.getSocioMoves}
-            addSocioMove={SupabaseService.addSocioMove}
-            deleteSocioMove={SupabaseService.deleteSocioMove}
-            liquidarCaja={SupabaseService.liquidarCaja}
-          />
+          <Suspense fallback={cargandoTab}>
+            <AdminSociosTab
+              loadLedgerFull={loadLedgerFull}
+              loadSocioMoves={SupabaseService.getSocioMoves}
+              addSocioMove={SupabaseService.addSocioMove}
+              deleteSocioMove={SupabaseService.deleteSocioMove}
+              liquidarCaja={SupabaseService.liquidarCaja}
+            />
+          </Suspense>
         )}
 
         {/* Blog Tab */}
         {activeTab === 'blog' && (
           <div className="fade-in">
-            <AdminBlogTab
-              posts={posts}
-              onSave={savePost}
-              onDelete={removePost}
-              uploadImage={(f) => SupabaseService.uploadImage(f, 'blog')}
-            />
+            <Suspense fallback={cargandoTab}>
+              <AdminBlogTab
+                posts={posts}
+                onSave={savePost}
+                onDelete={removePost}
+                uploadImage={(f) => SupabaseService.uploadImage(f, 'blog')}
+              />
+            </Suspense>
           </div>
         )}
 
         {/* Galería Tab (álbumes de fotos, cada uno un link de salida a Drive/Photos) */}
         {activeTab === 'galeria' && (
           <div className="fade-in">
-            <AdminGaleriaTab
-              uploadImage={(f) => SupabaseService.uploadImage(f, 'gallery')}
-            />
+            <Suspense fallback={cargandoTab}>
+              <AdminGaleriaTab
+                uploadImage={(f) => SupabaseService.uploadImage(f, 'gallery')}
+              />
+            </Suspense>
           </div>
         )}
 
         {/* Standings Tab */}
         {activeTab === 'standings' && (
           <div className="fade-in">
-            <AdminStandingsTab
-              standings={standings}
-              onSave={saveStanding}
-              onDelete={removeStanding}
-            />
+            <Suspense fallback={cargandoTab}>
+              <AdminStandingsTab
+                standings={standings}
+                onSave={saveStanding}
+                onDelete={removeStanding}
+              />
+            </Suspense>
           </div>
         )}
 
@@ -3990,17 +4041,19 @@ function AdminPage() {
 
         {/* Product editor global: se abre desde Productos y desde Stock & Alertas */}
         {productModal && (
-          <ProductEditor
-            product={editingProduct}
-            categories={categories}
-            uploadImage={(f) => SupabaseService.uploadImage(f, 'products')}
-            onClose={() => { setProductModal(false); setEditingProduct(null); }}
-            onSave={(p) => {
-              saveProduct(p);
-              setProductModal(false);
-              setEditingProduct(null);
-            }}
-          />
+          <Suspense fallback={null}>
+            <ProductEditor
+              product={editingProduct}
+              categories={categories}
+              uploadImage={(f) => SupabaseService.uploadImage(f, 'products')}
+              onClose={() => { setProductModal(false); setEditingProduct(null); }}
+              onSave={(p) => {
+                saveProduct(p);
+                setProductModal(false);
+                setEditingProduct(null);
+              }}
+            />
+          </Suspense>
         )}
 
         {deleteConfirm && (

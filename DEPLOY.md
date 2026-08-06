@@ -55,7 +55,6 @@ npx vercel --prod      # producción
 4. Variables de entorno (opcionales — ver `.env.example`):
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
-   - `VITE_ADMIN_PASSWORD`
 5. Deploy.
 
 ### Dominio
@@ -75,7 +74,7 @@ Vercel → Settings → Domains → Add `volea.uy` (o el que tengas).
   - `bridvanovich@twf.uy` (owner)
   - `somosvolea@gmail.com` (admin)
   - Para agregar a Gastón/Paula: `INSERT INTO admins (email, name, role) VALUES ('email', 'Nombre', 'admin');` en el SQL Editor de Supabase.
-- El fallback por password (`adminvolea` / `VITE_ADMIN_PASSWORD`) solo aplica si Supabase está caído.
+- No hay fallback por contraseña local: si Supabase está caído no hay login de admin (la tienda pública sigue funcionando igual).
 - Pestañas:
   - **Dashboard**: KPIs y alertas de stock
   - **Stock & Alertas**: detalle por talle×color con filtros y edición directa
