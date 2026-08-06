@@ -12,7 +12,7 @@ import {
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus } from './types';
 import {
-  WHATSAPP_NUMBER, INSTAGRAM_HANDLE, ADMIN_PASSWORD,
+  WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
 } from './constants';
 import { StorageService } from './services/storageService';
@@ -47,27 +47,47 @@ import { ProductEditor } from './components/ProductEditor';
 // seria mucho peor: arrastra el hook entero (supabase, mergeTorneos, etc.) de vuelta al
 // chunk de entrada y rompe el split lazy de AdminTorneosTab de abajo.
 
+// Un deploy nuevo borra los chunks viejos de Vercel: la pestaña abierta de ANTES del
+// deploy pide un hash que ya no existe, el rewrite devuelve HTML y el import() explota
+// con pantalla blanca (peor caso: volver de PAGAR en Mercado Pago a /pago/resultado).
+// Si el import() falla, recargamos UNA vez para traer el index nuevo (la bandera en
+// sessionStorage evita el loop); si vuelve a fallar, el throw cae en el ErrorBoundary raíz.
+const lazyConRecarga = <T extends React.ComponentType<any>>(imp: () => Promise<{ default: T }>) =>
+  lazy(() =>
+    imp()
+      .then((m) => { sessionStorage.removeItem('volea_chunk_retry'); return m; })
+      .catch((err) => {
+        if (!sessionStorage.getItem('volea_chunk_retry')) {
+          sessionStorage.setItem('volea_chunk_retry', '1');
+          window.location.reload();
+          // Promesa que nunca resuelve: la página ya se está recargando, no hay que renderizar nada.
+          return new Promise<{ default: T }>(() => {});
+        }
+        throw err;
+      }),
+  );
+
 // Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
 // (critical path) no lo cargue nunca; el chunk se pide recien al entrar a la pestaña Torneos.
-const AdminTorneosTab = lazy(() =>
+const AdminTorneosTab = lazyConRecarga(() =>
   import('./components/AdminTorneosTab').then((m) => ({ default: m.AdminTorneosTab })),
 );
 // Paginas publicas de Torneos (Etapa 2): mismo motivo que AdminTorneosTab arriba - cargan
 // el motor de torneos + torneos.css (.rk) que la tienda publica (critical path) no
 // necesita. Se piden recien cuando alguien navega a /ranking, /torneos o /torneos/:id.
-const RankingPageLazy = lazy(() => import('./torneos/publico/RankingPage'));
-const TorneosListaPageLazy = lazy(() => import('./torneos/publico/TorneosListaPage'));
-const TorneoDetallePageLazy = lazy(() => import('./torneos/publico/TorneoDetallePage'));
+const RankingPageLazy = lazyConRecarga(() => import('./torneos/publico/RankingPage'));
+const TorneosListaPageLazy = lazyConRecarga(() => import('./torneos/publico/TorneosListaPage'));
+const TorneoDetallePageLazy = lazyConRecarga(() => import('./torneos/publico/TorneoDetallePage'));
 // Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
 // los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
 // entra a /galeria. OJO: solo la PÁGINA se separa del entry; su módulo de datos
 // (src/galeria/datos.ts) SÍ viaja en el entry porque AdminGaleriaTab (import estático,
 // como el resto de las pestañas del admin salvo Torneos) lo importa. Son ~12 KB.
-const GaleriaPageLazy = lazy(() => import('./galeria/GaleriaPage'));
+const GaleriaPageLazy = lazyConRecarga(() => import('./galeria/GaleriaPage'));
 // Resultado del pago (aterrizaje de la vuelta de Mercado Pago, /pago/resultado): mismo
 // motivo que los lazy de arriba — la tienda pública no la necesita hasta que alguien vuelve
 // de MP. Vive en su propia carpeta src/pago/ porque el dominio "pago" va a crecer.
-const ResultadoPagoPageLazy = lazy(() => import('./pago/ResultadoPagoPage'));
+const ResultadoPagoPageLazy = lazyConRecarga(() => import('./pago/ResultadoPagoPage'));
 // Callback estable (identidad fija entre renders): si fuera una arrow function inline en el
 // JSX, cambiaria de identidad en cada render de AdminPage, lo que tira abajo useSyncTorneos'
 // avisarLimitado -> push -> pull (todos useCallback encadenados) y dispara el effect de
@@ -287,6 +307,19 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   // Subscribe to Supabase auth state changes (magic link return path)
   useEffect(() => {
     let mounted = true;
+    // Pedidos: se piden recién acá, cuando hay admin CONFIRMADO. Para un visitante
+    // anónimo getOrders() siempre devuelve [] por RLS — tenerla en el Promise.all del
+    // arranque era una query desperdiciada en cada visita. La bandera evita pedirlos
+    // dos veces cuando la sesión persistida dispara getCurrentAdmin Y onAuthStateChange.
+    let pedidosCargados = false;
+    const cargarPedidosAdmin = () => {
+      if (pedidosCargados) return;
+      pedidosCargados = true;
+      SupabaseService.getOrders().then((o) => {
+        if (!mounted) return;
+        if (o.length) _setOrders(o);
+      });
+    };
     (async () => {
       await supabaseReady;
       const admin = await getCurrentAdmin();
@@ -294,6 +327,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       if (admin) {
         setCurrentAdmin(admin);
         setIsAdmin(true);
+        cargarPedidosAdmin(); // sesión persistida: el admin ya estaba logueado al cargar
       } else if (isSupabaseConnected()) {
         // Supabase sano pero sin sesión real: el flag legacy de password no vale.
         sessionStorage.removeItem('volea_admin');
@@ -303,8 +337,13 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     const unsub = onAuthStateChange((admin) => {
       if (!mounted) return;
       setCurrentAdmin(admin);
-      if (admin) setIsAdmin(true);
-      else if (isSupabaseConnected()) setIsAdmin(false); // sesión expirada/revocada
+      if (admin) {
+        setIsAdmin(true);
+        cargarPedidosAdmin(); // login recién confirmado (password o magic link)
+      } else if (isSupabaseConnected()) {
+        setIsAdmin(false); // sesión expirada/revocada
+        pedidosCargados = false; // si vuelve a loguearse en esta misma visita, recargar
+      }
     });
     return () => { mounted = false; unsub(); };
   }, []);
@@ -345,13 +384,12 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         // se quedan girando eternamente. Con el techo, a los 10s se sigue con el respaldo
         // (snapshot para productos/categorías, INITIAL_* para el resto) y las páginas
         // pueden decir la verdad en vez de un "cargando" infinito.
-        const respaldo: [Product[] | null, Category[] | null, Event[], Order[], Club[], Announcement[], Post[], StandingEntry[]] =
-          [null, null, [], [], [], [], [], []];
-        const [p, c, e, o, cl, an, po, st] = await conLimite(Promise.all([
+        const respaldo: [Product[] | null, Category[] | null, Event[], Club[], Announcement[], Post[], StandingEntry[]] =
+          [null, null, [], [], [], [], []];
+        const [p, c, e, cl, an, po, st] = await conLimite(Promise.all([
           SupabaseService.getProducts(),
           SupabaseService.getCategories(),
           SupabaseService.getEvents(),
-          SupabaseService.getOrders(),
           SupabaseService.getClubs(),
           SupabaseService.getAnnouncements(),
           SupabaseService.getPosts(),
@@ -362,7 +400,12 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         _setProducts(loadedProducts);
         _setCategories(c ?? getCategoriesAsInternal());
         _setEvents(e.length ? e : INITIAL_EVENTS);
-        _setOrders(o);
+        // Pedidos: acá va solo lo que haya en este dispositivo (el comprador ve los suyos).
+        // La query real a Supabase se dispara recién cuando se confirma un admin (ver el
+        // useEffect de auth de arriba): para un anónimo siempre daba [] por RLS. Set
+        // funcional a propósito: si la carga del admin llegó ANTES que este Promise.all
+        // (una query sola vs siete), no hay que pisarle los pedidos de la nube.
+        _setOrders(prev => (prev.length ? prev : StorageService.getOrders()));
         _setClubs(cl.length ? cl : INITIAL_CLUBS);
         _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
         _setPosts(po);
@@ -620,16 +663,12 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     StorageService.setCart([]);
   }, []);
 
-  const login = useCallback((password: string) => {
-    // Legacy fallback: only allowed when Supabase auth is unavailable
-    if (isSupabaseConnected()) return false;
-    if (password === ADMIN_PASSWORD) {
-      setIsAdmin(true);
-      sessionStorage.setItem('volea_admin', 'true');
-      return true;
-    }
-    return false;
-  }, []);
+  // El login real es Supabase Auth (contraseña o magic link). Antes había un fallback
+  // legacy que aceptaba una contraseña hardcodeada en constants.ts cuando Supabase no
+  // estaba conectado: una contraseña en el bundle público era un footgun, y encima solo
+  // prendía un flag de sessionStorage sin sesión real (el panel quedaba vacío por RLS).
+  // Sin Supabase no hay login, punto.
+  const login = useCallback((_password: string) => false, []);
 
   const sendLoginLink = useCallback(async (email: string) => {
     return await sendMagicLink(email);
@@ -757,6 +796,7 @@ function Navbar() {
         <div className="flex items-center gap-4">
           <button
             onClick={() => setCartOpen(true)}
+            aria-label={totalItems > 0 ? `Carrito, ${totalItems} ${totalItems === 1 ? 'producto' : 'productos'}` : 'Abrir carrito'}
             className="relative text-white hover:text-lime-400 transition-colors"
           >
             <ShoppingCart size={24} />
@@ -768,6 +808,7 @@ function Navbar() {
           </button>
           <button
             onClick={() => setMobileOpen(true)}
+            aria-label="Abrir menú"
             className="lg:hidden text-white hover:text-lime-400 transition-colors"
           >
             <Menu size={24} />
@@ -782,7 +823,7 @@ function Navbar() {
           <div className="absolute left-0 top-0 h-full w-72 bg-navy-800 slide-in-left">
             <div className="flex items-center justify-between p-4 border-b border-navy-600">
               <img src="/logo.png" alt="VOLEA" className="h-8" onError={handleImgError} />
-              <button onClick={() => setMobileOpen(false)} className="text-white hover:text-lime-400">
+              <button onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" className="text-white hover:text-lime-400">
                 <X size={24} />
               </button>
             </div>
@@ -825,7 +866,7 @@ function CartDrawer() {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <h2 className="font-display text-xl font-bold text-navy-700">Tu carrito</h2>
-          <button onClick={() => setCartOpen(false)} className="text-navy-700 hover:text-red-500 transition-colors">
+          <button onClick={() => setCartOpen(false)} aria-label="Cerrar carrito" className="text-navy-700 hover:text-red-500 transition-colors">
             <X size={24} />
           </button>
         </div>
@@ -839,7 +880,7 @@ function CartDrawer() {
               <Link
                 to="/tienda"
                 onClick={() => setCartOpen(false)}
-                className="mt-4 text-lime-500 hover:text-lime-600 font-semibold"
+                className="mt-4 text-lime-800 hover:text-lime-700 font-semibold"
               >
                 Ir a la tienda
               </Link>
@@ -917,7 +958,7 @@ function CartDrawer() {
               <MessageCircle size={18} /> Finalizar pedido
             </Link>
             <p className="text-xs text-gray-400 text-center">
-              Coordinamos la entrega y el pago por WhatsApp.
+              El pago: online con Mercado Pago o por WhatsApp, como prefieras.
             </p>
           </div>
         )}
@@ -938,6 +979,8 @@ function ProductCard({ product }: { product: Product }) {
         <img
           src={product.images[0] || FALLBACK_IMG}
           alt={product.name}
+          loading="lazy"
+          decoding="async"
           className="card-img w-full h-full object-cover"
           onError={handleImgError}
         />
@@ -972,7 +1015,8 @@ function ProductCard({ product }: { product: Product }) {
           )}
         </div>
         <div className="mt-3 flex items-center justify-between">
-          <span className="text-lime-600 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
+          {/* lime-800, no 500/600: sobre blanco esos tonos no llegan ni a 3:1 (ilegible al sol) */}
+          <span className="text-lime-800 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
             Ver producto <ArrowRight size={14} />
           </span>
         </div>
@@ -1050,8 +1094,8 @@ function HomePage() {
     },
     {
       icon: <MessageCircle size={26} />,
-      title: 'Coordinamos por WhatsApp',
-      desc: 'Te escribimos para coordinar la entrega y el pago, simple y sin vueltas.',
+      title: 'Coordinamos la entrega',
+      desc: 'Te escribimos para coordinar la entrega. El pago: online o por WhatsApp, como te quede cómodo.',
     },
   ];
 
@@ -1153,7 +1197,7 @@ function HomePage() {
           </StaggerGrid>
           <Reveal delay={150}>
             <p className="text-center text-gray-400 text-sm mt-8">
-              Sin pago online: coordinamos entrega y pago por WhatsApp, con transferencia o efectivo.
+              Pagá online con Mercado Pago o coordiná pago y entrega por WhatsApp — transferencia o efectivo, como prefieras.
             </p>
           </Reveal>
         </div>
@@ -1168,7 +1212,7 @@ function HomePage() {
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
             <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">La selección de la casa</span>
+              <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">La selección de la casa</span>
               <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Destacados de la colección</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
@@ -1199,7 +1243,7 @@ function HomePage() {
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
             <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Encontrá lo tuyo</span>
+              <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">Encontrá lo tuyo</span>
               <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Explorá por categoría</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
@@ -1229,7 +1273,7 @@ function HomePage() {
           <div className="max-w-7xl mx-auto px-4">
             <Reveal>
               <div className="text-center mb-12">
-                <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Historias del deporte</span>
+                <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">Historias del deporte</span>
                 <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Últimas del blog</h2>
                 <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
               </div>
@@ -1246,6 +1290,8 @@ function HomePage() {
                         <img
                           src={post.coverUrl}
                           alt={post.title}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover"
                           onError={handleImgError}
                         />
@@ -1261,7 +1307,7 @@ function HomePage() {
                       </p>
                       <h3 className="font-display font-bold text-navy-700 text-lg leading-snug mb-2">{post.title}</h3>
                       <p className="text-gray-500 text-sm leading-relaxed line-clamp-3">{post.excerpt}</p>
-                      <span className="inline-flex items-center gap-1 text-lime-600 font-display font-bold text-sm mt-4">
+                      <span className="inline-flex items-center gap-1 text-lime-800 font-display font-bold text-sm mt-4">
                         Leer más <ChevronRight size={16} />
                       </span>
                     </div>
@@ -1368,13 +1414,13 @@ function HomePage() {
       {/* "VOLEA en acción" quitada 2026-08-06 a pedido de Brian: las 5 fotos eran de la misma sesión (lifestyle-sunset) y se veían repetidas. */}
 
       {/* ── 8. Nuestra esencia + Equipo ─────────────────────────────────── */}
+      {/* Sin backgroundAttachment: 'fixed': iOS lo ignora y en desktop fuerza repaints en cada scroll. */}
       <section
         className="relative py-24 overflow-hidden"
         style={{
           backgroundImage: 'url(/products/lifestyle-sunset-2.jpg)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          backgroundAttachment: 'fixed',
         }}
       >
         <div className="absolute inset-0 bg-gradient-to-r from-navy-900/95 via-navy-700/90 to-navy-700/80" />
@@ -1648,7 +1694,7 @@ function ProductDetailPage() {
       <div className="max-w-7xl mx-auto px-4 py-20 text-center">
         <AlertCircle size={64} className="mx-auto text-gray-300 mb-4" />
         <h1 className="font-display text-2xl font-bold text-navy-700 mb-4">Producto no encontrado</h1>
-        <Link to="/tienda" className="text-lime-500 hover:text-lime-600 font-semibold">Volver a la tienda</Link>
+        <Link to="/tienda" className="text-lime-800 hover:text-lime-700 font-semibold">Volver a la tienda</Link>
       </div>
     );
   }
@@ -1733,7 +1779,7 @@ function ProductDetailPage() {
                     mainImg === i ? 'border-lime-400 ring-2 ring-lime-400/30 scale-105' : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  <img src={img} alt="" className="w-full h-full object-cover" onError={handleImgError} />
+                  <img src={img} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={handleImgError} />
                 </button>
               ))}
             </div>
@@ -1951,6 +1997,8 @@ function EventsPage() {
                   <img
                     src={evt.imageUrl || FALLBACK_IMG}
                     alt={evt.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-48 object-cover"
                     onError={handleImgError}
                   />
@@ -1978,7 +2026,7 @@ function EventsPage() {
                       href={evt.mapsUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-lime-600 font-semibold text-sm mt-3 hover:text-lime-700"
+                      className="inline-flex items-center gap-1 text-lime-800 font-semibold text-sm mt-3 hover:text-lime-700"
                     >
                       Ver en mapa <ExternalLink size={14} />
                     </a>
@@ -2002,6 +2050,8 @@ function EventsPage() {
                 <img
                   src={evt.imageUrl || FALLBACK_IMG}
                   alt={evt.name}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-48 object-cover grayscale"
                   onError={handleImgError}
                 />
@@ -2183,7 +2233,7 @@ function MapPage() {
                 href={`https://www.google.com/maps?q=${club.lat},${club.lng}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-lime-600 font-semibold text-sm hover:text-lime-700 ml-auto"
+                className="inline-flex items-center gap-1 text-lime-800 font-semibold text-sm hover:text-lime-700 ml-auto"
               >
                 Google Maps <ExternalLink size={14} />
               </a>
@@ -2399,7 +2449,7 @@ function CheckoutPage() {
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
         <ShoppingCart size={64} strokeWidth={1} className="mx-auto text-gray-300 mb-4" />
         <h1 className="font-display text-2xl font-bold text-navy-700 mb-4">Tu carrito está vacío</h1>
-        <Link to="/tienda" className="text-lime-500 hover:text-lime-600 font-semibold inline-flex items-center gap-1">
+        <Link to="/tienda" className="text-lime-800 hover:text-lime-700 font-semibold inline-flex items-center gap-1">
           Descubrí la colección <ArrowRight size={16} />
         </Link>
       </div>
@@ -3043,7 +3093,7 @@ function AdminPage() {
               </p>
               <button
                 onClick={() => { setMagicLinkSent(false); setEmail(''); }}
-                className="text-lime-600 text-sm font-semibold hover:underline"
+                className="text-lime-800 text-sm font-semibold hover:underline"
               >
                 Usar otro email
               </button>
@@ -3090,7 +3140,7 @@ function AdminPage() {
               <button
                 type="button"
                 onClick={() => { setLoginError(''); setAuthMode('magiclink'); }}
-                className="w-full mt-3 text-lime-600 text-sm font-semibold hover:underline"
+                className="w-full mt-3 text-lime-800 text-sm font-semibold hover:underline"
               >
                 ¿Preferís recibir un link por email?
               </button>
@@ -3128,7 +3178,7 @@ function AdminPage() {
               <button
                 type="button"
                 onClick={() => { setLoginError(''); setAuthMode('password'); }}
-                className="w-full mt-3 text-lime-600 text-sm font-semibold hover:underline"
+                className="w-full mt-3 text-lime-800 text-sm font-semibold hover:underline"
               >
                 Entrar con contraseña
               </button>
@@ -4599,14 +4649,13 @@ function Footer() {
 
   return (
     <footer className="relative text-white">
-      {/* Parallax background strip */}
+      {/* Franja de fondo (sin backgroundAttachment: 'fixed': iOS lo ignora y en desktop fuerza repaints). */}
       <div
         className="absolute inset-0"
         style={{
           backgroundImage: 'url(/products/lifestyle-sunset-back.jpg)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          backgroundAttachment: 'fixed',
         }}
       />
       <div className="absolute inset-0 bg-navy-900/95" />
@@ -4621,9 +4670,10 @@ function Footer() {
               span.textContent = 'VOLEA';
               e.currentTarget.parentElement?.appendChild(span);
             }} />
-            {/* gray-600, no gray-400: sobre blanco el 400 daba 2.54:1, debajo del minimo AA
-                de 4.5:1 — se lee mal en el celular al sol, que es como mira casi todo el publico. */}
-            <p className="text-gray-600 text-sm mt-4 leading-relaxed">
+            {/* gray-300, no gray-600: este párrafo va sobre el overlay navy-900/95 del footer
+                (fondo azul casi negro, no blanco) — gray-600 era gris oscuro sobre oscuro,
+                ilegible; gray-300 da ~13:1 sobre navy-900, sobrado para AA. */}
+            <p className="text-gray-300 text-sm mt-4 leading-relaxed">
               La primera marca de indumentaria de pickleball de Uruguay. Evolucionamos distinto. Jugamos distinto.
             </p>
           </div>
@@ -4706,6 +4756,7 @@ function Footer() {
               href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Instagram de VOLEA"
               className="text-gray-400 hover:text-lime-400 transition-colors"
             >
               <Instagram size={20} />
@@ -4714,6 +4765,7 @@ function Footer() {
               href={`https://wa.me/${WHATSAPP_NUMBER}`}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="WhatsApp de VOLEA"
               className="text-gray-400 hover:text-lime-400 transition-colors"
             >
               <MessageCircle size={20} />

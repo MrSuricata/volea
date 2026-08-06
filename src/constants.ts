@@ -2,7 +2,8 @@ import type { Product, Event, Category, Club, Announcement } from './types';
 
 export const WHATSAPP_NUMBER = '59899511196';
 export const INSTAGRAM_HANDLE = 'volea.uy';
-export const ADMIN_PASSWORD = 'adminvolea';
+// ADMIN_PASSWORD eliminada (2026-08-06): el login real es Supabase Auth; una contraseña
+// hardcodeada acá viajaba en el bundle público — un footgun de seguridad.
 
 export const INITIAL_CATEGORIES: Category[] = [
   { id: 'remeras', name: 'Remeras', sortOrder: 1 },
