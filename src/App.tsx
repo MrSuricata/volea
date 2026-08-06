@@ -2535,6 +2535,9 @@ function CheckoutPage() {
       // OJO: el carrito NO se vacía acá. Se vacía en /pago/resultado si el
       // pago salió aprobado/pendiente; si el cliente abandona o MP rechaza,
       // el carrito lo espera intacto.
+      // Bandera para que /pago/resultado sepa que este navegador realmente
+      // inició un pago (un link compartido no debe vaciarle el carrito a nadie).
+      sessionStorage.setItem('volea_pago_en_curso', '1');
       window.location.href = data.initPoint;
     } catch (err) {
       toast.error(`${err instanceof Error ? err.message : 'Error al iniciar el pago'} — también podés coordinar por WhatsApp.`);
@@ -4826,7 +4829,7 @@ function ResultadoPagoRoute() {
   const { clearCart } = useStore();
   usePageMeta({ title: 'Resultado del pago', description: 'Resultado de tu pago con Mercado Pago.' });
   return (
-    <Suspense fallback={<SeccionCargando texto="Cargando…" />}>
+    <Suspense fallback={<SeccionCargando texto="Cargando el resultado…" />}>
       <ResultadoPagoPageLazy clearCart={clearCart} />
     </Suspense>
   );

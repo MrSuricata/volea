@@ -21,11 +21,15 @@ export default function ResultadoPagoPage({ clearCart }: ResultadoPagoPageProps)
   const estado = params.get('estado') || 'desconocido';
   const pedido = params.get('pedido') || '';
 
-  // El carrito recién se vacía cuando el pago salió bien (o quedó en proceso).
-  // Si fue rechazado, el cliente vuelve al checkout con todo como estaba.
+  // El carrito recién se vacía cuando el pago salió bien (o quedó en proceso)
+  // Y este navegador fue el que inició el pago: sin la bandera, un link
+  // compartido de "pago aprobado" le vaciaría el carrito a quien lo abra.
   const pagoOk = estado === 'aprobado' || estado === 'pendiente';
   useEffect(() => {
-    if (pagoOk) clearCart();
+    if (pagoOk && sessionStorage.getItem('volea_pago_en_curso')) {
+      sessionStorage.removeItem('volea_pago_en_curso');
+      clearCart();
+    }
   }, [pagoOk, clearCart]);
 
   const msgWhatsApp = encodeURIComponent(
