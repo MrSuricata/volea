@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Check, X, Info, MessageCircle, FileDown } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LedgerEntry, SocioMove } from '../types';
 import { exportCajaExcel } from '../utils/cajaExcel';
+import { fechaHumana } from '../utils/fechas';
 
 const TZ = 'America/Montevideo';
 
 const formatMoney = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
 
-const formatDateTime = (iso: string) => {
+/** "5/8" — para el "desde" de los deudores, sin hora. */
+const formatFechaCorta = (iso: string) => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString('es-UY', {
-    timeZone: TZ,
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return d.toLocaleDateString('es-UY', { timeZone: TZ, day: 'numeric', month: 'numeric' });
 };
 
 /** Día calendario (YYYY-MM-DD) de un instante, visto desde Montevideo. */
@@ -53,6 +49,15 @@ const PAYMENT_LABELS: Record<string, string> = {
   transferencia: 'Transferencia',
 };
 
+const METHOD_BADGE: Record<string, string> = {
+  mp: 'bg-blue-50 text-blue-600',
+  efectivo: 'bg-green-50 text-green-700',
+  transferencia: 'bg-navy-50 text-navy-600',
+};
+
+const badgeClass = 'rounded-full px-2 py-0.5 font-semibold';
+const sectionTitleClass = 'mb-2 font-display text-sm font-extrabold uppercase tracking-wide text-gray-500';
+
 export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
@@ -61,10 +66,13 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hasta que no resuelve el primer load no se muestra nada de datos (antes
+  // aparecía "Sin movimientos" mientras cargaba, mentira conocida).
+  const [cargandoInicial, setCargandoInicial] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [period, setPeriod] = useState<PeriodFilter>('7d');
   const [kind, setKind] = useState<KindFilter>('todos');
-  const [revertConfirm, setRevertConfirm] = useState<string | null>(null);
+  const [aAnular, setAAnular] = useState<LedgerEntry | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -85,6 +93,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
       setEntries(data);
     }
     setLoading(false);
+    setCargandoInicial(false);
   }, [loadLedger]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -127,7 +136,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const totals = useMemo(() => {
     const now = new Date();
     const todayMvd = dayInMontevideo(now);
-    let ventas = 0, gastos = 0, count = 0;
+    let ventas = 0, gastos = 0, count = 0, countVentas = 0, countGastos = 0;
     for (const e of entries) {
       if (e.reverted) continue;
       if (period !== 'todo') {
@@ -142,24 +151,33 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         }
       }
       count++;
-      if (e.kind === 'venta') ventas += e.amount;
-      else gastos += e.amount;
+      if (e.kind === 'venta') { ventas += e.amount; countVentas++; }
+      else { gastos += e.amount; countGastos++; }
     }
-    return { ventas, gastos, balance: ventas - gastos, count };
+    return { ventas, gastos, balance: ventas - gastos, count, countVentas, countGastos };
   }, [entries, period]);
 
-  // Deudas abiertas (sobre todo lo cargado, sin filtro de período)
+  // Deudas abiertas (sobre todo lo cargado, sin filtro de período), agrupadas por deudor
   const porCobrar = useMemo(() => {
     let total = 0, count = 0;
-    const nombres = new Set<string>();
+    const porNombre = new Map<string, { nombre: string; total: number; items: number; desde: string }>();
     for (const e of entries) {
       if (e.kind === 'venta' && e.paymentMethod === 'debe' && !e.settledAt && !e.reverted) {
         total += e.amount;
         count++;
-        if (e.debtorName) nombres.add(e.debtorName);
+        const nombre = e.debtorName || 'Sin nombre';
+        const grupo = porNombre.get(nombre);
+        if (grupo) {
+          grupo.total += e.amount;
+          grupo.items++;
+          if (e.createdAt < grupo.desde) grupo.desde = e.createdAt;
+        } else {
+          porNombre.set(nombre, { nombre, total: e.amount, items: 1, desde: e.createdAt });
+        }
       }
     }
-    return { total, count, nombres: Array.from(nombres) };
+    const deudores = Array.from(porNombre.values()).sort((a, b) => b.total - a.total);
+    return { total, count, deudores };
   }, [entries]);
 
   const handleRevert = async (entry: LedgerEntry) => {
@@ -167,7 +185,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     setReverting(entry.id);
     const result = await revertEntry(entry.id);
     setReverting(null);
-    setRevertConfirm(null);
+    setAAnular(null);
     if (!result.ok) {
       toast.error(result.error || 'No se pudo anular el movimiento');
       // Sincronizar igual: quizás ya estaba anulado desde el bot ("deshacer").
@@ -176,6 +194,30 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     }
     toast.success(result.stockRestored ? 'Movimiento anulado y stock repuesto' : 'Movimiento anulado');
     refresh();
+  };
+
+  const ahoraMs = Date.now();
+
+  /** Badge/texto de método de pago para la línea de meta (null en gastos). */
+  const metodoPago = (entry: LedgerEntry) => {
+    if (entry.kind !== 'venta' || !entry.paymentMethod) return null;
+    if (entry.paymentMethod === 'debe') {
+      if (entry.settledAt) {
+        return (
+          <span className="font-semibold text-green-600">
+            debía {entry.debtorName || '—'} · cobrado{entry.settledMethod ? ` ${PAYMENT_LABELS[entry.settledMethod]}` : ''}
+          </span>
+        );
+      }
+      return (
+        <span className={`${badgeClass} bg-amber-50 text-amber-700`}>Debe {entry.debtorName || '—'}</span>
+      );
+    }
+    return (
+      <span className={`${badgeClass} ${METHOD_BADGE[entry.paymentMethod]}`}>
+        {PAYMENT_LABELS[entry.paymentMethod]}
+      </span>
+    );
   };
 
   return (
@@ -201,221 +243,233 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         </div>
       </div>
 
-      {/* Info banner */}
-      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 px-4 py-3 rounded-r-lg flex items-start gap-3 text-sm text-blue-900">
-        <MessageCircle size={18} className="flex-shrink-0 mt-0.5" />
+      {/* Callout informativo */}
+      <div className="mb-6 flex items-start gap-2 rounded-xl bg-navy-50 px-4 py-2.5 text-xs text-navy-600">
+        <MessageCircle size={14} className="mt-0.5 flex-shrink-0" />
         <p>
-          Acá aparecen las ventas y gastos que el equipo registra por el <b>bot de Telegram</b>.
-          Al anular una venta de catálogo, el stock se repone solo.
+          Ventas y gastos registrados por el <b>bot de Telegram</b>. Al anular una venta de catálogo, el stock se repone solo.
         </p>
       </div>
 
-      {/* Summary cards */}
-      {!loadFailed && (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-            <TrendingUp size={14} className="text-green-600" /> Ventas
+      {cargandoInicial ? (
+        /* Loading inicial: antes acá aparecía "Sin movimientos" mientras cargaba */
+        <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
+          <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
+          <p className="font-display text-sm font-bold text-gray-500">Cargando la caja…</p>
+        </div>
+      ) : loadFailed ? (
+        !loading && (
+          <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
+            <Info size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
+            <p className="font-display text-sm font-bold text-gray-500">No se pudo cargar la caja</p>
+            <p className="mt-1 text-xs text-gray-400">Asegurate de haber entrado con el link mágico y probá "Actualizar".</p>
           </div>
-          <p className="font-display text-2xl font-bold text-green-600">{formatMoney(totals.ventas)}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-            <TrendingDown size={14} className="text-red-500" /> Gastos
+        )
+      ) : (
+        <>
+          {/* Totales con contexto */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
+                <TrendingUp size={14} className="text-green-600" /> Ventas
+              </div>
+              <p className="font-display text-2xl font-bold text-green-600">{formatMoney(totals.ventas)}</p>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                {totals.countVentas} {totals.countVentas === 1 ? 'venta' : 'ventas'}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
+                <TrendingDown size={14} className="text-red-500" /> Gastos
+              </div>
+              <p className="font-display text-2xl font-bold text-red-500">{formatMoney(totals.gastos)}</p>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                {totals.countGastos} {totals.countGastos === 1 ? 'gasto' : 'gastos'}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
+                <Scale size={14} className="text-navy-700" /> Balance
+              </div>
+              <p className={`font-display text-2xl font-bold ${totals.balance >= 0 ? 'text-navy-700' : 'text-red-500'}`}>
+                {formatMoney(totals.balance)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                sobre {totals.count} {totals.count === 1 ? 'movimiento' : 'movimientos'}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
+                <Wallet size={14} className="text-amber-600" /> Por cobrar
+              </div>
+              <p className="font-display text-2xl font-bold text-amber-600">{formatMoney(porCobrar.total)}</p>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                {porCobrar.count > 0
+                  ? `${porCobrar.count} ${porCobrar.count === 1 ? 'fiado' : 'fiados'} sin cobrar`
+                  : 'nada pendiente'}
+              </p>
+            </div>
           </div>
-          <p className="font-display text-2xl font-bold text-red-500">{formatMoney(totals.gastos)}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-            <Scale size={14} className="text-navy-700" /> Balance
+
+          {/* Deudores */}
+          {porCobrar.deudores.length > 0 && (
+            <div className="mb-6">
+              <h2 className={sectionTitleClass}>
+                Por cobrar ({porCobrar.deudores.length} {porCobrar.deudores.length === 1 ? 'persona' : 'personas'})
+              </h2>
+              <div className="space-y-2">
+                {porCobrar.deudores.map(deudor => (
+                  <div key={deudor.nombre} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-white px-3 py-2.5">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 font-display font-extrabold text-amber-700">
+                      {deudor.nombre.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-display text-sm font-bold text-navy-700">{deudor.nombre}</p>
+                      <p className="text-[11px] text-gray-400">
+                        {deudor.items} {deudor.items === 1 ? 'ítem' : 'ítems'} · desde {formatFechaCorta(deudor.desde)}
+                      </p>
+                    </div>
+                    <p className="text-sm font-bold tabular-nums text-amber-600 whitespace-nowrap">{formatMoney(deudor.total)}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-gray-400">Se cobra desde el bot: «cobré + nombre»</p>
+            </div>
+          )}
+
+          {/* Filtros como chips */}
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            {PERIODS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setPeriod(p.id)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-display font-bold transition-colors ${
+                  period === p.id ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+            {KINDS.map(k => (
+              <button
+                key={k.id}
+                onClick={() => setKind(k.id)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-display font-bold transition-colors ${
+                  kind === k.id ? 'bg-lime-400 text-navy-700' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
+                }`}
+              >
+                {k.label}
+              </button>
+            ))}
           </div>
-          <p className={`font-display text-2xl font-bold ${totals.balance >= 0 ? 'text-navy-700' : 'text-red-500'}`}>
-            {formatMoney(totals.balance)}
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-            <Wallet size={14} className="text-navy-700" /> Movimientos
-          </div>
-          <p className="font-display text-2xl font-bold text-navy-700">{totals.count}</p>
-        </div>
-      </div>
-      )}
 
-      {/* Deudas abiertas */}
-      {!loadFailed && porCobrar.count > 0 && (
-        <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 px-4 py-3 rounded-r-lg text-sm text-amber-900">
-          📒 <b>Por cobrar: {formatMoney(porCobrar.total)}</b> en {porCobrar.count} venta{porCobrar.count > 1 ? 's' : ''} fiada{porCobrar.count > 1 ? 's' : ''}
-          {porCobrar.nombres.length > 0 && <> — {porCobrar.nombres.join(', ')}</>}.
-          {' '}Se cobran desde el bot: <i>cobré + nombre</i>.
-        </div>
-      )}
-
-      {/* Filters */}
-      {!loadFailed && (
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="flex bg-white rounded-lg border border-gray-200 p-1">
-          {PERIODS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setPeriod(p.id)}
-              className={`px-4 py-2 rounded-md text-sm font-display font-semibold transition-colors ${
-                period === p.id ? 'bg-navy-700 text-white' : 'text-gray-500 hover:text-navy-700'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex bg-white rounded-lg border border-gray-200 p-1">
-          {KINDS.map(k => (
-            <button
-              key={k.id}
-              onClick={() => setKind(k.id)}
-              className={`px-4 py-2 rounded-md text-sm font-display font-semibold transition-colors ${
-                kind === k.id ? 'bg-lime-400 text-navy-700' : 'text-gray-500 hover:text-navy-700'
-              }`}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      )}
-
-      {/* Error state */}
-      {loadFailed && !loading && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-400">
-          <Info size={48} strokeWidth={1} className="mx-auto mb-3" />
-          <p className="font-display">No se pudo cargar la caja</p>
-          <p className="text-sm mt-1">Asegurate de haber entrado con el link mágico y probá "Actualizar".</p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loadFailed && !loading && filtered.length === 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-400">
-          <Wallet size={48} strokeWidth={1} className="mx-auto mb-3" />
-          <p className="font-display">Sin movimientos en este período</p>
-          <p className="text-sm mt-1">Cuando el equipo registre ventas o gastos por Telegram, van a aparecer acá.</p>
-        </div>
-      )}
-
-      {/* Table */}
-      {!loadFailed && filtered.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Fecha</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Tipo</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Detalle</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Cant.</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Monto</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden md:table-cell">Registró</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
+          {filtered.length === 0 ? (
+            loading ? (
+              <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
+                <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
+                <p className="font-display text-sm font-bold text-gray-500">Cargando la caja…</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
+                <Wallet size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
+                <p className="font-display text-sm font-bold text-gray-500">Sin movimientos en este período</p>
+                <p className="mt-1 text-xs text-gray-400">Cuando el equipo registre ventas o gastos por Telegram, van a aparecer acá.</p>
+              </div>
+            )
+          ) : (
+            <div>
+              <h2 className={sectionTitleClass}>Movimientos ({filtered.length})</h2>
+              <div className="space-y-2">
                 {filtered.map(entry => (
-                  <tr
+                  <div
                     key={entry.id}
-                    className={`border-b border-gray-100 transition-colors ${
-                      entry.reverted ? 'opacity-50' : 'hover:bg-gray-50'
+                    className={`flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 ${
+                      entry.reverted ? 'opacity-45' : ''
                     }`}
                   >
-                    <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-display font-bold ${
-                        entry.kind === 'venta' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
-                      }`}>
-                        {entry.kind === 'venta' ? 'Venta' : 'Gasto'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className={`font-display font-semibold text-navy-700 text-sm ${entry.reverted ? 'line-through' : ''}`}>
-                        {entry.label}
+                    <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
+                      entry.kind === 'venta' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
+                    }`}>
+                      {entry.kind === 'venta' ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate font-display text-sm font-bold text-navy-700 ${entry.reverted ? 'line-through' : ''}`}>
+                        {entry.label}{entry.qty > 1 ? ` ×${entry.qty}` : ''}
                       </p>
-                      {entry.variantKey && (
-                        <p className="text-xs text-gray-400">{formatVariant(entry.variantKey)}</p>
-                      )}
-                      {entry.kind === 'venta' && !entry.productId && (
-                        <p className="text-xs text-gray-400">Ítem suelto (sin stock)</p>
-                      )}
-                      {entry.kind === 'venta' && entry.paymentMethod && entry.paymentMethod !== 'debe' && (
-                        <p className="text-xs text-gray-400">{PAYMENT_LABELS[entry.paymentMethod]}</p>
-                      )}
-                      {entry.paymentMethod === 'debe' && (
-                        entry.settledAt ? (
-                          <p className="text-xs text-green-600">
-                            Debía {entry.debtorName || '—'} · cobrado
-                            {entry.settledMethod ? ` (${PAYMENT_LABELS[entry.settledMethod]})` : ''}
-                          </p>
-                        ) : (
-                          <p className="text-xs font-semibold text-amber-600">Debe {entry.debtorName || '—'}</p>
-                        )
-                      )}
-                      {entry.reverted && (
-                        <p className="text-xs text-red-400 font-semibold">Anulado</p>
-                      )}
-                      {entry.socioSettledAt && !entry.reverted && (
-                        <p className="text-[10px] text-teal-600 font-semibold">✓ liquidado a socios</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{entry.qty}</td>
-                    <td className={`px-4 py-3 text-sm font-bold whitespace-nowrap ${
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
+                        <span>{fechaHumana(entry.createdAt, ahoraMs)}</span>
+                        {entry.variantKey && <span>{formatVariant(entry.variantKey)}</span>}
+                        {entry.kind === 'venta' && !entry.productId && <span>ítem suelto (sin stock)</span>}
+                        {metodoPago(entry)}
+                        {entry.socioSettledAt && !entry.reverted && (
+                          <span className={`${badgeClass} bg-teal-50 text-teal-600`}>✓ liquidado</span>
+                        )}
+                        {entry.reverted && (
+                          <span className={`${badgeClass} bg-gray-100 text-gray-500`}>Anulada</span>
+                        )}
+                        <span>por {entry.reportedBy}</span>
+                      </div>
+                    </div>
+                    <p className={`text-sm font-bold tabular-nums whitespace-nowrap ${
                       entry.reverted ? 'text-gray-400 line-through' : entry.kind === 'venta' ? 'text-green-600' : 'text-red-500'
                     }`}>
                       {entry.kind === 'venta' ? '+' : '−'}{formatMoney(entry.amount)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{entry.reportedBy}</td>
-                    <td className="px-4 py-3">
-                      {entry.reverted ? (
-                        <span className="text-xs text-gray-400">—</span>
-                      ) : revertConfirm === entry.id ? (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-red-600 font-semibold whitespace-nowrap">
-                            {entry.productId ? '¿Anular y reponer stock?' : '¿Anular?'}
-                          </span>
-                          <button
-                            onClick={() => handleRevert(entry)}
-                            disabled={reverting === entry.id}
-                            className="text-red-500 hover:text-red-700 disabled:text-gray-300 transition-colors"
-                            title="Confirmar"
-                          >
-                            <Check size={16} />
-                          </button>
-                          <button
-                            onClick={() => setRevertConfirm(null)}
-                            disabled={reverting === entry.id}
-                            className="text-gray-400 hover:text-navy-700 transition-colors"
-                            title="Cancelar"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setRevertConfirm(entry.id)}
-                          disabled={reverting !== null}
-                          className="text-gray-400 hover:text-red-500 disabled:text-gray-200 transition-colors flex items-center gap-1 text-xs font-semibold"
-                          title="Anular movimiento"
-                        >
-                          <Undo2 size={16} /> Anular
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                    </p>
+                    {!entry.reverted && (
+                      <button
+                        onClick={() => setAAnular(entry)}
+                        disabled={reverting !== null}
+                        className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-red-500 disabled:text-gray-200"
+                        title="Anular movimiento"
+                      >
+                        <Undo2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-          {entries.length >= 500 && (
-            <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 text-xs text-amber-800">
-              Se muestran los últimos 500 movimientos: los totales de "Todo" pueden no incluir los más viejos.
+              </div>
+              {entries.length >= 500 && (
+                <p className="mt-3 text-[11px] text-gray-400">
+                  Se muestran los últimos 500 movimientos: los totales de "Todo" pueden no incluir los más viejos.
+                </p>
+              )}
             </div>
           )}
+        </>
+      )}
+
+      {/* Modal de anulación */}
+      {aAnular && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0" onClick={() => reverting === null && setAAnular(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="font-display text-lg font-bold text-navy-700 mb-2">¿Anular este movimiento?</h3>
+            <p className="truncate text-sm font-semibold text-navy-700">
+              {aAnular.label}{aAnular.qty > 1 ? ` ×${aAnular.qty}` : ''} · {formatMoney(aAnular.amount)}
+            </p>
+            <p className="mt-2 mb-6 text-sm text-gray-500">
+              {aAnular.productId
+                ? 'Se anula y se repone el stock (igual que el deshacer del bot).'
+                : 'Se anula el movimiento (igual que el deshacer del bot).'}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setAAnular(null)}
+                disabled={reverting !== null}
+                className="flex-1 border border-gray-200 hover:bg-gray-50 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleRevert(aAnular)}
+                disabled={reverting !== null}
+                className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white font-display font-semibold py-3 rounded-lg transition-colors"
+              >
+                {reverting === aAnular.id ? 'Anulando…' : 'Anular'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
