@@ -1365,58 +1365,7 @@ function HomePage() {
       </section>
       )}
 
-      {/* ── 7. VOLEA en acción ──────────────────────────────────────────── */}
-      <section className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4">
-          <Reveal>
-            <div className="text-center mb-12">
-              <span className="text-lime-500 font-display font-bold text-sm uppercase tracking-[0.2em]">Comunidad</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">VOLEA en acción</h2>
-              <p className="text-gray-500 mt-4 max-w-xl mx-auto">
-                Atardeceres, canchas y buena compañía: así se vive el pickleball con VOLEA puesta.
-              </p>
-              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-            </div>
-          </Reveal>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            {[
-              { src: '/products/lifestyle-sunset-front.jpg', span: 'md:row-span-2', height: 'h-64 md:h-full' },
-              { src: '/products/lifestyle-sunset-2.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/lifestyle-sunset-3.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/lifestyle-sunset-4.jpg', span: '', height: 'h-48 md:h-64' },
-              { src: '/products/lifestyle-sunset-back.jpg', span: '', height: 'h-48 md:h-64' },
-            ].map((photo, i) => (
-              <Reveal key={i} delay={i * 80}>
-                <div className={`gallery-item rounded-xl overflow-hidden ${photo.span} ${photo.height}`}>
-                  <img
-                    src={photo.src}
-                    alt="Jugadores con indumentaria VOLEA en la cancha"
-                    className="w-full h-full object-cover"
-                    onError={handleImgError}
-                  />
-                  <div className="gallery-overlay flex items-end p-4">
-                    <span className="text-white font-display font-bold text-sm flex items-center gap-1">
-                      <Instagram size={14} /> @{INSTAGRAM_HANDLE}
-                    </span>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-          <Reveal>
-            <div className="text-center mt-10">
-              <a
-                href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-display font-bold py-3 px-8 rounded-lg transition-transform hover:scale-105"
-              >
-                <Instagram size={20} /> Seguinos en @{INSTAGRAM_HANDLE}
-              </a>
-            </div>
-          </Reveal>
-        </div>
-      </section>
+      {/* "VOLEA en acción" quitada 2026-08-06 a pedido de Brian: las 5 fotos eran de la misma sesión (lifestyle-sunset) y se veían repetidas. */}
 
       {/* ── 8. Nuestra esencia + Equipo ─────────────────────────────────── */}
       <section
