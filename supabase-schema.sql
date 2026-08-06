@@ -203,3 +203,24 @@ CREATE POLICY gallery_admin_write ON public.gallery_albums FOR ALL USING (public
 
 -- Storage: portadas subidas al bucket product-images, carpeta gallery/ (mismo
 -- bucket que blog/ y products/; escritura solo admins autenticados via RLS de storage).
+
+-- ============================================
+-- v6 (2026-08-06): Hardening de seguridad (auditoría pre-lanzamiento)
+-- ============================================
+-- Migración "hardening_search_path_y_revokes" (+ "hardening_bot_rpc_revoke_public"
+-- para cerrar el grant PUBLIC residual) aplicadas en el proyecto volea-web.
+--
+-- 1) search_path fijo (pg_catalog, public) en todas las funciones SECURITY
+--    DEFINER / trigger de public que el advisor 0011 (function_search_path_mutable)
+--    marcaba con search_path mutable:
+--      is_admin(), orders_clamp_pago(), tg_set_updated_at(), update_updated_at(),
+--      bot_esc(text), bot_fmt(numeric)
+--    (is_admin_email() queda anon-callable A PROPÓSITO, no se tocó su grant).
+--
+-- 2) bot_handle(...) y bot_pick_variant(...) (RPCs SECURITY DEFINER del bot de
+--    WhatsApp) ya NO son ejecutables por anon/authenticated ni por el grant
+--    PUBLIC por defecto — se hizo REVOKE EXECUTE ... FROM anon, authenticated
+--    y luego FROM PUBLIC (el CREATE FUNCTION original dejaba EXECUTE abierto a
+--    PUBLIC, lo cual incluía a anon/authenticated de forma implícita). El bot
+--    entra a estas RPCs vía n8n usando la service_role key, que conserva su
+--    grant explícito y no se vio afectada.
