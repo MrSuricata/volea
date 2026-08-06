@@ -402,8 +402,8 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       // productos/categorías y localStorage para el resto.
       let loadedProducts: Product[];
       if (isSupabaseConnected()) {
-        // Techo también acá, no solo en el splash. Las 8 consultas son `await` pelados
-        // (supabaseService no tiene ni un timeout), así que si UNA no responde nunca,
+        // Techo también acá, no solo en el splash. Las 7 consultas son `await` pelados
+        // (las lecturas de supabaseService no tienen timeout propio), así que si UNA no responde nunca,
         // Promise.all no resuelve, el .finally() de abajo no corre y `datosListos` queda
         // en false PARA SIEMPRE: la web se muestra a los 4s pero tienda, checkout y ficha
         // se quedan girando eternamente. Con el techo, a los 10s se sigue con el respaldo
@@ -2977,7 +2977,7 @@ function StockProductRow({
                   const isLow = v.qty > 0 && v.qty <= threshold;
                   return (
                     <tr key={v.key} className={`border-t border-gray-100 ${isOut ? 'bg-red-50/50' : isLow ? 'bg-yellow-50/50' : ''}`}>
-                      <td className="px-4 py-2 font-medium text-navy-700">{v.size}</td>
+                      <td className="px-4 py-2 font-semibold text-navy-700">{v.size}</td>
                       <td className="px-4 py-2 text-gray-600">{v.color}</td>
                       <td className="px-4 py-2 text-right font-display font-bold tabular-nums">{v.qty}</td>
                       <td className="px-4 py-2">
