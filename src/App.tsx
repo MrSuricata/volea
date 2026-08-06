@@ -7,7 +7,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2, Images
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry } from './types';
@@ -2390,6 +2390,18 @@ function CheckoutPage() {
   });
   const [success, setSuccess] = useState(false);
 
+  // El botón de MP aparece solo si el server dice que hay credenciales
+  // cargadas. En dev local (Vite, sin /api) el fetch falla y queda oculto.
+  const [mpDisponible, setMpDisponible] = useState(false);
+  const [pagandoMP, setPagandoMP] = useState(false);
+  useEffect(() => {
+    fetch('/api/mp/disponible')
+      .then(r => r.json())
+      .then(d => setMpDisponible(Boolean(d?.disponible)))
+      .catch(() => setMpDisponible(false));
+  }, []);
+  const formRef = useRef<HTMLFormElement>(null);
+
   const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
 
   // El carrito se rehidrata al final de la carga inicial, y la web ahora se muestra a los
@@ -2438,32 +2450,36 @@ function CheckoutPage() {
     );
   }
 
-  const handleSubmitWhatsApp = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Última validación de stock antes de registrar el pedido
+  // Chequeo de stock + armado del pedido, compartido por ambos caminos de pago.
+  const construirPedido = (): Order | null => {
     const shortItem = cart.find(i => {
       const key = i.selectedColor ? `${i.selectedSize}|${i.selectedColor}` : i.selectedSize;
       return (i.product.stockBySize[key] || 0) < i.quantity;
     });
     if (shortItem) {
       toast.error(`No queda stock suficiente de ${shortItem.product.name} — ajustá la cantidad en el carrito.`);
-      return;
+      return null;
     }
-    const orderId = `VO-${Date.now().toString(36).toUpperCase()}`;
-    const order: Order = {
-      id: orderId,
+    return {
+      id: `VO-${Date.now().toString(36).toUpperCase()}`,
       items: cart,
       customer,
       total,
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
+  };
+
+  const handleSubmitWhatsApp = (e: React.FormEvent) => {
+    e.preventDefault();
+    const order = construirPedido();
+    if (!order) return;
     addOrder(order);
 
     // Build WhatsApp message
     const lines = [
       `🏓 *Nuevo pedido VOLEA*`,
-      `📌 Ref: ${orderId}`,
+      `📌 Ref: ${order.id}`,
       ``,
       `👤 *Cliente:* ${customer.name}`,
       `📱 *Tel:* ${customer.phone}`,
@@ -2483,6 +2499,33 @@ function CheckoutPage() {
     window.open(whatsappUrl, '_blank');
     clearCart();
     setSuccess(true);
+  };
+
+  const pagarConMP = async () => {
+    const order = construirPedido();
+    if (!order) return;
+    order.paymentStatus = 'iniciado';
+    order.paymentProvider = 'mp';
+    setPagandoMP(true);
+    try {
+      // Sin el pedido en la DB no hay preferencia: la función lo relee de ahí.
+      const inserto = await addOrder(order);
+      if (!inserto) throw new Error('No pudimos registrar el pedido (¿problemas de conexión?)');
+      const resp = await fetch('/api/mp/preferencia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.initPoint) throw new Error(data.error || 'No se pudo iniciar el pago');
+      // OJO: el carrito NO se vacía acá. Se vacía en /pago/resultado si el
+      // pago salió aprobado/pendiente; si el cliente abandona o MP rechaza,
+      // el carrito lo espera intacto.
+      window.location.href = data.initPoint;
+    } catch (err) {
+      toast.error(`${err instanceof Error ? err.message : 'Error al iniciar el pago'} — también podés coordinar por WhatsApp.`);
+      setPagandoMP(false);
+    }
   };
 
   return (
@@ -2522,12 +2565,24 @@ function CheckoutPage() {
           <div className="mt-6 bg-gradient-to-br from-navy-700 to-navy-900 rounded-xl p-6 text-white">
             <div className="flex items-center gap-2 mb-2">
               <MessageCircle size={18} className="text-lime-400" />
-              <h3 className="font-display font-bold text-lg">Compra coordinada por WhatsApp</h3>
+              <h3 className="font-display font-bold text-lg">
+                {mpDisponible ? 'Pagá online o coordiná por WhatsApp' : 'Compra coordinada por WhatsApp'}
+              </h3>
             </div>
             <p className="text-sm text-gray-300">
-              Completá tus datos y tu pedido nos llega al instante. Te escribimos
-              por WhatsApp para coordinar la entrega y el pago (transferencia,
-              efectivo o el medio que te quede más cómodo).
+              {mpDisponible ? (
+                <>
+                  Podés pagar ahora con Mercado Pago (tarjeta, débito o dinero en cuenta) o
+                  mandarnos el pedido por WhatsApp y coordinar transferencia o efectivo.
+                  Como prefieras.
+                </>
+              ) : (
+                <>
+                  Completá tus datos y tu pedido nos llega al instante. Te escribimos
+                  por WhatsApp para coordinar la entrega y el pago (transferencia,
+                  efectivo o el medio que te quede más cómodo).
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -2536,7 +2591,7 @@ function CheckoutPage() {
         <div className="order-1 lg:order-2">
           <h2 className="font-display text-xl font-bold text-navy-700 mb-2">Completá tus datos</h2>
           <p className="text-sm text-gray-500 mb-4">Con esto armamos tu pedido y te contactamos por WhatsApp.</p>
-          <form onSubmit={handleSubmitWhatsApp} className="space-y-4">
+          <form ref={formRef} onSubmit={handleSubmitWhatsApp} className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
               <input
@@ -2614,11 +2669,25 @@ function CheckoutPage() {
                 placeholder="Horario de entrega, punto de encuentro u otra aclaración"
               />
             </div>
+            {mpDisponible && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (formRef.current && !formRef.current.reportValidity()) return; // valida los required
+                  pagarConMP();
+                }}
+                disabled={pagandoMP}
+                className="w-full bg-[#009EE3] hover:bg-[#0088c9] disabled:opacity-60 text-white font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                <CreditCard size={20} /> {pagandoMP ? 'Conectando con Mercado Pago…' : 'Pagar online con Mercado Pago'}
+              </button>
+            )}
             <button
               type="submit"
-              className="pulse-glow w-full bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+              disabled={pagandoMP}
+              className="pulse-glow w-full bg-lime-400 hover:bg-lime-500 disabled:opacity-60 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              <MessageCircle size={20} /> Enviar pedido por WhatsApp
+              <MessageCircle size={20} /> {mpDisponible ? 'O coordinar por WhatsApp' : 'Enviar pedido por WhatsApp'}
             </button>
           </form>
         </div>
