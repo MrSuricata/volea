@@ -9,16 +9,31 @@
     <meta property="og:title" content="VOLEA | Pickleball Uruguay" />
     <meta property="og:description" content="La primera marca de pickleball en Uruguay. Indumentaria y accesorios de alto rendimiento." />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://volea.vercel.app/" />
+    <meta property="og:image" content="https://volea.vercel.app/og-cover.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#001F3F" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/favicon.png" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23ccff00' stroke='%23001F3F' stroke-width='3'/><circle cx='35' cy='35' r='6' fill='%23001F3F'/><circle cx='60' cy='30' r='6' fill='%23001F3F'/><circle cx='72' cy='50' r='6' fill='%23001F3F'/><circle cx='60' cy='70' r='6' fill='%23001F3F'/><circle cx='35' cy='65' r='6' fill='%23001F3F'/><circle cx='25' cy='50' r='6' fill='%23001F3F'/></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800;900&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Leaflet CSS & JS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
+    <!-- Supabase: la primera query paga DNS+TLS hoy; el preconnect lo adelanta -->
+    <link rel="preconnect" href="https://scftuxrtflfowohiewsc.supabase.co" crossorigin />
+    <!-- Fuentes podadas a los pesos realmente usados (Lexend 400/600/700/900, Montserrat 400/600/700) -->
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700;900&family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
+    <!-- Leaflet 1.9.4 self-hosted (mismos bytes que unpkg, verificados contra los hashes SRI originales) -->
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+    <script defer src="/vendor/leaflet/leaflet.js"></script>
+    <!-- Tailwind Play CDN 3.4.17 self-hosted con defer: el CDN de dev era 302 + tercero sin SRI + render-blocking.
+         Mitigación hasta migrar a Tailwind compilado. -->
+    <script defer src="/vendor/tailwind-3.4.17.js"></script>
+    <!-- OJO: la config va DESPUÉS del script de Tailwind y como type="module" a propósito:
+         el Play CDN pisa window.tailwind con un Proxy nuevo al ejecutarse (config pre-seteada se pierde),
+         y un module inline corre después de los defer anteriores en orden de documento,
+         así que esto reproduce exactamente la semántica original (config asignada tras cargar el CDN). -->
+    <script type="module">
       tailwind.config = {
         theme: {
           extend: {
