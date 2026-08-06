@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
-import { conLimite } from '../utils/arranque';
+import { conLimite, conReintento } from '../utils/arranque';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -20,6 +20,12 @@ function conTechoEscritura<T extends { data?: unknown; error: { message: string 
     { data: null, error: new Error('timeout: la escritura no llegó a Supabase en 15s') },
   );
 }
+
+// Las lecturas del admin (caja, socios, pedidos) también se cuelgan cuando la
+// sesión quedó vencida con el refresh trabado: getSession devuelve la sesión
+// vieja de memoria, pasa el guard, y el SELECT espera un refresh que no llega.
+// Sin techo, la pestaña quedaba en "cargando" para siempre (visto 2026-08-06).
+const conTechoLectura = conTechoEscritura;
 
 function orderToRow(o: Order) {
   return {
@@ -235,9 +241,14 @@ export const SupabaseService = {
     // avisar el problema de sesión que mostrar una caja "vacía" engañosa.
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
-    const { data, error } = await supabase.from('bot_ledger').select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    // Reintento único como las lecturas públicas: el primer intento tras abrir
+    // la pestaña a veces muere con la conexión trabada y el segundo anda.
+    const { data, error } = await conReintento(
+      () => conTechoLectura(supabase!.from('bot_ledger').select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit)),
+      r => !!r.error,
+    );
     if (error) { console.error('Error fetching ledger:', error); return null; }
     return (data || []).map(row => ({
       id: row.id,
@@ -280,10 +291,13 @@ export const SupabaseService = {
     if (!supabase || !isSupabaseConnected()) return null;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
-    const { data, error } = await supabase.from('socio_moves').select('*')
-      .order('orden', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true })
-      .limit(3000);
+    const { data, error } = await conReintento(
+      () => conTechoLectura(supabase!.from('socio_moves').select('*')
+        .order('orden', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true })
+        .limit(3000)),
+      r => !!r.error,
+    );
     if (error) { console.error('Error fetching socio moves:', error); return null; }
     return (data || []).map(row => ({
       id: row.id,

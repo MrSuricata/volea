@@ -3296,7 +3296,9 @@ function AdminPage() {
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed lg:static top-0 left-0 h-full z-50 w-64 bg-navy-800 text-white flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      {/* En desktop la columna es sticky DEBAJO del nav público (h-16): antes era
+          static y al scrollear se deslizaba por abajo del nav sticky y quedaba tapada. */}
+      <aside className={`fixed lg:sticky top-0 lg:top-16 left-0 h-full lg:h-[calc(100vh-4rem)] lg:self-start z-50 lg:z-30 w-64 bg-navy-800 text-white flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 border-b border-navy-600 flex items-center justify-between">
           <span className="font-display text-xl font-bold text-lime-400">Admin</span>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white hover:text-lime-400">
@@ -3446,11 +3448,13 @@ function AdminPage() {
                   <tbody>
                     {products.map(p => (
                       <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3">
+                        {/* Foto y nombre abren el editor (pedido de Brian 2026-08-06):
+                            el lápiz de Acciones quedaba lejos en pantallas anchas. */}
+                        <td className="px-4 py-3 cursor-pointer" onClick={() => { setEditingProduct(p); setProductModal(true); }} title="Editar producto">
                           <img src={p.images[0] || FALLBACK_IMG} alt={p.name} className="w-12 h-12 object-cover rounded-lg" onError={handleImgError} />
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono hidden sm:table-cell">{p.sku}</td>
-                        <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm">{p.name}</td>
+                        <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm cursor-pointer hover:text-lime-800 transition-colors" onClick={() => { setEditingProduct(p); setProductModal(true); }} title="Editar producto">{p.name}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{categoryLabel(categories, p.category)}</td>
                         <td className="px-4 py-3 font-display font-bold text-navy-700 text-sm">{formatPrice(p.price)}</td>
                         <td className="px-4 py-3 text-sm hidden sm:table-cell">
