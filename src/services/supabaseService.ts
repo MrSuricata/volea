@@ -3,6 +3,24 @@ import { comprimirImagen } from '../utils/imagenes';
 import { conLimite } from '../utils/arranque';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
 
+// ── Techo de 15s para TODAS las escrituras del admin ──
+// supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
+// colgado (la conexión trabada de siempre), una escritura podía quedar esperando PARA
+// SIEMPRE — sin error, sin toast, la UI mostraba el cambio local y un F5 lo revertía
+// a lo que había en la nube. Con este techo, a los 15s el cuelgue resuelve como fallo
+// y toma el mismo camino que una escritura rechazada (console.error + false), así el
+// aviso de warnCloudFail sí aparece. uploadImage no pasa por acá: ya tiene su techo de 45s.
+const TECHO_ESCRITURA_MS = 15000;
+function conTechoEscritura<T extends { data?: unknown; error: { message: string } | null }>(
+  escritura: PromiseLike<T>,
+): Promise<T | { data: null; error: Error }> {
+  return conLimite<T | { data: null; error: Error }>(
+    escritura,
+    TECHO_ESCRITURA_MS,
+    { data: null, error: new Error('timeout: la escritura no llegó a Supabase en 15s') },
+  );
+}
+
 function orderToRow(o: Order) {
   return {
     id: o.id,
@@ -83,7 +101,7 @@ export const SupabaseService = {
     if (!supabase) return true;
     let ok = true;
     for (const p of products) {
-      const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
+      const { error } = await conTechoEscritura(supabase.from('products').upsert(productToRow(p), { onConflict: 'id' }));
       if (error) { console.error('Error upserting product:', error); ok = false; }
     }
     return ok;
@@ -91,14 +109,14 @@ export const SupabaseService = {
 
   async upsertProduct(p: Product): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('products').upsert(productToRow(p), { onConflict: 'id' });
+    const { error } = await conTechoEscritura(supabase.from('products').upsert(productToRow(p), { onConflict: 'id' }));
     if (error) { console.error('Error upserting product:', error); return false; }
     return true;
   },
 
   async deleteProduct(id: string): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('products').delete().eq('id', id);
+    const { error } = await conTechoEscritura(supabase.from('products').delete().eq('id', id));
     if (error) { console.error('Error deleting product:', error); return false; }
     return true;
   },
@@ -115,10 +133,10 @@ export const SupabaseService = {
     if (!supabase) return true;
     let ok = true;
     for (const c of categories) {
-      const { error } = await supabase.from('categories').upsert(
+      const { error } = await conTechoEscritura(supabase.from('categories').upsert(
         { id: c.id, name: c.name, sort_order: c.sortOrder },
         { onConflict: 'id' }
-      );
+      ));
       if (error) { console.error('Error upserting category:', error); ok = false; }
     }
     return ok;
@@ -126,7 +144,7 @@ export const SupabaseService = {
 
   async deleteCategory(id: string): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('categories').delete().eq('id', id);
+    const { error } = await conTechoEscritura(supabase.from('categories').delete().eq('id', id));
     if (error) { console.error('Error deleting category:', error); return false; }
     return true;
   },
@@ -151,7 +169,7 @@ export const SupabaseService = {
 
   async upsertPost(p: Post): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('posts').upsert({
+    const { error } = await conTechoEscritura(supabase.from('posts').upsert({
       id: p.id,
       title: p.title,
       slug: p.slug,
@@ -160,14 +178,14 @@ export const SupabaseService = {
       cover_url: p.coverUrl || '',
       published: p.published,
       published_at: p.published ? (p.publishedAt || new Date().toISOString()) : null,
-    }, { onConflict: 'id' });
+    }, { onConflict: 'id' }));
     if (error) { console.error('Error upserting post:', error); return false; }
     return true;
   },
 
   async deletePost(id: string): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('posts').delete().eq('id', id);
+    const { error } = await conTechoEscritura(supabase.from('posts').delete().eq('id', id));
     if (error) { console.error('Error deleting post:', error); return false; }
     return true;
   },
@@ -191,21 +209,21 @@ export const SupabaseService = {
 
   async upsertStanding(s: StandingEntry): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('standings').upsert({
+    const { error } = await conTechoEscritura(supabase.from('standings').upsert({
       id: s.id,
       position: s.position,
       player_name: s.playerName,
       points: s.points,
       category: s.category || 'General',
       notes: s.notes || '',
-    }, { onConflict: 'id' });
+    }, { onConflict: 'id' }));
     if (error) { console.error('Error upserting standing:', error); return false; }
     return true;
   },
 
   async deleteStanding(id: string): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await supabase.from('standings').delete().eq('id', id);
+    const { error } = await conTechoEscritura(supabase.from('standings').delete().eq('id', id));
     if (error) { console.error('Error deleting standing:', error); return false; }
     return true;
   },
@@ -245,7 +263,7 @@ export const SupabaseService = {
     if (!supabase || !isSupabaseConnected()) {
       return { ok: false, stockRestored: false, error: 'Sin conexión con Supabase' };
     }
-    const { data, error } = await supabase.rpc('admin_revert_ledger', { p_id: id });
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_revert_ledger', { p_id: id }));
     if (error) {
       console.error('Error reverting ledger entry:', error);
       return { ok: false, stockRestored: false, error: error.message };
@@ -296,7 +314,7 @@ export const SupabaseService = {
       console.error('Movimiento de socios inválido:', input);
       return false;
     }
-    const { error } = await supabase.from('socio_moves').insert({
+    const { error } = await conTechoEscritura(supabase.from('socio_moves').insert({
       area: input.area,
       tipo: input.tipo,
       fecha: input.fecha,
@@ -310,14 +328,14 @@ export const SupabaseService = {
       imp_paula: input.impPaula,
       imp_gaston: input.impGaston,
       source: 'web',
-    });
+    }));
     if (error) { console.error('Error adding socio move:', error); return false; }
     return true;
   },
 
   async deleteSocioMove(id: string): Promise<boolean> {
     if (!supabase) return false;
-    const { error } = await supabase.from('socio_moves').delete().eq('id', id);
+    const { error } = await conTechoEscritura(supabase.from('socio_moves').delete().eq('id', id));
     if (error) { console.error('Error deleting socio move:', error); return false; }
     return true;
   },
@@ -331,7 +349,7 @@ export const SupabaseService = {
     if (!supabase || !isSupabaseConnected()) {
       return { ok: false, error: 'Sin conexión con Supabase' };
     }
-    const { data, error } = await supabase.rpc('admin_liquidar_caja', { p_ids: ids, p_moves: moves });
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_liquidar_caja', { p_ids: ids, p_moves: moves }));
     if (error) {
       console.error('Error liquidando caja:', error);
       return { ok: false, error: error.message };
@@ -388,19 +406,19 @@ export const SupabaseService = {
   async setEvents(events: Event[]): Promise<void> {
     if (!supabase) return;
     for (const e of events) {
-      await supabase.from('events').upsert({
+      await conTechoEscritura(supabase.from('events').upsert({
         id: e.id, name: e.name, date: e.date, time: e.time,
         location: e.location, city: e.city, description: e.description,
         image_url: e.imageUrl, maps_url: e.mapsUrl,
         max_participants: e.maxParticipants || null,
         status: e.status, category: e.category,
-      }, { onConflict: 'id' });
+      }, { onConflict: 'id' }));
     }
   },
 
   async deleteEvent(id: string): Promise<void> {
     if (!supabase) return;
-    await supabase.from('events').delete().eq('id', id);
+    await conTechoEscritura(supabase.from('events').delete().eq('id', id));
   },
 
   // ── Orders ──
@@ -452,7 +470,9 @@ export const SupabaseService = {
       // payment_provider, no por source.
       row.source = 'web';
     }
-    const { error } = await supabase.from('orders').insert(row);
+    // Mismo techo de 15s que las escrituras admin: el flujo de Mercado Pago espera
+    // este insert; un cuelgue acá dejaba el checkout colgado en vez de avisar.
+    const { error } = await conTechoEscritura(supabase.from('orders').insert(row));
     if (error) { console.error('Error inserting order:', error); return false; }
     return true;
   },
@@ -462,7 +482,7 @@ export const SupabaseService = {
     if (!supabase) return true;
     let ok = true;
     for (const o of orders) {
-      const { error } = await supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' });
+      const { error } = await conTechoEscritura(supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' }));
       if (error) { console.error('Error upserting order:', error); ok = false; }
     }
     return ok;
@@ -484,18 +504,18 @@ export const SupabaseService = {
   async setClubs(clubs: Club[]): Promise<void> {
     if (!supabase) return;
     for (const c of clubs) {
-      await supabase.from('clubs').upsert({
+      await conTechoEscritura(supabase.from('clubs').upsert({
         id: c.id, name: c.name, address: c.address, city: c.city,
         country: c.country, lat: c.lat, lng: c.lng, phone: c.phone || '',
         instagram: c.instagram || '', has_pickleball: c.hasPickleball,
         description: c.description,
-      }, { onConflict: 'id' });
+      }, { onConflict: 'id' }));
     }
   },
 
   async deleteClub(id: string): Promise<void> {
     if (!supabase) return;
-    await supabase.from('clubs').delete().eq('id', id);
+    await conTechoEscritura(supabase.from('clubs').delete().eq('id', id));
   },
 
   // ── Announcements ──
@@ -513,15 +533,15 @@ export const SupabaseService = {
   async setAnnouncements(announcements: Announcement[]): Promise<void> {
     if (!supabase) return;
     for (const a of announcements) {
-      await supabase.from('announcements').upsert({
+      await conTechoEscritura(supabase.from('announcements').upsert({
         id: a.id, title: a.title, content: a.content,
         type: a.type, active: a.active,
-      }, { onConflict: 'id' });
+      }, { onConflict: 'id' }));
     }
   },
 
   async deleteAnnouncement(id: string): Promise<void> {
     if (!supabase) return;
-    await supabase.from('announcements').delete().eq('id', id);
+    await conTechoEscritura(supabase.from('announcements').delete().eq('id', id));
   },
 };

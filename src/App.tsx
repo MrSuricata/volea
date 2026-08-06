@@ -24,6 +24,7 @@ import {
   signInWithPassword,
   getCurrentAdmin,
   onAuthStateChange,
+  sesionAdminVencida,
   signOut as authSignOut,
   type AdminUser,
 } from './services/authService';
@@ -448,14 +449,28 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Aviso genérico cuando la nube rechaza una escritura (sin conexión, sesión
-  // vencida, RLS). El cambio siempre quedó guardado en este dispositivo; el
-  // aviso evita que se pierda "en silencio" sin llegar a la nube.
+  // Aviso cuando la nube rechaza una escritura (sin conexión, sesión vencida,
+  // RLS). El cambio siempre quedó guardado en este dispositivo; el aviso evita
+  // que se pierda "en silencio" sin llegar a la nube. Si la causa es la sesión
+  // de admin vencida (el clásico: el token expiró y el refresh quedó colgado),
+  // el aviso lo dice explícito para que quede claro que hay que relogearse.
+  // IIFE async adentro: los call sites hacen .then(warnCloudFail) y la firma
+  // sync se mantiene tal cual.
   const warnCloudFail = (ok: boolean) => {
-    if (!ok) toast.error(
-      '⚠️ No se pudo subir a la nube. El cambio quedó guardado solo en este dispositivo. Revisá tu conexión / que sigas con sesión de admin, y guardá de nuevo.',
-      { duration: 9000 },
-    );
+    if (ok) return;
+    void (async () => {
+      if (await sesionAdminVencida()) {
+        toast.error(
+          'Tu sesión de admin venció — cerrá sesión y volvé a entrar. Los cambios NO se están guardando en la nube.',
+          { duration: 9000 },
+        );
+      } else {
+        toast.error(
+          '⚠️ No se pudo subir a la nube. El cambio quedó guardado solo en este dispositivo. Revisá tu conexión / que sigas con sesión de admin, y guardá de nuevo.',
+          { duration: 9000 },
+        );
+      }
+    })();
   };
 
   const saveProduct = useCallback((p: Product) => {
