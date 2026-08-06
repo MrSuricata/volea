@@ -149,6 +149,8 @@ export interface Event {
   category: 'tournament' | 'clinic' | 'social';
 }
 
+export type PaymentStatus = 'iniciado' | 'aprobado' | 'pendiente' | 'rechazado' | 'devuelto';
+
 export interface Order {
   id: string;
   items: CartItem[];
@@ -156,6 +158,13 @@ export interface Order {
   total: number;
   status: 'pending' | 'confirmed' | 'shipped' | 'delivered';
   createdAt: string;
+  /** Pago online (Mercado Pago). Ausente/null = flujo WhatsApp puro. */
+  paymentStatus?: PaymentStatus | null;
+  paymentProvider?: 'mp' | null;
+  mpPreferenceId?: string | null;
+  mpPaymentId?: string | null;
+  paidAt?: string | null;
+  paidAmount?: number | null;
 }
 
 export interface CustomerInfo {

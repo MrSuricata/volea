@@ -423,6 +423,12 @@ export const SupabaseService = {
       },
       total: Number(row.total) || 0,
       status: row.status || 'pending',
+      paymentStatus: row.payment_status ?? null,
+      paymentProvider: row.payment_provider ?? null,
+      mpPreferenceId: row.mp_preference_id ?? null,
+      mpPaymentId: row.mp_payment_id ?? null,
+      paidAt: row.paid_at ?? null,
+      paidAmount: row.paid_amount ?? null,
       createdAt: row.created_at?.split('T')[0] || '',
     }));
   },
@@ -430,10 +436,25 @@ export const SupabaseService = {
   // Insert plano para el checkout anónimo. RLS permite INSERT a cualquiera,
   // pero rechaza el upsert (ON CONFLICT DO UPDATE) porque el brazo UPDATE
   // exige is_admin(). No usar upsert acá.
-  async addOrder(o: Order): Promise<void> {
-    if (!supabase) return;
-    const { error } = await supabase.from('orders').insert(orderToRow(o));
-    if (error) console.error('Error inserting order:', error);
+  // Devuelve true si el insert llegó a Supabase: el flujo de Mercado Pago
+  // NO manda al cliente a pagar si el pedido no quedó en la DB.
+  async addOrder(o: Order): Promise<boolean> {
+    if (!supabase) return false;
+    const row: Record<string, unknown> = orderToRow(o);
+    // Los campos de pago se escriben SOLO acá (insert del checkout). El
+    // upsert del admin (setOrders/orderToRow) no los incluye a propósito:
+    // así nunca pisa lo que el webhook de MP escribió con service role.
+    if (o.paymentStatus) {
+      row.payment_status = o.paymentStatus;
+      row.payment_provider = o.paymentProvider ?? 'mp';
+      // 'web' y no 'web-mp': el CHECK orders_source_check de la DB viva solo
+      // admite whatsapp/shopify/web/telegram. El pago se distingue por
+      // payment_provider, no por source.
+      row.source = 'web';
+    }
+    const { error } = await supabase.from('orders').insert(row);
+    if (error) { console.error('Error inserting order:', error); return false; }
+    return true;
   },
 
   // Solo admins autenticados (magic link) pueden actualizar pedidos existentes.

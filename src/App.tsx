@@ -225,7 +225,7 @@ interface StoreContextType {
   setEvents: (e: Event[]) => void;
   orders: Order[];
   setOrders: (o: Order[]) => void;
-  addOrder: (o: Order) => void;
+  addOrder: (o: Order) => Promise<boolean>;
   posts: Post[];
   savePost: (p: Post) => void;
   removePost: (id: string) => void;
@@ -513,13 +513,14 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Alta de pedido desde el checkout (anónimo): insert plano, no upsert.
+  // Devuelve la promesa del insert: el flujo MP la espera, WhatsApp no.
   const addOrder = useCallback((order: Order) => {
     _setOrders(prev => {
       const next = [...prev, order];
       StorageService.setOrders(next);
       return next;
     });
-    SupabaseService.addOrder(order);
+    return SupabaseService.addOrder(order);
   }, []);
 
   const setCategories = useCallback((c: Category[]) => {
