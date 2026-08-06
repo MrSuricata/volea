@@ -1459,7 +1459,7 @@ function HomePage() {
             <Reveal delay={200}>
               <div className="relative flex justify-center">
                 <img
-                  src="/products/7.png"
+                  src="/products/7.jpg"
                   alt="Indumentaria VOLEA"
                   className="w-full max-w-md rounded-2xl shadow-2xl"
                   onError={handleImgError}
