@@ -218,9 +218,12 @@ CREATE POLICY gallery_admin_write ON public.gallery_albums FOR ALL USING (public
 --    (is_admin_email() queda anon-callable A PROPÓSITO, no se tocó su grant).
 --
 -- 2) bot_handle(...) y bot_pick_variant(...) (RPCs SECURITY DEFINER del bot de
---    WhatsApp) ya NO son ejecutables por anon/authenticated ni por el grant
---    PUBLIC por defecto — se hizo REVOKE EXECUTE ... FROM anon, authenticated
---    y luego FROM PUBLIC (el CREATE FUNCTION original dejaba EXECUTE abierto a
---    PUBLIC, lo cual incluía a anon/authenticated de forma implícita). El bot
---    entra a estas RPCs vía n8n usando la service_role key, que conserva su
---    grant explícito y no se vio afectada.
+--    Telegram): se les quitó el grant PUBLIC residual del CREATE FUNCTION
+--    (REVOKE ... FROM PUBLIC), pero anon CONSERVA EXECUTE explícito.
+--    ⚠ CORRECCIÓN 2026-08-07: el revoke total a anon del 06/08 ROMPIÓ EL BOT
+--    (n8n llama estas RPCs con la ANON key + el secreto compartido de
+--    bot_config — NO con service role; el 401 "permission denied for function
+--    bot_handle" tumbó el Cerebro un día entero). Se restauró GRANT EXECUTE
+--    TO anon para ambas. La protección real de estas funciones es el secreto
+--    en bot_config (ilegible para anon): NO volver a revocar anon sin cambiar
+--    antes la credencial de n8n a service role.
