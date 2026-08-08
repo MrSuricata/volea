@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabaseClient';
+import { conLimite } from '../utils/arranque';
 import type { EstadoTorneos } from './TorneosApp';
 import type { Torneo } from './engine/tipos';
 import { mergeTorneos } from './sync';
@@ -7,6 +8,21 @@ import { CLAVE_CACHE } from './cacheTorneos';
 import type { Cache } from './cacheTorneos';
 
 export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
+
+// Techo para CADA llamada de red del sync: con la sesión vencida y el refresh
+// colgado (la conexión trabada de la PC del trabajo), un upsert podía esperar
+// para siempre → `enVuelo` quedaba tomado y la UI decía "Sincronizando…" sin fin
+// (visto 2026-08-08 subiendo los torneos del 9/8). Con techo, el fallo cae en los
+// caminos de error que ya existen ('sinConexion' + reintento periódico de 30s).
+// 30s y no 15: los torneos con muchas parejas son documentos grandes y esta
+// conexión a veces es lenta de verdad — cortar un envío que iba a llegar es peor.
+const TECHO_SYNC_MS = 30000;
+function conTechoSync<T extends { data?: unknown; error: unknown }>(q: PromiseLike<T>): Promise<T | { data: null; error: Error }> {
+  return conLimite<T | { data: null; error: Error }>(q, TECHO_SYNC_MS, {
+    data: null,
+    error: new Error('timeout: la red no respondió en 30s'),
+  });
+}
 
 function cacheVacia(): Cache {
   return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false, conflictos: [] };
@@ -161,13 +177,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           creado_el: t.creadoEl,
           updated_at: ahora,
         }));
-        const { error } = await supabase.from('rk_torneos').upsert(filas);
+        const { error } = await conTechoSync(supabase.from('rk_torneos').upsert(filas));
         if (!error) {
           for (const f of filas) { baseDelta[f.id] = ahora; idsSubidos.add(f.id); }
         } else {
           // reintento fila por fila; se excluye (y avisa) la que vuelva a fallar
           for (const f of filas) {
-            const { error: e2 } = await supabase.from('rk_torneos').upsert([f]);
+            const { error: e2 } = await conTechoSync(supabase.from('rk_torneos').upsert([f]));
             if (!e2) {
               baseDelta[f.id] = ahora;
               idsSubidos.add(f.id);
@@ -195,7 +211,7 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         const idsActuales = new Set(cacheRef.current.estado.torneos.map((x) => x.id));
         const aBorrar = snapshotBorrados.filter((id) => !idsActuales.has(id));
         if (aBorrar.length > 0) {
-          const { error } = await supabase.from('rk_torneos').delete().in('id', aBorrar);
+          const { error } = await conTechoSync(supabase.from('rk_torneos').delete().in('id', aBorrar));
           if (!error) borradosOk = aBorrar;
           else { huboErrorGeneral = true; console.error('[torneos sync] borrado de torneos fallo', error); }
         }
@@ -207,13 +223,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         try {
           const filasJ = snapshotJugadores.map((j) => ({ id: j.id, nombre: j.nombre, alias: j.alias ?? [], updated_at: ahora }));
           if (filasJ.length > 0) {
-            const { error } = await supabase.from('rk_jugadores').upsert(filasJ);
+            const { error } = await conTechoSync(supabase.from('rk_jugadores').upsert(filasJ));
             if (error) throw error;
           }
           const idsLocales = new Set(snapshotJugadores.map((j) => j.id));
           const idsBorrarJ = c.jugadoresBase.filter((id) => !idsLocales.has(id));
           if (idsBorrarJ.length > 0) {
-            const { error } = await supabase.from('rk_jugadores').delete().in('id', idsBorrarJ);
+            const { error } = await conTechoSync(supabase.from('rk_jugadores').delete().in('id', idsBorrarJ));
             if (error) throw error;
           }
           jugadoresOk = true;
@@ -226,7 +242,7 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       // ---- config ----
       let configOk = false;
       if (snapshotConfigSucia && snapshotConfig) {
-        const { error } = await supabase.from('rk_config').upsert({ id: 1, data: snapshotConfig, updated_at: ahora });
+        const { error } = await conTechoSync(supabase.from('rk_config').upsert({ id: 1, data: snapshotConfig, updated_at: ahora }));
         if (!error) configOk = true;
         else { huboErrorGeneral = true; console.error('[torneos sync] config fallo', error); }
       }
@@ -320,9 +336,9 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     if (!supabase) { setEstadoSync('sinConexion'); return; }
     try {
       const [rt, rj, rc] = await Promise.all([
-        supabase.from('rk_torneos').select('id, data, updated_at'),
-        supabase.from('rk_jugadores').select('id, nombre, alias'),
-        supabase.from('rk_config').select('data').eq('id', 1).maybeSingle(),
+        conTechoSync(supabase.from('rk_torneos').select('id, data, updated_at')),
+        conTechoSync(supabase.from('rk_jugadores').select('id, nombre, alias')),
+        conTechoSync(supabase.from('rk_config').select('data').eq('id', 1).maybeSingle()),
       ]);
       if (rt.error) throw rt.error;
       if (rj.error) throw rj.error;
@@ -431,7 +447,7 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       return;
     }
     if (!supabase) return;
-    const { data, error } = await supabase.from('rk_torneos').select('data, updated_at').eq('id', id).maybeSingle();
+    const { data, error } = await conTechoSync(supabase.from('rk_torneos').select('data, updated_at').eq('id', id).maybeSingle());
     if (error || !data) { avisarLimitado('No se pudo traer la versión del server.'); return; }
     setCache((prev) => ({
       ...prev,
