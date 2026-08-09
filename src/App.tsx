@@ -10,7 +10,7 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, VentaCajaInput } from './types';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -3046,6 +3046,20 @@ function AdminPage() {
     if (result.ok && result.stockRestored) refreshProducts();
     return result;
   }, [refreshProducts]);
+  // Nueva venta / gasto desde la Caja web: mismas RPCs-semántica que el bot.
+  // Quién registró: nombre del admin logueado (fallback al email o "Web").
+  const cajaReportedBy = currentAdmin?.name || currentAdmin?.email || 'Web';
+  const registrarVenta = useCallback(async (input: VentaCajaInput) => {
+    const result = await SupabaseService.registrarVentaCaja(input, cajaReportedBy);
+    // Venta de catálogo: el stock bajó y las otras pestañas (Stock, Productos)
+    // deben verlo — mismo patrón de refresh que la anulación.
+    if (result.ok && input.productId) refreshProducts();
+    return result;
+  }, [cajaReportedBy, refreshProducts]);
+  const registrarGasto = useCallback(
+    (label: string, amount: number) => SupabaseService.registrarGastoCaja(label, amount, cajaReportedBy),
+    [cajaReportedBy],
+  );
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -4001,6 +4015,9 @@ function AdminPage() {
                 loadLedgerFull={loadLedgerFull}
                 revertEntry={revertLedgerEntry}
                 loadSocioMoves={SupabaseService.getSocioMoves}
+                products={products}
+                registrarVenta={registrarVenta}
+                registrarGasto={registrarGasto}
               />
             </Suspense>
           </div>

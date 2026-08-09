@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2 } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, SocioMove } from '../types';
+import type { LedgerEntry, Product, SocioMove, VentaCajaInput } from '../types';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
+import { formatVariant, stockTotal, variantesConStock } from '../utils/caja';
 
 const TZ = 'America/Montevideo';
 
@@ -36,13 +37,6 @@ const KINDS: { id: KindFilter; label: string }[] = [
   { id: 'gasto', label: 'Gastos' },
 ];
 
-/** "M / Femenino|Fucsia" → "M / Femenino · Fucsia" */
-const formatVariant = (key: string | null) => {
-  if (!key) return '';
-  const [size, color] = key.split('|');
-  return [size, color].filter(Boolean).join(' · ');
-};
-
 const PAYMENT_LABELS: Record<string, string> = {
   mp: 'Mercado Pago',
   efectivo: 'Efectivo',
@@ -57,12 +51,25 @@ const METHOD_BADGE: Record<string, string> = {
 
 const badgeClass = 'rounded-full px-2 py-0.5 font-semibold';
 const sectionTitleClass = 'mb-2 font-display text-sm font-bold uppercase tracking-wide text-gray-500';
+const inputClass = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 focus:border-navy-400 focus:outline-none';
+const labelClass = 'mb-1 block font-display text-xs font-bold uppercase tracking-wide text-gray-500';
 
-export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves }: {
+// Chips de método de pago del modal de venta (mismos colores que los badges de la lista)
+const METODOS_VENTA: { id: VentaCajaInput['payment']; label: string; activo: string }[] = [
+  { id: 'mp', label: 'MP', activo: 'border-blue-300 bg-blue-50 text-blue-600' },
+  { id: 'efectivo', label: 'Efectivo', activo: 'border-green-300 bg-green-50 text-green-700' },
+  { id: 'transferencia', label: 'Transferencia', activo: 'border-navy-300 bg-navy-50 text-navy-600' },
+  { id: 'debe', label: 'Debe', activo: 'border-amber-300 bg-amber-50 text-amber-700' },
+];
+
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
+  products: Product[];
+  registrarVenta: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
+  registrarGasto: (label: string, amount: number) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +82,8 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [aAnular, setAAnular] = useState<LedgerEntry | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [ventaAbierta, setVentaAbierta] = useState(false);
+  const [gastoAbierto, setGastoAbierto] = useState(false);
 
   // Secuencia de fetches: si una respuesta vieja llega después de una nueva
   // (ej: refresh disparado justo antes de confirmar una anulación), se ignora.
@@ -222,21 +231,33 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
 
   return (
     <div className="fade-in">
-      {/* Header */}
+      {/* Header: "Nueva venta" primero y a lo ancho en mobile; el resto en fila */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Caja</h1>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+          <button
+            onClick={() => setVentaAbierta(true)}
+            className="order-first w-full sm:order-last sm:w-auto bg-lime-400 hover:bg-lime-300 text-navy-700 font-display font-bold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+          >
+            <Plus size={18} strokeWidth={2.5} /> Nueva venta
+          </button>
+          <button
+            onClick={() => setGastoAbierto(true)}
+            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 text-red-500 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+          >
+            <TrendingDown size={16} /> Gasto
+          </button>
           <button
             onClick={handleExport}
             disabled={exporting || loading}
-            className="bg-white hover:bg-gray-50 disabled:opacity-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 disabled:opacity-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
           >
             <FileDown size={16} /> {exporting ? 'Generando…' : 'Descargar Excel'}
           </button>
           <button
             onClick={refresh}
             disabled={loading}
-            className="bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+            className="flex-1 sm:flex-none justify-center bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
           </button>
@@ -247,7 +268,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
       <div className="mb-6 flex items-start gap-2 rounded-xl bg-navy-50 px-4 py-2.5 text-xs text-navy-600">
         <MessageCircle size={14} className="mt-0.5 flex-shrink-0" />
         <p>
-          Ventas y gastos registrados por el <b>bot de Telegram</b>. Al anular una venta de catálogo, el stock se repone solo.
+          Ventas y gastos del <b>bot de Telegram</b> y de esta pantalla. Al anular una venta de catálogo, el stock se repone solo.
         </p>
       </div>
 
@@ -374,7 +395,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
               <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
                 <Wallet size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
                 <p className="font-display text-sm font-bold text-gray-500">Sin movimientos en este período</p>
-                <p className="mt-1 text-xs text-gray-400">Cuando el equipo registre ventas o gastos por Telegram, van a aparecer acá.</p>
+                <p className="mt-1 text-xs text-gray-400">Registrá una con «Nueva venta» o desde el bot de Telegram.</p>
               </div>
             )
           ) : (
@@ -472,6 +493,460 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           </div>
         </div>
       )}
+
+      {/* Modal de nueva venta */}
+      {ventaAbierta && (
+        <VentaModal
+          products={products}
+          registrar={registrarVenta}
+          onClose={() => setVentaAbierta(false)}
+          onDone={() => { setVentaAbierta(false); refresh(); }}
+        />
+      )}
+
+      {/* Modal de gasto */}
+      {gastoAbierto && (
+        <GastoModal
+          registrar={registrarGasto}
+          onClose={() => setGastoAbierto(false)}
+          onDone={() => { setGastoAbierto(false); refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Foto chica del producto en la lista del buscador (o percha si no tiene). */
+function FotoProducto({ producto }: { producto: Product }) {
+  const url = producto.images?.[0];
+  if (!url) {
+    return (
+      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-300">
+        <Shirt size={18} />
+      </div>
+    );
+  }
+  return <img src={url} alt="" className="h-10 w-10 flex-shrink-0 rounded-lg bg-gray-100 object-cover" />;
+}
+
+/**
+ * Nueva venta desde la web: producto del catálogo (descuenta stock, igual que
+ * el bot) o ítem suelto. Si la RPC falla (ej: "sin stock: quedan N"), el modal
+ * queda abierto para corregir.
+ */
+function VentaModal({ products, registrar, onClose, onDone }: {
+  products: Product[];
+  registrar: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [pestana, setPestana] = useState<'catalogo' | 'suelto'>('catalogo');
+  const [busqueda, setBusqueda] = useState('');
+  const [producto, setProducto] = useState<Product | null>(null);
+  const [variante, setVariante] = useState<string | null>(null);
+  const [qty, setQty] = useState(1);
+  // Precio como texto editable: arranca en precio de lista × cantidad y se
+  // recalcula al cambiar la cantidad SOLO si el admin no lo tocó a mano.
+  const [precio, setPrecio] = useState('');
+  const [precioTocado, setPrecioTocado] = useState(false);
+  const [nombreSuelto, setNombreSuelto] = useState('');
+  const [montoSuelto, setMontoSuelto] = useState('');
+  const [metodo, setMetodo] = useState<VentaCajaInput['payment'] | null>(null);
+  const [deudor, setDeudor] = useState('');
+  const [registrando, setRegistrando] = useState(false);
+
+  // Solo productos activos con algo para vender
+  const candidatos = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    return products
+      .filter(p => p.active !== false && stockTotal(p.stockBySize) > 0)
+      .filter(p => !q || p.name.toLowerCase().includes(q));
+  }, [products, busqueda]);
+
+  const variantes = useMemo(
+    () => (producto ? variantesConStock(producto.stockBySize) : []),
+    [producto],
+  );
+  const stockVariante = variantes.find(v => v.key === variante)?.stock ?? 0;
+
+  const elegirProducto = (p: Product) => {
+    const vs = variantesConStock(p.stockBySize);
+    setProducto(p);
+    setVariante(vs.length === 1 ? vs[0].key : null);
+    setQty(1);
+    setPrecioTocado(false);
+    setPrecio(String(p.price));
+  };
+
+  const cambiarCantidad = (nueva: number) => {
+    if (!producto) return;
+    const tope = Math.max(1, stockVariante || 1);
+    const clamped = Math.min(tope, Math.max(1, nueva));
+    setQty(clamped);
+    if (!precioTocado) setPrecio(String(producto.price * clamped));
+  };
+
+  const elegirVariante = (key: string, stock: number) => {
+    setVariante(key);
+    const clamped = Math.min(Math.max(1, qty), stock);
+    setQty(clamped);
+    if (producto && !precioTocado) setPrecio(String(producto.price * clamped));
+  };
+
+  const precioNum = Number(precio);
+  const montoNum = Number(montoSuelto);
+  const faltaDeudor = metodo === 'debe' && deudor.trim() === '';
+  const listo = pestana === 'catalogo'
+    ? !!producto && !!variante && qty >= 1 && qty <= stockVariante
+      && Number.isFinite(precioNum) && precioNum > 0 && !!metodo && !faltaDeudor
+    : nombreSuelto.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0 && !!metodo && !faltaDeudor;
+
+  const handleRegistrar = async () => {
+    if (!listo || registrando || !metodo) return;
+    const input: VentaCajaInput = pestana === 'catalogo'
+      ? {
+          label: producto!.name,
+          amount: precioNum,
+          payment: metodo,
+          productId: producto!.id,
+          variantKey: variante,
+          qty,
+          debtor: metodo === 'debe' ? deudor.trim() : null,
+        }
+      : {
+          label: nombreSuelto.trim(),
+          amount: montoNum,
+          payment: metodo,
+          debtor: metodo === 'debe' ? deudor.trim() : null,
+        };
+    setRegistrando(true);
+    const result = await registrar(input);
+    setRegistrando(false);
+    if (!result.ok) {
+      // Modal abierto: se corrige (otra variante, menos cantidad) y se reintenta.
+      toast.error(result.error || 'No se pudo registrar la venta');
+      return;
+    }
+    toast.success('Venta registrada ✓');
+    onDone();
+  };
+
+  const chipPestana = (id: 'catalogo' | 'suelto', label: string) => (
+    <button
+      onClick={() => setPestana(id)}
+      aria-pressed={pestana === id}
+      className={`flex-1 rounded-md py-2 font-display text-sm font-bold transition-colors ${
+        pestana === id ? 'bg-white text-navy-700 shadow-sm' : 'text-gray-500 hover:text-navy-700'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0" onClick={() => !registrando && onClose()} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Nueva venta"
+        className="relative flex max-h-[92dvh] w-full max-w-md flex-col rounded-2xl bg-white shadow-2xl"
+      >
+        <div className="flex items-center justify-between px-5 pt-5">
+          <h3 className="font-display text-lg font-bold text-navy-700">Nueva venta</h3>
+          <button
+            onClick={onClose}
+            disabled={registrando}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-5 pt-4">
+          {/* Pestañas Catálogo | Suelto */}
+          <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+            {chipPestana('catalogo', 'Catálogo')}
+            {chipPestana('suelto', 'Suelto')}
+          </div>
+
+          {pestana === 'catalogo' ? (
+            !producto ? (
+              <div>
+                <label htmlFor="venta-buscador" className={labelClass}>Producto</label>
+                <div className="relative">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    id="venta-buscador"
+                    type="search"
+                    value={busqueda}
+                    onChange={e => setBusqueda(e.target.value)}
+                    placeholder="Buscar por nombre…"
+                    autoFocus
+                    className={`${inputClass} pl-9`}
+                  />
+                </div>
+                <div className="mt-2 max-h-60 space-y-1 overflow-y-auto">
+                  {candidatos.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-gray-400">
+                      No hay productos activos con stock que coincidan.
+                    </p>
+                  ) : (
+                    candidatos.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => elegirProducto(p)}
+                        className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2 text-left transition-colors hover:border-lime-300 hover:bg-lime-50"
+                      >
+                        <FotoProducto producto={p} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-display text-sm font-bold text-navy-700">{p.name}</p>
+                          <p className="text-[11px] text-gray-400">
+                            {formatMoney(p.price)} · {stockTotal(p.stockBySize)} en stock
+                          </p>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Producto elegido */}
+                <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                  <FotoProducto producto={producto} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-display text-sm font-bold text-navy-700">{producto.name}</p>
+                    <p className="text-[11px] text-gray-400">lista: {formatMoney(producto.price)} c/u</p>
+                  </div>
+                  <button
+                    onClick={() => { setProducto(null); setVariante(null); setPrecio(''); setPrecioTocado(false); setQty(1); }}
+                    className="flex-shrink-0 font-display text-xs font-bold text-navy-500 hover:text-navy-700"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+
+                {/* Variantes con stock */}
+                <div>
+                  <span className={labelClass}>Variante</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {variantes.map(v => (
+                      <button
+                        key={v.key}
+                        onClick={() => elegirVariante(v.key, v.stock)}
+                        aria-pressed={variante === v.key}
+                        className={`rounded-full px-3 py-1.5 text-xs font-display font-bold transition-colors ${
+                          variante === v.key ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-600 hover:text-navy-700'
+                        }`}
+                      >
+                        {v.label} ({v.stock})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cantidad + precio */}
+                <div className="flex gap-3">
+                  <div>
+                    <span className={labelClass}>Cantidad</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => cambiarCantidad(qty - 1)}
+                        disabled={qty <= 1}
+                        aria-label="Una menos"
+                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-navy-700 transition-colors hover:bg-gray-50 disabled:text-gray-300"
+                      >
+                        <Minus size={16} />
+                      </button>
+                      <span className="w-9 text-center font-display text-base font-bold tabular-nums text-navy-700" aria-live="polite">
+                        {qty}
+                      </span>
+                      <button
+                        onClick={() => cambiarCantidad(qty + 1)}
+                        disabled={!variante || qty >= stockVariante}
+                        aria-label="Una más"
+                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-navy-700 transition-colors hover:bg-gray-50 disabled:text-gray-300"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="venta-precio" className={labelClass}>Precio total ($)</label>
+                    <input
+                      id="venta-precio"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={precio}
+                      onChange={e => { setPrecio(e.target.value); setPrecioTocado(true); }}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          ) : (
+            /* Ítem suelto: no toca stock */
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="venta-suelto-nombre" className={labelClass}>¿Qué se vendió?</label>
+                <input
+                  id="venta-suelto-nombre"
+                  type="text"
+                  value={nombreSuelto}
+                  onChange={e => setNombreSuelto(e.target.value)}
+                  placeholder="Ej: alquiler de paleta"
+                  autoFocus
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label htmlFor="venta-suelto-monto" className={labelClass}>Monto ($)</label>
+                <input
+                  id="venta-suelto-monto"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={montoSuelto}
+                  onChange={e => setMontoSuelto(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <p className="text-[11px] text-gray-400">Los ítems sueltos no descuentan stock del catálogo.</p>
+            </div>
+          )}
+
+          {/* Método de pago */}
+          <div>
+            <span className={labelClass}>¿Cómo pagaron?</span>
+            <div className="grid grid-cols-2 gap-2">
+              {METODOS_VENTA.map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => setMetodo(m.id)}
+                  aria-pressed={metodo === m.id}
+                  className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
+                    metodo === m.id ? m.activo : 'border-gray-200 bg-white text-gray-500 hover:text-navy-700'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {metodo === 'debe' && (
+              <div className="mt-2">
+                <label htmlFor="venta-deudor" className={labelClass}>¿Quién debe?</label>
+                <input
+                  id="venta-deudor"
+                  type="text"
+                  value={deudor}
+                  onChange={e => setDeudor(e.target.value)}
+                  placeholder="Nombre y apellido"
+                  className={inputClass}
+                />
+                <p className="mt-1 text-[11px] text-gray-400">Queda en «Por cobrar»; se cobra desde el bot con «cobré + nombre».</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t border-gray-100 p-5 pt-4">
+          <button
+            onClick={handleRegistrar}
+            disabled={!listo || registrando}
+            className="w-full rounded-lg bg-lime-400 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400"
+          >
+            {registrando ? 'Registrando…' : 'Registrar venta'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Gasto rápido: descripción + monto (sin stock ni método de pago). */
+function GastoModal({ registrar, onClose, onDone }: {
+  registrar: (label: string, amount: number) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [descripcion, setDescripcion] = useState('');
+  const [monto, setMonto] = useState('');
+  const [registrando, setRegistrando] = useState(false);
+
+  const montoNum = Number(monto);
+  const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0;
+
+  const handleRegistrar = async () => {
+    if (!listo || registrando) return;
+    setRegistrando(true);
+    const result = await registrar(descripcion.trim(), montoNum);
+    setRegistrando(false);
+    if (!result.ok) {
+      toast.error(result.error || 'No se pudo registrar el gasto');
+      return;
+    }
+    toast.success('Gasto registrado ✓');
+    onDone();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0" onClick={() => !registrando && onClose()} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Registrar gasto"
+        className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">Gasto</h3>
+          <button
+            onClick={onClose}
+            disabled={registrando}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="gasto-descripcion" className={labelClass}>¿En qué se gastó?</label>
+            <input
+              id="gasto-descripcion"
+              type="text"
+              value={descripcion}
+              onChange={e => setDescripcion(e.target.value)}
+              placeholder="Ej: pelotas, hielo, nafta"
+              autoFocus
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="gasto-monto" className={labelClass}>Monto ($)</label>
+            <input
+              id="gasto-monto"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </div>
+        <button
+          onClick={handleRegistrar}
+          disabled={!listo || registrando}
+          className="mt-5 w-full rounded-lg bg-red-500 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-gray-200 disabled:text-gray-400"
+        >
+          {registrando ? 'Registrando…' : 'Registrar gasto'}
+        </button>
+      </div>
     </div>
   );
 }

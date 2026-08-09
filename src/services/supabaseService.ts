@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -284,6 +284,49 @@ export const SupabaseService = {
       stockRestored: data?.stock_restored === true,
       error: typeof data?.error === 'string' ? data.error : undefined,
     };
+  },
+
+  /**
+   * Registra una venta desde la Caja web con la misma semántica del bot:
+   * la RPC descuenta stock atómicamente (ventas de catálogo) e inserta en
+   * bot_ledger, así deudas/cobré/liquidación/anular siguen andando igual.
+   */
+  async registrarVentaCaja(input: VentaCajaInput, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase || !isSupabaseConnected()) {
+      return { ok: false, error: 'Sin conexión con Supabase' };
+    }
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_registrar_venta', {
+      p_label: input.label,
+      p_amount: input.amount,
+      p_payment: input.payment,
+      p_reported_by: reportedBy,
+      p_product_id: input.productId ?? null,
+      p_variant_key: input.variantKey ?? null,
+      p_qty: input.qty ?? 1,
+      p_debtor: input.debtor ?? null,
+    }));
+    if (error) {
+      console.error('Error registrando venta:', error);
+      return { ok: false, error: error.message };
+    }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  /** Registra un gasto desde la Caja web (fila 'gasto' en bot_ledger, sin stock ni método). */
+  async registrarGastoCaja(label: string, amount: number, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase || !isSupabaseConnected()) {
+      return { ok: false, error: 'Sin conexión con Supabase' };
+    }
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_registrar_gasto', {
+      p_label: label,
+      p_amount: amount,
+      p_reported_by: reportedBy,
+    }));
+    if (error) {
+      console.error('Error registrando gasto:', error);
+      return { ok: false, error: error.message };
+    }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 
   // ── Cuentas entre socios (tabla socio_moves, solo admins vía RLS) ──

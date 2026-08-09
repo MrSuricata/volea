@@ -70,6 +70,21 @@ export interface LedgerEntry {
   socioSettledAt: string | null;
 }
 
+/**
+ * Alta de venta desde la Caja web (RPC admin_registrar_venta). Con productId,
+ * la RPC descuenta stock de la variante como el bot; sin productId es un ítem
+ * suelto y el stock no se toca.
+ */
+export interface VentaCajaInput {
+  label: string;
+  amount: number;
+  payment: 'mp' | 'efectivo' | 'transferencia' | 'debe';
+  productId?: string | null;
+  variantKey?: string | null;
+  qty?: number;
+  debtor?: string | null;
+}
+
 /** Fila que la liquidación de caja asienta en socio_moves (claves = columnas del RPC). */
 export interface SocioLiquidacionMove {
   area: SocioMove['area'];
