@@ -11,3 +11,4 @@ dist
 tsconfig.app.tsbuildinfo
 !.env.example
 !.env.production
+backups/

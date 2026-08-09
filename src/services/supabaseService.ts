@@ -292,7 +292,11 @@ export const SupabaseService = {
    * bot_ledger, así deudas/cobré/liquidación/anular siguen andando igual.
    */
   async registrarVentaCaja(input: VentaCajaInput, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
-    if (!supabase || !isSupabaseConnected()) {
+    // Sin isSupabaseConnected(): las escrituras del admin intentan SIEMPRE que
+    // haya cliente (regla del fix 2026-07-18 — el probe del arranque da falsos
+    // negativos con la conexión fría y dejaba la pestaña "sin conexión" para
+    // siempre; visto de nuevo con los gastos de la Caja el 2026-08-09).
+    if (!supabase) {
       return { ok: false, error: 'Sin conexión con Supabase' };
     }
     const { data, error } = await conTechoEscritura(supabase.rpc('admin_registrar_venta', {
@@ -314,7 +318,8 @@ export const SupabaseService = {
 
   /** Registra un gasto desde la Caja web (fila 'gasto' en bot_ledger, sin stock ni método). */
   async registrarGastoCaja(label: string, amount: number, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
-    if (!supabase || !isSupabaseConnected()) {
+    // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
+    if (!supabase) {
       return { ok: false, error: 'Sin conexión con Supabase' };
     }
     const { data, error } = await conTechoEscritura(supabase.rpc('admin_registrar_gasto', {

@@ -632,15 +632,22 @@ function VentaModal({ products, registrar, onClose, onDone }: {
           debtor: metodo === 'debe' ? deudor.trim() : null,
         };
     setRegistrando(true);
-    const result = await registrar(input);
-    setRegistrando(false);
-    if (!result.ok) {
-      // Modal abierto: se corrige (otra variante, menos cantidad) y se reintenta.
-      toast.error(result.error || 'No se pudo registrar la venta');
-      return;
+    try {
+      const result = await registrar(input);
+      if (!result.ok) {
+        // Modal abierto: se corrige (otra variante, menos cantidad) y se reintenta.
+        toast.error(result.error || 'No se pudo registrar la venta');
+        return;
+      }
+      toast.success('Venta registrada ✓');
+      onDone();
+    } catch (e) {
+      // Un throw inesperado no puede dejar el botón girando para siempre.
+      console.error('Error registrando venta:', e);
+      toast.error('No se pudo registrar la venta. Probá de nuevo.');
+    } finally {
+      setRegistrando(false);
     }
-    toast.success('Venta registrada ✓');
-    onDone();
   };
 
   const chipPestana = (id: 'catalogo' | 'suelto', label: string) => (
@@ -921,14 +928,21 @@ function GastoModal({ registrar, onClose, onDone }: {
   const handleRegistrar = async () => {
     if (!listo || registrando) return;
     setRegistrando(true);
-    const result = await registrar(descripcion.trim(), montoNum);
-    setRegistrando(false);
-    if (!result.ok) {
-      toast.error(result.error || 'No se pudo registrar el gasto');
-      return;
+    try {
+      const result = await registrar(descripcion.trim(), montoNum);
+      if (!result.ok) {
+        toast.error(result.error || 'No se pudo registrar el gasto');
+        return;
+      }
+      toast.success('Gasto registrado ✓');
+      onDone();
+    } catch (e) {
+      // Un throw inesperado no puede dejar el botón girando para siempre.
+      console.error('Error registrando gasto:', e);
+      toast.error('No se pudo registrar el gasto. Probá de nuevo.');
+    } finally {
+      setRegistrando(false);
     }
-    toast.success('Gasto registrado ✓');
-    onDone();
   };
 
   return (
