@@ -227,3 +227,132 @@ CREATE POLICY gallery_admin_write ON public.gallery_albums FOR ALL USING (public
 --    TO anon para ambas. La protección real de estas funciones es el secreto
 --    en bot_config (ilegible para anon): NO volver a revocar anon sin cambiar
 --    antes la credencial de n8n a service role.
+
+-- ============================================
+-- v7 (2026-08-09): Nueva venta / Gasto desde la Caja web
+-- ============================================
+-- Migración "caja_web_registrar" aplicada en el proyecto volea-web.
+-- Dos RPCs para que el admin web registre ventas y gastos con la MISMA
+-- semántica que bot_do_register (el bot de Telegram): descuento atómico de
+-- stock (SELECT ... FOR UPDATE + jsonb_set sobre products.stock_by_size) y
+-- fila en bot_ledger con las mismas columnas, así deudas, "cobré",
+-- liquidación a socios, anulación (admin_revert_ledger repone stock) y
+-- export Excel siguen funcionando igual.
+--
+-- Diferencias a propósito con el bot:
+--  * chat_id = 0 marca los registros hechos desde la web (columna NOT NULL;
+--    ningún chat real de Telegram usa el id 0, así el "deshacer" del bot
+--    nunca los toca).
+--  * Sin stock suficiente se RECHAZA ({ok:false, error:'sin stock: quedan N'})
+--    en vez de avisar y clavar en 0 como hace el bot.
+
+CREATE OR REPLACE FUNCTION public.admin_registrar_venta(
+  p_label text,
+  p_amount numeric,
+  p_payment text,
+  p_reported_by text,
+  p_product_id text DEFAULT NULL,
+  p_variant_key text DEFAULT NULL,
+  p_qty integer DEFAULT 1,
+  p_debtor text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_label text := btrim(COALESCE(p_label, ''));
+  v_reported text := COALESCE(NULLIF(btrim(COALESCE(p_reported_by, '')), ''), 'Web');
+  v_stock jsonb;
+  v_before int;
+  v_after int := NULL;
+BEGIN
+  IF NOT is_admin() THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'solo admins');
+  END IF;
+
+  IF p_payment IS NULL OR p_payment NOT IN ('mp', 'efectivo', 'transferencia', 'debe') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'método de pago inválido');
+  END IF;
+  IF p_payment = 'debe' AND COALESCE(btrim(p_debtor), '') = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'falta el nombre de quién debe');
+  END IF;
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'monto inválido');
+  END IF;
+  IF p_qty IS NULL OR p_qty < 1 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'cantidad inválida');
+  END IF;
+
+  IF p_product_id IS NOT NULL THEN
+    -- Venta de catálogo: lock de la fila + chequeo + descuento, misma mecánica
+    -- que bot_do_register (SELECT ... FOR UPDATE + jsonb_set; el label pasa a
+    -- ser el nombre del producto, como hace el bot).
+    SELECT name, stock_by_size INTO v_label, v_stock
+      FROM products WHERE id = p_product_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'ese producto ya no está en el catálogo');
+    END IF;
+    IF p_variant_key IS NULL THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'falta la variante (talle|color)');
+    END IF;
+    v_before := COALESCE((v_stock ->> p_variant_key)::int, 0);
+    IF v_before < p_qty THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'sin stock: quedan ' || v_before);
+    END IF;
+    v_after := v_before - p_qty;
+    UPDATE products
+      SET stock_by_size = jsonb_set(stock_by_size, ARRAY[p_variant_key], to_jsonb(v_after))
+      WHERE id = p_product_id;
+  ELSIF v_label = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'falta el nombre del ítem');
+  END IF;
+
+  INSERT INTO bot_ledger (kind, product_id, variant_key, label, qty, amount, reported_by, chat_id, payment_method, debtor_name)
+  VALUES ('venta', p_product_id,
+          CASE WHEN p_product_id IS NOT NULL THEN p_variant_key ELSE NULL END,
+          v_label, p_qty, p_amount, v_reported, 0, p_payment,
+          CASE WHEN p_payment = 'debe' THEN btrim(p_debtor) ELSE NULL END);
+
+  RETURN jsonb_build_object('ok', true, 'stock_left', v_after);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_registrar_gasto(
+  p_label text,
+  p_amount numeric,
+  p_reported_by text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_label text := btrim(COALESCE(p_label, ''));
+  v_reported text := COALESCE(NULLIF(btrim(COALESCE(p_reported_by, '')), ''), 'Web');
+BEGIN
+  IF NOT is_admin() THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'solo admins');
+  END IF;
+  IF v_label = '' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'falta la descripción del gasto');
+  END IF;
+  IF p_amount IS NULL OR p_amount <= 0 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'monto inválido');
+  END IF;
+
+  INSERT INTO bot_ledger (kind, product_id, variant_key, label, qty, amount, reported_by, chat_id, payment_method, debtor_name)
+  VALUES ('gasto', NULL, NULL, v_label, 1, p_amount, v_reported, 0, NULL, NULL);
+
+  RETURN jsonb_build_object('ok', true);
+END;
+$$;
+
+-- Grants: el CREATE FUNCTION deja EXECUTE a PUBLIC (mismo gotcha residual del
+-- v6); se cierra explícito y solo queda authenticated. El admin web llama con
+-- su sesión de usuario — is_admin() es el guard real dentro de cada función.
+-- Verificado con has_function_privilege: anon=false, authenticated=true en ambas.
+REVOKE ALL ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, text, text, integer, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, text, text, integer, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.admin_registrar_gasto(text, numeric, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text) TO authenticated;
