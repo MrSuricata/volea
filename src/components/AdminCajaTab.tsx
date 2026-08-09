@@ -63,7 +63,7 @@ const METODOS_VENTA: { id: VentaCajaInput['payment']; label: string; activo: str
   { id: 'debe', label: 'Debe', activo: 'border-amber-300 bg-amber-50 text-amber-700' },
 ];
 
-export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto }: {
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, cobrarDeudor }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
@@ -71,6 +71,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   products: Product[];
   registrarVenta: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
   registrarGasto: (label: string, amount: number) => Promise<{ ok: boolean; error?: string }>;
+  cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +82,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [period, setPeriod] = useState<PeriodFilter>('7d');
   const [kind, setKind] = useState<KindFilter>('todos');
   const [aAnular, setAAnular] = useState<LedgerEntry | null>(null);
+  const [aCobrar, setACobrar] = useState<{ nombre: string; total: number } | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [ventaAbierta, setVentaAbierta] = useState(false);
@@ -352,10 +354,16 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                       </p>
                     </div>
                     <p className="text-sm font-bold tabular-nums text-amber-600 whitespace-nowrap">{formatMoney(deudor.total)}</p>
+                    <button
+                      onClick={() => setACobrar({ nombre: deudor.nombre, total: deudor.total })}
+                      className="flex-shrink-0 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-lime-500"
+                    >
+                      Cobrar
+                    </button>
                   </div>
                 ))}
               </div>
-              <p className="mt-2 text-[11px] text-gray-400">Se cobra desde el bot: «cobré + nombre»</p>
+              <p className="mt-2 text-[11px] text-gray-400">También podés cobrar desde el bot: «cobré + nombre»</p>
             </div>
           )}
 
@@ -513,6 +521,128 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           onDone={() => { setGastoAbierto(false); refresh(); }}
         />
       )}
+
+      {/* Modal de cobro de deudas (total o parcial FIFO) */}
+      {aCobrar && (
+        <CobroModal
+          deudor={aCobrar}
+          cobrar={cobrarDeudor}
+          onClose={() => setACobrar(null)}
+          onDone={() => { setACobrar(null); refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Cobrar deudas de una persona: precarga el total, pero se puede poner menos
+ * (pago parcial FIFO: cancela las deudas más viejas; un ítem a caballo se
+ * parte y el resto sigue pendiente). Misma semántica que «cobré» del bot.
+ */
+function CobroModal({ deudor, cobrar, onClose, onDone }: {
+  deudor: { nombre: string; total: number };
+  cobrar: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [monto, setMonto] = useState(String(deudor.total));
+  const [metodo, setMetodo] = useState<'mp' | 'efectivo' | 'transferencia' | null>(null);
+  const [cobrando, setCobrando] = useState(false);
+
+  const montoNum = Number(monto);
+  const listo = Number.isFinite(montoNum) && montoNum > 0 && montoNum <= deudor.total && !!metodo;
+  const esParcial = listo && montoNum < deudor.total;
+
+  const handleCobrar = async () => {
+    if (!listo || cobrando || !metodo) return;
+    setCobrando(true);
+    try {
+      const result = await cobrar(deudor.nombre, metodo, esParcial ? montoNum : null);
+      if (!result.ok) {
+        toast.error(result.error || 'No se pudo cobrar');
+        return;
+      }
+      if (result.restante && result.restante > 0) {
+        toast.success(`Cobrado ${formatMoney(montoNum)} de ${deudor.nombre} — quedan ${formatMoney(result.restante)} pendientes`);
+      } else {
+        toast.success(`Deuda de ${deudor.nombre} saldada ✓`);
+      }
+      onDone();
+    } catch (e) {
+      console.error('Error cobrando deuda:', e);
+      toast.error('No se pudo cobrar. Probá de nuevo.');
+    } finally {
+      setCobrando(false);
+    }
+  };
+
+  const METODOS_COBRO: Array<{ id: 'mp' | 'efectivo' | 'transferencia'; label: string }> = [
+    { id: 'mp', label: 'MP' },
+    { id: 'efectivo', label: 'Efectivo' },
+    { id: 'transferencia', label: 'Transferencia' },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0" onClick={() => !cobrando && onClose()} />
+      <div role="dialog" aria-modal="true" aria-label={`Cobrar a ${deudor.nombre}`} className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">Cobrar a {deudor.nombre}</h3>
+          <button onClick={onClose} disabled={cobrando} aria-label="Cerrar" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="mb-4 text-sm text-gray-500">Debe <strong className="text-amber-600 tabular-nums">{formatMoney(deudor.total)}</strong> en total.</p>
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="cobro-monto" className={labelClass}>¿Cuánto paga ahora?</label>
+            <input
+              id="cobro-monto"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={deudor.total}
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              className={inputClass}
+            />
+            {esParcial && (
+              <p className="mt-1 text-[11px] text-amber-600">
+                Pago parcial: quedan {formatMoney(deudor.total - montoNum)} pendientes (se cancelan las deudas más viejas primero).
+              </p>
+            )}
+            {Number.isFinite(montoNum) && montoNum > deudor.total && (
+              <p className="mt-1 text-[11px] text-red-500">No puede pagar más de lo que debe.</p>
+            )}
+          </div>
+          <div>
+            <span className={labelClass}>¿Cómo paga?</span>
+            <div className="grid grid-cols-3 gap-2">
+              {METODOS_COBRO.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setMetodo(m.id)}
+                  aria-pressed={metodo === m.id}
+                  className={`rounded-xl border px-2 py-2.5 font-display text-sm font-bold transition-colors ${
+                    metodo === m.id ? 'border-lime-400 bg-lime-50 text-navy-700' : 'border-gray-200 bg-white text-gray-500 hover:border-lime-400'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={handleCobrar}
+            disabled={!listo || cobrando}
+            className="w-full rounded-xl bg-lime-400 py-3 font-display font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {cobrando ? 'Cobrando…' : esParcial ? `Cobrar ${formatMoney(montoNum)} (parcial)` : 'Cobrar todo'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

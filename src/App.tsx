@@ -4018,6 +4018,7 @@ function AdminPage() {
                 products={products}
                 registrarVenta={registrarVenta}
                 registrarGasto={registrarGasto}
+                cobrarDeudor={SupabaseService.cobrarDeudorCaja}
               />
             </Suspense>
           </div>

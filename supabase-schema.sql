@@ -356,3 +356,19 @@ REVOKE ALL ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, t
 GRANT EXECUTE ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, text, text, integer, text) TO authenticated;
 REVOKE ALL ON FUNCTION public.admin_registrar_gasto(text, numeric, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text) TO authenticated;
+
+-- ============================================
+-- v8 (2026-08-09): Cobro de deudas desde la Caja web
+-- ============================================
+-- Migraciones "caja_web_cobrar_deudor" + "caja_web_cobrar_parcial" +
+-- "caja_web_cobrar_drop_v1" aplicadas en volea-web.
+-- admin_cobrar_deudor(p_debtor, p_method, p_monto DEFAULT NULL):
+--   SECURITY DEFINER (is_admin() primero, search_path fijo). Cierra deudas
+--   pendientes del deudor (nombre EXACTO del agrupado de la Caja) con
+--   settled_at/settled_method — misma semántica que el «cobré» del bot.
+--   p_monto NULL o >= deuda => cobra todo. Parcial => FIFO por created_at;
+--   el ítem a caballo se PARTE: la fila original conserva producto/qty con el
+--   resto pendiente, y la parte pagada nace como fila nueva ya cobrada con
+--   product_id NULL (anularla jamás toca stock). Grants: authenticated ✓,
+--   anon/PUBLIC revocados (regla del 2026-08-06). La v1 de 2 args se DROPeó
+--   (quedaba como sobrecarga ambigua para PostgREST).

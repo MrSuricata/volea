@@ -316,6 +316,32 @@ export const SupabaseService = {
     return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 
+  /**
+   * Cobra deudas de un deudor (nombre exacto del agrupado de la Caja).
+   * monto null = cobra todo; con monto = pago parcial FIFO (la RPC parte el
+   * ítem a caballo y deja el resto pendiente). Misma semántica que «cobré».
+   */
+  async cobrarDeudorCaja(debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null): Promise<{ ok: boolean; error?: string; restante?: number }> {
+    // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
+    if (!supabase) {
+      return { ok: false, error: 'Sin conexión con Supabase' };
+    }
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_cobrar_deudor', {
+      p_debtor: debtor,
+      p_method: method,
+      p_monto: monto,
+    }));
+    if (error) {
+      console.error('Error cobrando deudor:', error);
+      return { ok: false, error: error.message };
+    }
+    return {
+      ok: data?.ok === true,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+      restante: typeof data?.restante === 'number' ? data.restante : undefined,
+    };
+  },
+
   /** Registra un gasto desde la Caja web (fila 'gasto' en bot_ledger, sin stock ni método). */
   async registrarGastoCaja(label: string, amount: number, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
     // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
