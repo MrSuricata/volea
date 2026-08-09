@@ -17,7 +17,16 @@ export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
 // 30s y no 15: los torneos con muchas parejas son documentos grandes y esta
 // conexión a veces es lenta de verdad — cortar un envío que iba a llegar es peor.
 const TECHO_SYNC_MS = 30000;
-function conTechoSync<T extends { data?: unknown; error: unknown }>(q: PromiseLike<T>): Promise<T | { data: null; error: Error }> {
+function conTechoSync<T extends { data?: unknown; error: unknown }>(
+  q: PromiseLike<T> & { abortSignal?: (signal: AbortSignal) => unknown },
+): Promise<T | { data: null; error: Error }> {
+  // ABORT real al vencer (mismo fix que supabaseService 2026-08-09): sin esto el
+  // request colgado quedaba zombie ocupando la conexión y encolaba a los nuevos.
+  if (typeof q.abortSignal === 'function') {
+    const ctrl = new AbortController();
+    q.abortSignal(ctrl.signal);
+    setTimeout(() => ctrl.abort(), TECHO_SYNC_MS + 100);
+  }
   return conLimite<T | { data: null; error: Error }>(q, TECHO_SYNC_MS, {
     data: null,
     error: new Error('timeout: la red no respondió en 30s'),

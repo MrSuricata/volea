@@ -12,8 +12,18 @@ import type { Product, Event, Order, Category, Club, Announcement, Post, Standin
 // aviso de warnCloudFail sí aparece. uploadImage no pasa por acá: ya tiene su techo de 45s.
 const TECHO_ESCRITURA_MS = 15000;
 function conTechoEscritura<T extends { data?: unknown; error: { message: string } | null }>(
-  escritura: PromiseLike<T>,
+  escritura: PromiseLike<T> & { abortSignal?: (signal: AbortSignal) => unknown },
 ): Promise<T | { data: null; error: Error }> {
+  // ABORT real al vencer el techo (2026-08-09): resolver el timeout no alcanza —
+  // el request colgado seguía vivo ocupando la conexión del navegador a Supabase,
+  // los zombies se acumulaban y las llamadas nuevas quedaban encoladas sin salir
+  // ("sigue pensando" hasta F5). Abortar libera la cañería; el reintento sale
+  // por una conexión nueva. Si el request ya terminó, el abort es un no-op.
+  if (typeof escritura.abortSignal === 'function') {
+    const ctrl = new AbortController();
+    escritura.abortSignal(ctrl.signal);
+    setTimeout(() => ctrl.abort(), TECHO_ESCRITURA_MS + 100);
+  }
   return conLimite<T | { data: null; error: Error }>(
     escritura,
     TECHO_ESCRITURA_MS,
