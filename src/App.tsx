@@ -7,7 +7,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus } from './types';
@@ -3067,6 +3067,8 @@ function AdminPage() {
     return 'dashboard';
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Modo transmisión: esconde la columna del admin en desktop (streaming en vivo).
+  const [panelOculto, setPanelOculto] = useState(false);
   const useSupabaseAuth = isSupabaseConnected();
 
   // Product modal state
@@ -3297,8 +3299,11 @@ function AdminPage() {
 
       {/* Sidebar */}
       {/* En desktop la columna es sticky DEBAJO del nav público (h-16): antes era
-          static y al scrollear se deslizaba por abajo del nav sticky y quedaba tapada. */}
-      <aside className={`fixed lg:sticky top-0 lg:top-16 left-0 h-full lg:h-[calc(100vh-4rem)] lg:self-start z-50 lg:z-30 w-64 bg-navy-800 text-white flex flex-col transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          static y al scrollear se deslizaba por abajo del nav sticky y quedaba tapada.
+          panelOculto = modo transmisión (pedido de Brian 2026-08-09): esconde la
+          columna entera en desktop para streamear la pantalla limpia; se vuelve
+          con el botón flotante de abajo a la izquierda. En mobile no aplica. */}
+      <aside className={`fixed lg:sticky top-0 lg:top-16 left-0 h-full lg:h-[calc(100vh-4rem)] lg:self-start z-50 lg:z-30 w-64 bg-navy-800 text-white flex-col transition-transform lg:translate-x-0 ${panelOculto ? 'flex lg:hidden' : 'flex'} ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 border-b border-navy-600 flex items-center justify-between">
           <span className="font-display text-xl font-bold text-lime-400">Admin</span>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white hover:text-lime-400">
@@ -3320,7 +3325,14 @@ function AdminPage() {
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-navy-600">
+        <div className="p-4 border-t border-navy-600 space-y-1">
+          <button
+            onClick={() => setPanelOculto(true)}
+            className="hidden lg:flex w-full items-center gap-3 px-4 py-3 rounded-lg font-display text-sm font-semibold text-gray-300 hover:text-lime-400 hover:bg-navy-700 transition-colors"
+            title="Esconde esta columna para transmitir la pantalla limpia"
+          >
+            <EyeOff size={18} /> Ocultar panel
+          </button>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg font-display text-sm font-semibold text-gray-300 hover:text-red-400 hover:bg-navy-700 transition-colors"
@@ -3329,6 +3341,17 @@ function AdminPage() {
           </button>
         </div>
       </aside>
+
+      {/* Botón flotante para volver del modo transmisión (discreto, abajo a la izquierda) */}
+      {panelOculto && (
+        <button
+          onClick={() => setPanelOculto(false)}
+          className="hidden lg:flex fixed bottom-4 left-4 z-40 items-center gap-2 bg-navy-800/80 hover:bg-navy-700 text-gray-300 hover:text-lime-400 text-xs font-display font-semibold px-3 py-2 rounded-full shadow-lg transition-colors"
+          title="Mostrar el panel del admin"
+        >
+          <Eye size={14} /> Panel
+        </button>
+      )}
 
       {/* Main content */}
       <div className="flex-1 bg-gray-50 p-4 md:p-8">
