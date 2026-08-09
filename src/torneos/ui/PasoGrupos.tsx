@@ -88,7 +88,8 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
     }
     actualizar((t) => ({
       ...t,
-      partidosGrupo: generarPartidosGrupos(t.grupos),
+      // el flag vive en el torneo: si se rearma el fixture (acá o volviendo de otro paso) se re-aplica
+      partidosGrupo: generarPartidosGrupos(t.grupos, { idaYVuelta: t.idaYVuelta }),
       configLlave: null,
       partidosLlave: null,
       fase: 'faseGrupos',
@@ -114,6 +115,17 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
           </label>
           <button className="boton" onClick={sortear}>🎲 Sortear grupos</button>
         </div>
+        <label style={{ display: 'block', marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={torneo.idaYVuelta ?? false}
+            onChange={(e) => {
+              const marcado = e.target.checked;
+              actualizar((t) => ({ ...t, idaYVuelta: marcado }));
+            }}
+          />{' '}
+          Ida y vuelta (doble rueda): cada cruce se juega dos veces
+        </label>
         {opciones.length === 0 && <div className="aviso">Con {cantParejas} parejas no se puede armar ningún grupo válido (mínimo 3).</div>}
         {opciones.length > 0 && !opciones.includes(cantidadActual) && (
           <div className="aviso">
