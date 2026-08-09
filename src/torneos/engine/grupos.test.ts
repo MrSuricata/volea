@@ -64,4 +64,23 @@ describe('generarPartidosGrupos', () => {
     expect(new Set(partidos.map((p) => p.id)).size).toBe(9);
     expect(partidos.every((p) => p.puntosA === null && p.puntosB === null)).toBe(true);
   });
+
+  it('con idaYVuelta genera doble rueda en cada grupo', () => {
+    const grupos = [
+      { id: 'g1', nombre: 'A', parejaIds: ['a', 'b', 'c', 'd'] },
+      { id: 'g2', nombre: 'B', parejaIds: ['e', 'f', 'g'] },
+    ];
+    const partidos = generarPartidosGrupos(grupos, { idaYVuelta: true });
+    const deG1 = partidos.filter((p) => p.grupoId === 'g1');
+    const deG2 = partidos.filter((p) => p.grupoId === 'g2');
+    expect(deG1).toHaveLength(12); // 6 ida + 6 vuelta
+    expect(deG2).toHaveLength(6); // 3 ida + 3 vuelta
+    expect(Math.max(...deG1.map((p) => p.ronda))).toBe(6);
+    expect(new Set(partidos.map((p) => p.id)).size).toBe(18);
+    // cada par del grupo A se juega exactamente 2 veces
+    const claves = deG1.map((p) => [p.aId, p.bId].sort().join('-'));
+    for (const clave of new Set(claves)) {
+      expect(claves.filter((c) => c === clave)).toHaveLength(2);
+    }
+  });
 });

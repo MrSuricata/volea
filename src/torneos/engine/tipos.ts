@@ -48,6 +48,7 @@ export type Torneo = {
   fase: Fase;
   parejas: Pareja[];
   grupos: Grupo[];
+  idaYVuelta?: boolean; // fase de grupos a doble rueda (ida y vuelta); ausente ⇒ una sola rueda (compat con torneos guardados)
   partidosGrupo: PartidoGrupo[];
   configLlave: ConfigLlave | null;
   partidosLlave: PartidoLlave[] | null;

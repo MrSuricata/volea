@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG_PUNTOS_DEFAULT } from './tipos';
-import { armarLlave, cargarResultadoLlave } from './llave';
+import { armarLlave, cargarResultadoLlave, podio } from './llave';
 import type { SeedInfo } from './llave';
+import { generarPartidosGrupos } from './grupos';
+import { calcularTabla } from './tabla';
+import { calcularClasificados } from './clasificacion';
 import { escalonEnLlave, escalonDePareja, puntosDe } from './ranking';
 import type { Torneo } from './tipos';
 
@@ -84,6 +87,60 @@ describe('escalonDePareja', () => {
     expect(escalonDePareja(t, 'a')).toBe('CAMPEON'); // 2-0
     expect(escalonDePareja(t, 'b')).toBe('FINALISTA'); // 1-1, gano a c
     expect(escalonDePareja(t, 'c')).toBe('PARTICIPO');
+  });
+});
+
+// Pin completo del formato del torneo de HOY: 1 grupo de 4 a doble rueda (ida y vuelta),
+// clasifican 2 a una FINAL directa (sin semis). Posiciones 1-4: campeón y finalista salen
+// de la final; 3º y 4º salen de la tabla del grupo (mismo criterio que cualquier eliminado).
+describe('grupo único ida y vuelta + final directa: posiciones y puntos', () => {
+  it('campeón=1º, finalista=2º, 3º/4º por tabla del grupo; puntos del ranking correctos', () => {
+    const grupos = [{ id: 'g1', nombre: 'A', parejaIds: ['a', 'b', 'c', 'd'] }];
+    const partidosGrupo = generarPartidosGrupos(grupos, { idaYVuelta: true });
+    expect(partidosGrupo).toHaveLength(12);
+    // resultados: a le gana a todos; b solo pierde con a; c le gana solo a d — en ida Y vuelta
+    const orden: Record<string, number> = { a: 0, b: 1, c: 2, d: 3 };
+    const conResultados = partidosGrupo.map((p) =>
+      orden[p.aId] < orden[p.bId] ? { ...p, puntosA: 11, puntosB: 5 } : { ...p, puntosA: 5, puntosB: 11 },
+    );
+    const tabla = calcularTabla(grupos[0].parejaIds, conResultados);
+    expect(tabla.map((f) => [f.parejaId, f.posicion, f.pj, f.pg])).toEqual([
+      ['a', 1, 6, 6], ['b', 2, 6, 4], ['c', 3, 6, 2], ['d', 4, 6, 0],
+    ]);
+
+    // clasifican 2 (final directa, sin semis)
+    const clasificados = calcularClasificados(grupos, conResultados, { porGrupo: 2, mejoresExtra: 0 });
+    expect(clasificados.map((c) => c.parejaId)).toEqual(['a', 'b']);
+    let llave = armarLlave(clasificados.map((c) => ({ parejaId: c.parejaId, grupoId: c.grupoId })), false);
+    expect(llave).toHaveLength(1); // la final, nada más
+    llave = cargarResultadoLlave(llave, llave[0].id, 9, 11).partidos; // batacazo: gana b
+
+    expect(podio(llave)).toEqual({ campeon: 'b', subcampeon: 'a', tercero: null });
+
+    const t = torneoBase({
+      categoria: 'A',
+      grupos,
+      partidosGrupo: conResultados,
+      partidosLlave: llave,
+      parejas: [
+        { id: 'a', nombre: 'A', jugadorIds: ['jA'] },
+        { id: 'b', nombre: 'B', jugadorIds: ['jB'] },
+        { id: 'c', nombre: 'C', jugadorIds: ['jC'] },
+        { id: 'd', nombre: 'D', jugadorIds: ['jD'] },
+      ],
+    });
+    expect(escalonDePareja(t, 'b')).toBe('CAMPEON');
+    expect(escalonDePareja(t, 'a')).toBe('FINALISTA');
+    expect(escalonDePareja(t, 'c')).toBe('PARTICIPO'); // 3º: eliminado en grupos, como siempre
+    expect(escalonDePareja(t, 'd')).toBe('PARTICIPO'); // 4º: ídem
+
+    const jugadores: Jugador[] = ['jA', 'jB', 'jC', 'jD'].map((id) => ({ id, nombre: id }));
+    const ranking = calcularRanking([t], jugadores, cfg);
+    const fila = (id: string) => ranking.find((f) => f.jugadorId === id)!;
+    expect(fila('jB').puntos).toBe(100); // campeón A
+    expect(fila('jA').puntos).toBe(86); // finalista A
+    expect(fila('jC').puntos).toBe(40); // participó
+    expect(fila('jD').puntos).toBe(40);
   });
 });
 

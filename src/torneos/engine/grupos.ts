@@ -1,4 +1,5 @@
 import { generarFixture } from './fixture';
+import type { OpcionesFixture } from './fixture';
 import type { Grupo, PartidoGrupo } from './tipos';
 import { nuevoId } from './tipos';
 import { mezclar } from './rng';
@@ -37,10 +38,10 @@ export function repartirEnGrupos(parejaIds: string[], cantidad: number, rng: () 
   return grupos;
 }
 
-export function generarPartidosGrupos(grupos: Grupo[]): PartidoGrupo[] {
+export function generarPartidosGrupos(grupos: Grupo[], opciones?: OpcionesFixture): PartidoGrupo[] {
   const partidos: PartidoGrupo[] = [];
   for (const g of grupos) {
-    for (const p of generarFixture(g.parejaIds)) {
+    for (const p of generarFixture(g.parejaIds, opciones)) {
       partidos.push({
         id: nuevoId(), grupoId: g.id, ronda: p.ronda,
         aId: p.aId, bId: p.bId, puntosA: null, puntosB: null,

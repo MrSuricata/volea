@@ -63,3 +63,80 @@ describe('generarFixture', () => {
     expect(generarFixture(['a', 'b'])).toEqual([{ ronda: 1, aId: 'a', bId: 'b' }]);
   });
 });
+
+describe('generarFixture ida y vuelta', () => {
+  // Agrupa los partidos por par (sin importar el lado) para comparar ida vs vuelta.
+  function porPar(partidos: { ronda: number; aId: string; bId: string }[]) {
+    const mapa = new Map<string, { ronda: number; aId: string; bId: string }[]>();
+    for (const p of partidos) {
+      const clave = [p.aId, p.bId].sort().join('-');
+      if (!mapa.has(clave)) mapa.set(clave, []);
+      mapa.get(clave)!.push(p);
+    }
+    return mapa;
+  }
+
+  it('sin opciones el fixture es EXACTAMENTE el de siempre (pin de regresión)', () => {
+    const ids = ['p1', 'p2', 'p3', 'p4'];
+    const esperado = [
+      { ronda: 1, aId: 'p1', bId: 'p4' },
+      { ronda: 1, aId: 'p2', bId: 'p3' },
+      { ronda: 2, aId: 'p1', bId: 'p3' },
+      { ronda: 2, aId: 'p4', bId: 'p2' },
+      { ronda: 3, aId: 'p1', bId: 'p2' },
+      { ronda: 3, aId: 'p3', bId: 'p4' },
+    ];
+    expect(generarFixture(ids)).toEqual(esperado);
+    expect(generarFixture(ids, {})).toEqual(esperado);
+    expect(generarFixture(ids, { idaYVuelta: false })).toEqual(esperado);
+  });
+
+  it('4 parejas: 6 rondas, 12 partidos, cada par juega 2 veces con los lados invertidos', () => {
+    const ids = ['p1', 'p2', 'p3', 'p4'];
+    const partidos = generarFixture(ids, { idaYVuelta: true });
+    expect(partidos).toHaveLength(12);
+    const rondas = [...new Set(partidos.map((p) => p.ronda))].sort((a, b) => a - b);
+    expect(rondas).toEqual([1, 2, 3, 4, 5, 6]);
+    for (const r of rondas) {
+      const deRonda = partidos.filter((p) => p.ronda === r);
+      expect(deRonda).toHaveLength(2);
+      expect(new Set(deRonda.flatMap((p) => [p.aId, p.bId])).size).toBe(4); // nadie juega 2 veces en la ronda
+    }
+    const pares = porPar(partidos);
+    expect(pares.size).toBe(6);
+    for (const [, [ida, vuelta]] of pares) {
+      expect(vuelta.ronda).toBe(ida.ronda + 3); // misma ronda, corrida una rueda
+      expect(vuelta.aId).toBe(ida.bId); // lados invertidos
+      expect(vuelta.bId).toBe(ida.aId);
+    }
+    // la vuelta conserva el orden de emparejamiento de la ida
+    const ida = generarFixture(ids);
+    expect(partidos.slice(0, 6)).toEqual(ida);
+    expect(partidos.slice(6)).toEqual(ida.map((p) => ({ ronda: p.ronda + 3, aId: p.bId, bId: p.aId })));
+  });
+
+  it('2 parejas: partido de ida y partido de vuelta', () => {
+    expect(generarFixture(['a', 'b'], { idaYVuelta: true })).toEqual([
+      { ronda: 1, aId: 'a', bId: 'b' },
+      { ronda: 2, aId: 'b', bId: 'a' },
+    ]);
+  });
+
+  it('3 parejas (impar, con libre): 6 rondas, cada par juega 2 veces, cada pareja libre 2 veces', () => {
+    const ids = ['a', 'b', 'c'];
+    const partidos = generarFixture(ids, { idaYVuelta: true });
+    expect(partidos).toHaveLength(6);
+    const rondas = [...new Set(partidos.map((p) => p.ronda))].sort((a, b) => a - b);
+    expect(rondas).toEqual([1, 2, 3, 4, 5, 6]); // 3 por rueda
+    const pares = porPar(partidos);
+    expect(pares.size).toBe(3);
+    for (const [, [ida, vuelta]] of pares) {
+      expect(vuelta.ronda).toBe(ida.ronda + 3);
+      expect(vuelta.aId).toBe(ida.bId);
+      expect(vuelta.bId).toBe(ida.aId);
+    }
+    for (const id of ids) {
+      expect(partidos.filter((p) => p.aId === id || p.bId === id)).toHaveLength(4); // juega 4 de 6 rondas
+    }
+  });
+});

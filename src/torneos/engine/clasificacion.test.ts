@@ -64,6 +64,15 @@ describe('opcionesClasificacion', () => {
     expect(opcionesClasificacion(cinco)[0]).toMatchObject({ porGrupo: 1, mejoresExtra: 3, total: 8, tamanoLlave: 8, byes: 0 });
   });
 
+  it('1 grupo de 4: la recomendada es final directa entre los 2 primeros', () => {
+    const unico = [grupo('g1', 'A', ['a1', 'a2', 'a3', 'a4'])];
+    const opciones = opcionesClasificacion(unico);
+    expect(opciones[0]).toMatchObject({ porGrupo: 2, mejoresExtra: 0, total: 2, tamanoLlave: 2, byes: 0 });
+    expect(opciones[0].descripcion).toContain('final directa');
+    // con 1 solo grupo no hay "mejores extra" de ningún puesto
+    expect(opciones.every((o) => o.mejoresExtra === 0)).toBe(true);
+  });
+
   it('mejoresExtra nunca llega a la cantidad de grupos y porGrupo respeta el grupo más chico', () => {
     const conChico = [grupo('g1', 'A', ['a1', 'a2', 'a3', 'a4']), grupo('g2', 'B', ['b1', 'b2', 'b3'])];
     const opciones = opcionesClasificacion(conChico);
