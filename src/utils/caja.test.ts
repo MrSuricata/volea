@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatVariant, stockTotal, variantesConStock } from './caja';
+import { formatVariant, stockTotal, variantesConStock, ventaRapidaAcumulada } from './caja';
 
 describe('formatVariant', () => {
   it('separa talle y color con " · "', () => {
@@ -45,5 +45,19 @@ describe('stockTotal', () => {
   it('sin datos → 0', () => {
     expect(stockTotal(undefined)).toBe(0);
     expect(stockTotal({})).toBe(0);
+  });
+});
+
+describe('ventaRapidaAcumulada', () => {
+  const empanada = { emoji: '🥟', nombre: 'Empanada', precio: 100 };
+  it('un toque: nombre pelado y precio unitario', () => {
+    expect(ventaRapidaAcumulada(empanada, 1)).toEqual({ nombre: 'Empanada', monto: 100 });
+  });
+  it('toques repetidos acumulan cantidad y monto', () => {
+    expect(ventaRapidaAcumulada(empanada, 3)).toEqual({ nombre: '3× Empanada', monto: 300 });
+  });
+  it('valores raros se clampan a 1', () => {
+    expect(ventaRapidaAcumulada(empanada, 0)).toEqual({ nombre: 'Empanada', monto: 100 });
+    expect(ventaRapidaAcumulada(empanada, -2)).toEqual({ nombre: 'Empanada', monto: 100 });
   });
 });

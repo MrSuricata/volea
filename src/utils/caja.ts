@@ -34,3 +34,31 @@ export function variantesConStock(stockBySize: Record<string, number> | undefine
 export function stockTotal(stockBySize: Record<string, number> | undefined): number {
   return variantesConStock(stockBySize).reduce((sum, v) => sum + v.stock, 0);
 }
+
+// ── Ventas rápidas de ítems sueltos ──
+// Lista curada de lo que VOLEA vende suelto de verdad, sacada del historial real
+// de bot_ledger (2026-08-09: powerade/empanadas/alfajor los más vendidos) con el
+// último precio conocido de cada uno. El precio es solo el default del botón:
+// en el modal queda editable. Para agregar o cambiar precios, editar acá.
+export interface VentaRapida { emoji: string; nombre: string; precio: number; }
+export const VENTAS_RAPIDAS: VentaRapida[] = [
+  { emoji: '🥟', nombre: 'Empanada', precio: 100 },
+  { emoji: '🥤', nombre: 'Powerade', precio: 80 },
+  { emoji: '🧁', nombre: 'Alfajor', precio: 120 },
+  { emoji: '🥤', nombre: 'Coca', precio: 90 },
+  { emoji: '☕', nombre: 'Café', precio: 80 },
+  { emoji: '☕', nombre: 'Capuchino', precio: 120 },
+  { emoji: '💧', nombre: 'Agua', precio: 80 },
+  { emoji: '🍺', nombre: 'Cerveza', precio: 240 },
+  { emoji: '🍪', nombre: 'Cookie', precio: 100 },
+  { emoji: '🍫', nombre: 'Barrita', precio: 100 },
+  { emoji: '🥧', nombre: 'Pastafrola', precio: 80 },
+  { emoji: '🍕', nombre: 'Pizza', precio: 100 },
+];
+
+// Toques repetidos del mismo botón suman cantidad: arma el nombre y el monto
+// del ítem suelto ("3× Empanada", 300). Puro para poder testearlo.
+export function ventaRapidaAcumulada(v: VentaRapida, veces: number): { nombre: string; monto: number } {
+  const n = Math.max(1, Math.floor(veces));
+  return { nombre: n === 1 ? v.nombre : `${n}× ${v.nombre}`, monto: v.precio * n };
+}

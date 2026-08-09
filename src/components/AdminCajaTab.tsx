@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import type { LedgerEntry, Product, SocioMove, VentaCajaInput } from '../types';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
-import { formatVariant, stockTotal, variantesConStock } from '../utils/caja';
+import { formatVariant, stockTotal, variantesConStock, VENTAS_RAPIDAS, ventaRapidaAcumulada } from '../utils/caja';
+import type { VentaRapida } from '../utils/caja';
 
 const TZ = 'America/Montevideo';
 
@@ -551,6 +552,17 @@ function VentaModal({ products, registrar, onClose, onDone }: {
   const [precioTocado, setPrecioTocado] = useState(false);
   const [nombreSuelto, setNombreSuelto] = useState('');
   const [montoSuelto, setMontoSuelto] = useState('');
+  // Botonera de ventas rápidas: tocar un botón precarga nombre y monto; tocar el
+  // MISMO botón otra vez suma cantidad ("2× Empanada", monto ×2). Editar los
+  // campos a mano corta la acumulación (rapidaSel se limpia en los onChange).
+  const [rapidaSel, setRapidaSel] = useState<{ nombre: string; veces: number } | null>(null);
+  const tocarRapida = (v: VentaRapida) => {
+    const veces = rapidaSel?.nombre === v.nombre ? rapidaSel.veces + 1 : 1;
+    setRapidaSel({ nombre: v.nombre, veces });
+    const r = ventaRapidaAcumulada(v, veces);
+    setNombreSuelto(r.nombre);
+    setMontoSuelto(String(r.monto));
+  };
   const [metodo, setMetodo] = useState<VentaCajaInput['payment'] | null>(null);
   const [deudor, setDeudor] = useState('');
   const [registrando, setRegistrando] = useState(false);
@@ -791,15 +803,41 @@ function VentaModal({ products, registrar, onClose, onDone }: {
           ) : (
             /* Ítem suelto: no toca stock */
             <div className="space-y-3">
+              {/* Lo que más se vende suelto (lista real del ledger), a un toque.
+                  Tocar de nuevo el mismo botón suma cantidad. */}
+              <div>
+                <span className={labelClass}>Lo de siempre</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {VENTAS_RAPIDAS.map(v => {
+                    const activo = rapidaSel?.nombre === v.nombre;
+                    return (
+                      <button
+                        key={v.nombre}
+                        type="button"
+                        onClick={() => tocarRapida(v)}
+                        className={`rounded-xl border px-2 py-2.5 text-center transition-colors ${
+                          activo ? 'border-lime-400 bg-lime-50' : 'border-gray-200 bg-white hover:border-lime-400'
+                        }`}
+                        aria-label={`${v.nombre} $${v.precio}${activo ? `, ${rapidaSel!.veces} en el carrito` : ''}`}
+                      >
+                        <span className="block text-xl leading-none">{v.emoji}</span>
+                        <span className="block text-xs font-bold text-navy-700 mt-1 truncate">
+                          {activo && rapidaSel!.veces > 1 ? `${rapidaSel!.veces}× ` : ''}{v.nombre}
+                        </span>
+                        <span className="block text-[11px] text-gray-400">${v.precio}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div>
                 <label htmlFor="venta-suelto-nombre" className={labelClass}>¿Qué se vendió?</label>
                 <input
                   id="venta-suelto-nombre"
                   type="text"
                   value={nombreSuelto}
-                  onChange={e => setNombreSuelto(e.target.value)}
+                  onChange={e => { setNombreSuelto(e.target.value); setRapidaSel(null); }}
                   placeholder="Ej: alquiler de paleta"
-                  autoFocus
                   className={inputClass}
                 />
               </div>
@@ -811,7 +849,7 @@ function VentaModal({ products, registrar, onClose, onDone }: {
                   inputMode="numeric"
                   min={1}
                   value={montoSuelto}
-                  onChange={e => setMontoSuelto(e.target.value)}
+                  onChange={e => { setMontoSuelto(e.target.value); setRapidaSel(null); }}
                   className={inputClass}
                 />
               </div>
