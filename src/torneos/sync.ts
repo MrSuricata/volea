@@ -12,6 +12,23 @@ import type { Torneo } from './engine/tipos';
 export type EntradaRemota = { torneo: Torneo; updatedAt: string };
 export type ResultadoMerge = { torneos: Torneo[]; base: Record<string, string>; conflictos: string[] };
 
+// Compara dos marcas de tiempo por INSTANTE, no por texto.
+// PROPÓSITO (incidente 2026-08-09/10): la base se guarda con el toISOString() del
+// cliente ("2026-08-09T17:44:19.957Z") mientras que PostgREST devuelve el MISMO
+// instante como "2026-08-09T17:44:19.957+00:00" (la columna es timestamptz y
+// Postgres nunca emite "Z"). Comparando como texto, un torneo recién subido y
+// vuelto a editar quedaba en CONFLICTO FALSO para siempre; y un torneo en
+// conflicto se excluye del push (useSyncTorneos), así que sus resultados no
+// volvían a subir nunca y la web pública los mostraba "sin jugar" — sin ningún
+// aviso. Fechas ausentes o ilegibles devuelven false: base desconocida sigue
+// siendo conflicto, que es el lado seguro (avisar de más antes que pisar).
+function mismoInstante(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
+}
+
 export function mergeTorneos(args: {
   locales: Torneo[];
   remotos: EntradaRemota[];
@@ -42,7 +59,7 @@ export function mergeTorneos(args: {
     // sucio: si la base conocida no coincide con el server (incluida una base
     // desconocida, que nunca coincide) es CONFLICTO; de lo contrario el server
     // no avanzo desde la ultima vez que sincronizamos y el local sigue pendiente.
-    if (base[local.id] !== rem.updatedAt) {
+    if (!mismoInstante(base[local.id], rem.updatedAt)) {
       // CONFLICTO: la base NO avanza al updatedAt del server. Si adoptaramos
       // rem.updatedAt aca, el proximo pull (con el mismo server y el mismo local
       // sin resolver) dejaria de detectar el conflicto - se "autoresolveria" en

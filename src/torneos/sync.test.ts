@@ -100,6 +100,46 @@ describe('mergeTorneos', () => {
     expect(r.base.t1).toBeUndefined(); // base desconocida: sigue ausente, no se adopta la del server
   });
 
+  // REGRESION (incidente 2026-08-09/10): la base se guarda con el toISOString() del
+  // cliente ("...957Z") pero PostgREST devuelve el MISMO instante como "...957+00:00".
+  // Comparando como texto eso daba CONFLICTO FALSO para siempre, y un torneo en
+  // conflicto queda excluido del push => los resultados del torneo del 9/8 nunca
+  // subieron y la web publica los mostraba "sin jugar". Se compara por INSTANTE.
+  it('misma fecha en distinto formato (Z vs +00:00) NO es conflicto', () => {
+    const r = mergeTorneos({
+      locales: [t('t1', 'Editado local')],
+      remotos: [remoto(t('t1', 'Base server'), '2026-08-09T17:44:19.957+00:00')],
+      sucios: new Set(['t1']),
+      borrados: new Set(),
+      base: { t1: '2026-08-09T17:44:19.957Z' },
+    });
+    expect(r.conflictos).toEqual([]);
+    expect(r.torneos[0].nombre).toBe('Editado local'); // sigue pendiente de push
+    expect(r.base.t1).toBe('2026-08-09T17:44:19.957+00:00'); // se adopta el formato del server
+  });
+
+  it('fechas distintas en distinto formato SIGUEN siendo conflicto', () => {
+    const r = mergeTorneos({
+      locales: [t('t1', 'Editado local')],
+      remotos: [remoto(t('t1', 'Otro admin'), '2026-08-09T18:00:00.000+00:00')],
+      sucios: new Set(['t1']),
+      borrados: new Set(),
+      base: { t1: '2026-08-09T17:44:19.957Z' },
+    });
+    expect(r.conflictos).toEqual(['t1']);
+  });
+
+  it('base con fecha ilegible: conflicto (no se asume que partimos del mismo punto)', () => {
+    const r = mergeTorneos({
+      locales: [t('t1', 'Editado local')],
+      remotos: [remoto(t('t1', 'Server'), '2026-08-09T17:44:19.957+00:00')],
+      sucios: new Set(['t1']),
+      borrados: new Set(),
+      base: { t1: 'cualquier-cosa' },
+    });
+    expect(r.conflictos).toEqual(['t1']);
+  });
+
   it('conflicto con base desconocida persiste en pulls sucesivos (no se autoresuelve)', () => {
     const args = {
       locales: [t('t1', 'Editado local sin base')],

@@ -7,7 +7,11 @@ import { mergeTorneos } from './sync';
 import { CLAVE_CACHE } from './cacheTorneos';
 import type { Cache } from './cacheTorneos';
 
-export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion';
+// 'conflicto' = hay cambios locales sin subir y TODOS están frenados esperando que
+// alguien resuelva el banner. Sin este estado la UI decía "⏳ Sincronizando…" para
+// siempre (push() se saltea los ids en conflicto y vuelve sin marcar error), que fue
+// exactamente lo que hizo invisible la pérdida de los resultados del 9/8.
+export type EstadoSync = 'sincronizado' | 'pendiente' | 'sinConexion' | 'conflicto';
 
 // Techo para CADA llamada de red del sync: con la sesión vencida y el refresh
 // colgado (la conexión trabada de la PC del trabajo), un upsert podía esperar
@@ -121,8 +125,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     conflictosRef.current = new Set(cache.conflictos);
 
     const hayAlgoSucio = cache.sucios.length > 0 || cache.borrados.length > 0 || cache.jugadoresSucios || cache.configSucia;
+    // Si lo único que queda pendiente está frenado por un conflicto sin resolver, el
+    // push no lo va a subir NUNCA (se saltea esos ids): decirlo en vez de mostrar
+    // "Sincronizando…" eternamente, que hace creer que ya está subiendo solo.
+    const conflictoSet = new Set(cache.conflictos);
+    const quedaAlgoSubible =
+      cache.sucios.some((id) => !conflictoSet.has(id)) ||
+      cache.borrados.length > 0 || cache.jugadoresSucios || cache.configSucia;
     if (!hayAlgoSucio) {
       setEstadoSync('sincronizado');
+    } else if (!quedaAlgoSubible && cache.conflictos.length > 0) {
+      setEstadoSync('conflicto');
     } else {
       setEstadoSync(ultimoPushFallo.current ? 'sinConexion' : 'pendiente');
     }

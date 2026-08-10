@@ -7,6 +7,7 @@ const ETIQUETA_SYNC: Record<EstadoSync, { texto: string; clase: string }> = {
   sincronizado: { texto: '✓ Sincronizado', clase: 'text-lime-500' },
   pendiente: { texto: '⏳ Sincronizando…', clase: 'text-amber-600' },
   sinConexion: { texto: '⚠ Sin conexión — trabajando local', clase: 'text-red-600' },
+  conflicto: { texto: '⚠ Cambios SIN SUBIR — resolvé el aviso de abajo', clase: 'text-red-600' },
 };
 
 export function AdminTorneosTab({ avisar }: { avisar: (mensaje: string) => void }) {
