@@ -474,7 +474,9 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0" onClick={() => reverting === null && setAAnular(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="font-display text-lg font-bold text-navy-700 mb-2">¿Anular este movimiento?</h3>
+            <h3 className="font-display text-lg font-bold text-navy-700 mb-2">
+              {aAnular.kind === 'gasto' ? '¿Anular este gasto?' : '¿Anular esta venta?'}
+            </h3>
             <p className="truncate text-sm font-semibold text-navy-700">
               {aAnular.label}{aAnular.qty > 1 ? ` ×${aAnular.qty}` : ''} · {formatMoney(aAnular.amount)}
             </p>

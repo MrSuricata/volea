@@ -279,9 +279,10 @@ export const SupabaseService = {
     }));
   },
 
-  /** Anula un movimiento de la Caja; si era una venta de catálogo, repone stock. */
+  /** Anula un movimiento de la Caja (venta o gasto); si era una venta de catálogo, repone stock. */
   async revertLedgerEntry(id: string): Promise<{ ok: boolean; stockRestored: boolean; error?: string }> {
-    if (!supabase || !isSupabaseConnected()) {
+    // Sin isSupabaseConnected(): misma regla que registrarVentaCaja (fix 2026-07-18).
+    if (!supabase) {
       return { ok: false, stockRestored: false, error: 'Sin conexión con Supabase' };
     }
     const { data, error } = await conTechoEscritura(supabase.rpc('admin_revert_ledger', { p_id: id }));

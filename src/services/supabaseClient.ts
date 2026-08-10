@@ -45,8 +45,37 @@ function stripHashError(): void {
 const _pendingMagicLink = rescueHashTokens();
 stripHashError();
 
+// ── Fetch con techo duro (aborta de verdad) ─────────────────────────────────
+// PROPÓSITO: un fetch que nunca responde (socket zombie de la red/proxy) dentro
+// del refresh de token de supabase-js deja tomado el navigator lock de auth
+// PARA SIEMPRE: toda consulta posterior espera ese lock sin salir a la red y la
+// app queda "pensando" hasta un F5 (recargar libera los locks). Visto el
+// 2026-08-10 en la Caja: lock:sb-…-auth-token retenido y cero requests nuevas.
+// Los techos de supabaseService resuelven la promesa de la UI pero no liberan
+// el lock (el refresh corre por dentro de auth-js, fuera de nuestro alcance).
+// Acá se corta el fetch en sí: auth cortito (suelta el lock rápido), storage
+// largo (subidas de fotos pesadas), resto intermedio como red de seguridad.
+function techoFetchMs(url: string): number {
+  if (url.includes('/auth/v1/')) return 15_000;
+  if (url.includes('/storage/v1/')) return 180_000;
+  return 60_000;
+}
+
+const fetchConTecho: typeof fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException('timeout: Supabase no respondió', 'TimeoutError')), techoFetchMs(url));
+  // Respetar la señal del que llama (los techos por consulta de supabaseService).
+  const propia = init?.signal;
+  if (propia) {
+    if (propia.aborted) ctrl.abort(propia.reason);
+    else propia.addEventListener('abort', () => ctrl.abort(propia.reason), { once: true });
+  }
+  return fetch(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+};
+
 export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, { global: { fetch: fetchConTecho } })
   : null;
 
 // Probe reachability once at startup so the rest of the app can fall back to
