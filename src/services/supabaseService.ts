@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove, VentaCajaInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -276,6 +276,7 @@ export const SupabaseService = {
       settledAt: row.settled_at ?? null,
       settledMethod: row.settled_method ?? null,
       socioSettledAt: row.socio_settled_at ?? null,
+      paidBy: row.paid_by ?? null,
     }));
   },
 
@@ -353,8 +354,18 @@ export const SupabaseService = {
     };
   },
 
-  /** Registra un gasto desde la Caja web (fila 'gasto' en bot_ledger, sin stock ni método). */
-  async registrarGastoCaja(label: string, amount: number, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * Registra un gasto desde la Caja web (fila 'gasto' en bot_ledger, sin stock ni método).
+   * `paidBy` = de qué socio salió la plata, para el reparto 50/25/25. Va aparte de
+   * `reportedBy` (quién lo cargó): con la cuenta compartida "VOLEA Team" los dos no
+   * son la misma persona, y antes se adivinaba mal.
+   */
+  // paidBy es OBLIGATORIO a propósito: con un default a null, un llamador futuro que
+  // se olvide del argumento compila en silencio y graba un gasto sin atribuir — que
+  // es exactamente el bug que este cambio vino a cerrar.
+  async registrarGastoCaja(
+    label: string, amount: number, reportedBy: string, paidBy: SocioName,
+  ): Promise<{ ok: boolean; error?: string }> {
     // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
     if (!supabase) {
       return { ok: false, error: 'Sin conexión con Supabase' };
@@ -363,6 +374,7 @@ export const SupabaseService = {
       p_label: label,
       p_amount: amount,
       p_reported_by: reportedBy,
+      p_paid_by: paidBy,
     }));
     if (error) {
       console.error('Error registrando gasto:', error);

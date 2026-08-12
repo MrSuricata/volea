@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, Product, SocioMove, VentaCajaInput } from '../types';
+import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput } from '../types';
+import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
 import { formatVariant, stockTotal, variantesConStock, VENTAS_RAPIDAS, ventaRapidaAcumulada } from '../utils/caja';
@@ -63,14 +64,16 @@ const METODOS_VENTA: { id: VentaCajaInput['payment']; label: string; activo: str
   { id: 'debe', label: 'Debe', activo: 'border-amber-300 bg-amber-50 text-amber-700' },
 ];
 
-export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, cobrarDeudor }: {
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, socioSugerido, cobrarDeudor }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
   products: Product[];
   registrarVenta: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
-  registrarGasto: (label: string, amount: number) => Promise<{ ok: boolean; error?: string }>;
+  registrarGasto: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  /** Socio deducido del admin logueado; null con la cuenta compartida. */
+  socioSugerido: SocioName | null;
   cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
@@ -438,6 +441,11 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                         {entry.reverted && (
                           <span className={`${badgeClass} bg-gray-100 text-gray-500`}>Anulada</span>
                         )}
+                        {entry.kind === 'gasto' && entry.paidBy && (
+                          <span className={`${badgeClass} bg-navy-50 text-navy-700`}>
+                            pagó {NOMBRES_SOCIOS[entry.paidBy]}
+                          </span>
+                        )}
                         <span>por {entry.reportedBy}</span>
                       </div>
                     </div>
@@ -519,6 +527,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
       {gastoAbierto && (
         <GastoModal
           registrar={registrarGasto}
+          socioSugerido={socioSugerido}
           onClose={() => setGastoAbierto(false)}
           onDone={() => { setGastoAbierto(false); refresh(); }}
         />
@@ -1045,23 +1054,28 @@ function VentaModal({ products, registrar, onClose, onDone }: {
 }
 
 /** Gasto rápido: descripción + monto (sin stock ni método de pago). */
-function GastoModal({ registrar, onClose, onDone }: {
-  registrar: (label: string, amount: number) => Promise<{ ok: boolean; error?: string }>;
+function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
+  registrar: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  /** Socio deducido del admin logueado; null con la cuenta compartida ("VOLEA Team"). */
+  socioSugerido: SocioName | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const [descripcion, setDescripcion] = useState('');
   const [monto, setMonto] = useState('');
+  // Si no se puede deducir de la sesión, se elige a mano: sin esto el gasto se le
+  // asentaba a Gastón por descarte y el reparto 50/25/25 salía mal.
+  const [pagador, setPagador] = useState<SocioName | null>(socioSugerido);
   const [registrando, setRegistrando] = useState(false);
 
   const montoNum = Number(monto);
-  const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0;
+  const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0 && pagador !== null;
 
   const handleRegistrar = async () => {
-    if (!listo || registrando) return;
+    if (!listo || registrando || !pagador) return;
     setRegistrando(true);
     try {
-      const result = await registrar(descripcion.trim(), montoNum);
+      const result = await registrar(descripcion.trim(), montoNum, pagador);
       if (!result.ok) {
         toast.error(result.error || 'No se pudo registrar el gasto');
         return;
@@ -1080,11 +1094,13 @@ function GastoModal({ registrar, onClose, onDone }: {
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0" onClick={() => !registrando && onClose()} />
+      {/* max-h + scroll como VentaModal: el modal creció con los botones de socio y en el
+          celular, con el teclado abierto, el submit quedaba abajo del fold. */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Registrar gasto"
-        className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold text-navy-700">Gasto</h3>
@@ -1122,13 +1138,38 @@ function GastoModal({ registrar, onClose, onDone }: {
               className={inputClass}
             />
           </div>
+          <div>
+            <span className={labelClass}>¿Quién puso la plata?</span>
+            <div className="grid grid-cols-3 gap-2">
+              {SOCIOS.map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setPagador(s)}
+                  aria-pressed={pagador === s}
+                  className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
+                    pagador === s
+                      ? 'border-navy-700 bg-navy-700 text-white'
+                      : 'border-gray-200 text-navy-700 hover:border-navy-700'
+                  }`}
+                >
+                  {NOMBRES_SOCIOS[s]}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-gray-400">
+              {pagador === null
+                ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
+                : `El gasto se le asienta a ${NOMBRES_SOCIOS[pagador]} y se reparte 50/25/25.`}
+            </p>
+          </div>
         </div>
         <button
           onClick={handleRegistrar}
           disabled={!listo || registrando}
           className="mt-5 w-full rounded-lg bg-red-500 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-gray-200 disabled:text-gray-400"
         >
-          {registrando ? 'Registrando…' : 'Registrar gasto'}
+          {registrando ? 'Registrando…' : pagador === null ? 'Elegí quién pagó' : 'Registrar gasto'}
         </button>
       </div>
     </div>

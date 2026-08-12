@@ -318,10 +318,21 @@ BEGIN
 END;
 $$;
 
+-- v9 — quién PUSO LA PLATA del gasto, para el reparto Brian 50 / Paula 25 / Gastón 25.
+-- Es distinto de reported_by (quién lo cargó): con la cuenta compartida "VOLEA Team"
+-- no son la misma persona. Antes se adivinaba al liquidar por el nombre de quien
+-- registró y todo lo no reconocido caía en Gastón. NULL = gasto del bot o histórico:
+-- ahí el modal de liquidación sigue con la heurística, marcado "pagador a confirmar".
+ALTER TABLE bot_ledger ADD COLUMN IF NOT EXISTS paid_by text;
+ALTER TABLE bot_ledger DROP CONSTRAINT IF EXISTS bot_ledger_paid_by_check;
+ALTER TABLE bot_ledger ADD CONSTRAINT bot_ledger_paid_by_check
+  CHECK (paid_by IS NULL OR paid_by IN ('brian', 'paula', 'gaston'));
+
 CREATE OR REPLACE FUNCTION public.admin_registrar_gasto(
   p_label text,
   p_amount numeric,
-  p_reported_by text
+  p_reported_by text,
+  p_paid_by text
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -330,6 +341,7 @@ AS $$
 DECLARE
   v_label text := btrim(COALESCE(p_label, ''));
   v_reported text := COALESCE(NULLIF(btrim(COALESCE(p_reported_by, '')), ''), 'Web');
+  v_paid text := NULLIF(btrim(lower(COALESCE(p_paid_by, ''))), '');
 BEGIN
   IF NOT is_admin() THEN
     RETURN jsonb_build_object('ok', false, 'error', 'solo admins');
@@ -340,13 +352,22 @@ BEGIN
   IF p_amount IS NULL OR p_amount <= 0 THEN
     RETURN jsonb_build_object('ok', false, 'error', 'monto inválido');
   END IF;
+  IF v_paid IS NOT NULL AND v_paid NOT IN ('brian', 'paula', 'gaston') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'socio inválido');
+  END IF;
 
-  INSERT INTO bot_ledger (kind, product_id, variant_key, label, qty, amount, reported_by, chat_id, payment_method, debtor_name)
-  VALUES ('gasto', NULL, NULL, v_label, 1, p_amount, v_reported, 0, NULL, NULL);
+  INSERT INTO bot_ledger (kind, product_id, variant_key, label, qty, amount, reported_by, chat_id, payment_method, debtor_name, paid_by)
+  VALUES ('gasto', NULL, NULL, v_label, 1, p_amount, v_reported, 0, NULL, NULL, v_paid);
 
   RETURN jsonb_build_object('ok', true);
 END;
 $$;
+
+-- La firma vieja de 3 args se dropea: conviviendo con la nueva, PostgREST no sabe
+-- cuál elegir y falla por ambigüedad (mismo problema que tuvo admin_cobrar_deudor).
+-- El bot de Telegram NO usa esta función (bot_do_register inserta directo en
+-- bot_ledger), así que dropearla no lo afecta.
+DROP FUNCTION IF EXISTS public.admin_registrar_gasto(text, numeric, text);
 
 -- Grants: el CREATE FUNCTION deja EXECUTE a PUBLIC (mismo gotcha residual del
 -- v6); se cierra explícito y solo queda authenticated. El admin web llama con
@@ -354,8 +375,8 @@ $$;
 -- Verificado con has_function_privilege: anon=false, authenticated=true en ambas.
 REVOKE ALL ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, text, text, integer, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_registrar_venta(text, numeric, text, text, text, text, integer, text) TO authenticated;
-REVOKE ALL ON FUNCTION public.admin_registrar_gasto(text, numeric, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.admin_registrar_gasto(text, numeric, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text, text) TO authenticated;
 
 -- ============================================
 -- v8 (2026-08-09): Cobro de deudas desde la Caja web

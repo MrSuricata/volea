@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
@@ -10,7 +10,7 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, VentaCajaInput } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, SocioName, VentaCajaInput } from './types';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -3057,9 +3057,27 @@ function AdminPage() {
     return result;
   }, [cajaReportedBy, refreshProducts]);
   const registrarGasto = useCallback(
-    (label: string, amount: number) => SupabaseService.registrarGastoCaja(label, amount, cajaReportedBy),
+    (label: string, amount: number, paidBy: SocioName) =>
+      SupabaseService.registrarGastoCaja(label, amount, cajaReportedBy, paidBy),
     [cajaReportedBy],
   );
+  // De qué socio salió la plata NO se puede deducir de la cuenta compartida
+  // ("VOLEA Team", somosvolea@gmail.com): ahí devolvemos null y la Caja obliga a
+  // elegirlo a mano. Antes se adivinaba al liquidar y todo lo no reconocido se le
+  // asentaba a Gastón, torciendo el reparto 50/25/25.
+  // Los prefijos son deliberadamente específicos: con "gast" a secas, una cuenta
+  // gastos@volea.uy o un nombre "Gastos VOLEA" quedaría mapeado a Gastón EN SILENCIO
+  // y encima marcado como confirmado en la liquidación. Ante la duda, null: que lo
+  // elija una persona.
+  const socioSugerido = useMemo<SocioName | null>(() => {
+    const campos = [(currentAdmin?.name || ''), (currentAdmin?.email || '')]
+      .map(v => v.trim().toLowerCase()).filter(Boolean);
+    const empieza = (...prefijos: string[]) => campos.some(c => prefijos.some(p => c.startsWith(p)));
+    if (empieza('brian', 'bridvanovich')) return 'brian';
+    if (empieza('paula', 'pauli')) return 'paula';
+    if (empieza('gaston', 'gastón', 'gasty')) return 'gaston';
+    return null;
+  }, [currentAdmin?.name, currentAdmin?.email]);
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -4018,6 +4036,7 @@ function AdminPage() {
                 products={products}
                 registrarVenta={registrarVenta}
                 registrarGasto={registrarGasto}
+                socioSugerido={socioSugerido}
                 cobrarDeudor={SupabaseService.cobrarDeudorCaja}
               />
             </Suspense>

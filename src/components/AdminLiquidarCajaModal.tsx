@@ -13,7 +13,13 @@ const diaMvd = (iso?: string) => {
   return isNaN(d.getTime()) ? null : d.toLocaleDateString('en-CA', { timeZone: TZ });
 };
 
-/** "Gasty" registró el gasto → la plata la puso Gastón (ajustable en el modal). */
+/**
+ * Fallback para gastos SIN pagador elegido (los del bot y los históricos): se
+ * deduce del nombre de quien lo registró. Es una adivinanza y se equivoca: todo
+ * lo que no empieza con "brian"/"paul" cae en Gastón — incluida la cuenta
+ * compartida "VOLEA Team". Por eso los gastos nuevos de la web guardan `paidBy`
+ * explícito y esta función ya no los toca. Igual queda ajustable en el modal.
+ */
 const personaASocio = (nombre: string): SocioName => {
   const n = nombre.trim().toLowerCase();
   if (n.startsWith('brian')) return 'brian';
@@ -21,8 +27,17 @@ const personaASocio = (nombre: string): SocioName => {
   return 'gaston';
 };
 
+/** Quién puso la plata: lo elegido al registrar manda; si no hay, se adivina. */
+const pagadorDe = (e: LedgerEntry): SocioName => e.paidBy ?? personaASocio(e.reportedBy || '');
+
 type VentaGroup = { key: string; label: string; ids: string[]; n: number; total: number; cobrador: SocioName; incluir: boolean };
-type GastoRow = { id: string; label: string; fecha: string | null; monto: number; persona: string; pagador: SocioName; incluir: boolean };
+type GastoRow = {
+  id: string; label: string; fecha: string | null; monto: number; persona: string;
+  pagador: SocioName;
+  /** true = lo eligió alguien al registrar; false = lo adivinamos por el nombre. */
+  elegido: boolean;
+  incluir: boolean;
+};
 
 export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, onClose, onDone }: {
   socioMoves: SocioMove[] | null;
@@ -68,7 +83,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .map(e => ({
           id: e.id, label: e.label, fecha: diaMvd(e.createdAt), monto: e.amount,
-          persona: e.reportedBy || '—', pagador: personaASocio(e.reportedBy || ''), incluir: true,
+          persona: e.reportedBy || '—', pagador: pagadorDe(e), elegido: e.paidBy !== null, incluir: true,
         }));
 
       setVentaGroups(Array.from(grupos.values()).sort((a, b) => b.total - a.total));
@@ -108,6 +123,10 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
   const totGastos = gastoRows.filter(r => r.incluir).reduce((s, r) => s + r.monto, 0);
   const nMovs = ventaGroups.filter(g => g.incluir).length + gastoRows.filter(r => r.incluir).length;
   const hayAlgo = ventaGroups.length + gastoRows.length > 0;
+  // Gastos que se van a liquidar con un pagador ADIVINADO. Se muestra el monto,
+  // no solo la cantidad: es la plata que se le puede asentar al socio equivocado.
+  const sinConfirmar = gastoRows.filter(r => r.incluir && !r.elegido);
+  const montoSinConfirmar = sinConfirmar.reduce((s, r) => s + r.monto, 0);
 
   const handleConfirm = async () => {
     if (saving || nMovs === 0) return;
@@ -212,19 +231,28 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
                         onChange={() => setGastoRows(rs => rs.map(x => x.id === r.id ? { ...x, incluir: !x.incluir } : x))} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-navy-700 truncate">{r.label}</p>
-                        <p className="text-xs text-gray-400">{r.fecha} · registró {r.persona}</p>
+                        <p className="text-xs text-gray-400">
+                          {r.fecha} · registró {r.persona}
+                          {!r.elegido && <span className="text-amber-600"> · pagador a confirmar</span>}
+                        </p>
                       </div>
                       <span className="text-sm font-bold text-red-500 whitespace-nowrap">{money(r.monto)}</span>
                       <label className="text-xs text-gray-400">pagó</label>
-                      <select value={r.pagador} className={selectCls} disabled={!r.incluir}
-                        onChange={e => setGastoRows(rs => rs.map(x => x.id === r.id ? { ...x, pagador: e.target.value as SocioName } : x))}>
+                      {/* Tocar el select CONFIRMA la fila (elegido: true): sin eso el aviso
+                          ámbar quedaba pegado para siempre y, con casi todas las filas en
+                          ámbar, dejaba de leerse. Así funciona como checklist. */}
+                      <select value={r.pagador} className={`${selectCls} ${!r.elegido ? 'border-amber-400 bg-amber-50' : ''}`} disabled={!r.incluir}
+                        onChange={e => setGastoRows(rs => rs.map(x => x.id === r.id ? { ...x, pagador: e.target.value as SocioName, elegido: true } : x))}>
                         {SOCIOS.map(s => <option key={s} value={s}>{NOMBRES_SOCIOS[s]}</option>)}
                       </select>
                     </div>
                   ))}
                 </div>
                 <p className="text-xs text-gray-400 mt-2">
-                  "Pagó" = quién puso la plata. Si un gasto salió del efectivo de la caja, dejalo a nombre de quien tenía esa caja.
+                  "Pagó" = quién puso la plata. Los gastos cargados desde la Caja web ya vienen con el
+                  pagador elegido; los que dicen <span className="text-amber-600">pagador a confirmar</span> vienen
+                  del bot o son viejos y están adivinados por el nombre — revisalos.
+                  Si un gasto salió del efectivo de la caja, dejalo a nombre de quien tenía esa caja.
                   Si algo ya está cargado en las cuentas, destildalo para no contarlo dos veces.
                 </p>
               </div>
@@ -260,6 +288,14 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
                 );
               })}
             </div>
+
+            {sinConfirmar.length > 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                ⚠ {sinConfirmar.length} gasto{sinConfirmar.length === 1 ? '' : 's'} por {money(montoSinConfirmar)} con
+                el pagador <strong>adivinado</strong> por el nombre de quien lo registró. Tocá el "pagó" de cada uno
+                para confirmarlo — si está mal, esa plata se le asienta al socio equivocado.
+              </div>
+            )}
 
             <button
               onClick={handleConfirm}

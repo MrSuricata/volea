@@ -68,6 +68,12 @@ export interface LedgerEntry {
   settledMethod: 'mp' | 'efectivo' | 'transferencia' | null;
   /** Cuándo se liquidó a las cuentas de socios (null = pendiente de liquidar). */
   socioSettledAt: string | null;
+  /**
+   * Quién PUSO LA PLATA del gasto — distinto de reportedBy (quién lo cargó).
+   * null en ventas, en gastos del bot y en los históricos: ahí el modal de
+   * liquidación sigue adivinando a partir del nombre de quien registró.
+   */
+  paidBy: SocioName | null;
 }
 
 /**
