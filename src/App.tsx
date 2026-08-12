@@ -358,7 +358,11 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         sessionStorage.removeItem('volea_admin');
         setIsAdmin(false);
       }
-    })();
+    })().catch((e) => {
+      // Sin este catch, un rechazo acá quedaba sin atender y dejaba `isAdmin` sin
+      // decidir: la pantalla no avanzaba ni al panel ni al login.
+      console.error('[arranque] no se pudo resolver el admin', e);
+    });
     const unsub = onAuthStateChange((admin) => {
       if (!mounted) return;
       setCurrentAdmin(admin);

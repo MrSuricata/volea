@@ -111,8 +111,13 @@ export async function signOut(): Promise<void> {
  */
 export async function getCurrentAdmin(): Promise<AdminUser | null> {
   if (!supabase || !isSupabaseConnected()) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  const email = session?.user?.email?.toLowerCase();
+  // getSession() NO es una lectura local: si al token le quedan menos de 90s dispara
+  // el POST de refresh y puede quedarse esperando el candado de auth. Era la única
+  // ruta de red del proyecto sin techo, y su rechazo subía sin catch hasta el
+  // arranque de App.tsx. Peor caso ahora: se resuelve como "no admin" y se muestra
+  // el login, en vez de dejar la pantalla colgada.
+  const res = await conLimite(supabase.auth.getSession().catch(() => null), 8000, null);
+  const email = res?.data?.session?.user?.email?.toLowerCase();
   if (!email) return null;
 
   const { data, error } = await supabase
@@ -146,15 +151,36 @@ export async function sesionAdminVencida(): Promise<boolean> {
  */
 export function onAuthStateChange(cb: (admin: AdminUser | null) => void): () => void {
   if (!supabase) return () => {};
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-    // Usar la sesión del evento: en SIGNED_OUT llega null y evita la carrera
-    // de re-consultar con una sesión cacheada (dejaba el panel "abierto").
-    if (!session?.user?.email) {
-      cb(null);
-      return;
-    }
-    const admin = await getCurrentAdmin();
-    cb(admin);
+  let vivo = true;
+  let generacion = 0;
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // ⚠ NUNCA hacer await ni llamar a supabase DENTRO de este callback.
+    // BLOQUEO MUTUO (causa raíz del "se traba la primera vez del día", 2026-08-12):
+    // auth-js ejecuta este callback ADENTRO de su inicialización
+    // (_recoverAndRefresh → _notifyAllSubscribers, que lo espera con Promise.all,
+    // todo dentro de _initialize), y getCurrentAdmin() → getSession() arranca con
+    // `await initializePromise`, que solo resuelve cuando este callback termina.
+    // Cada uno espera al otro: se traba PARA SIEMPRE, no es un timeout. Y como cada
+    // from()/rpc() pide el token con getSession(), el cliente entero queda muerto y
+    // NINGUNA consulta sale a la red — por eso el login moría en su techo de 15s sin
+    // que el pedido llegara nunca al servidor. Reintentar no servía: lo único que
+    // destrababa era el F5.
+    // Solo pasa en la PRIMERA carga del día: auth-js refresca el token únicamente si
+    // vence dentro de los próximos 90s, y después de recargar ya quedó fresco.
+    // El setTimeout devuelve el control a auth-js en el acto y rompe el ciclo.
+    const mio = ++generacion;
+    const email = session?.user?.email;
+    setTimeout(async () => {
+      if (!vivo || mio !== generacion) return;
+      // Sin sesión en el evento: cortar sin consultar. En SIGNED_OUT evita la
+      // carrera de re-preguntar con una sesión cacheada (dejaba el panel "abierto").
+      if (!email) { cb(null); return; }
+      const admin = await getCurrentAdmin();
+      // Llegó un evento más nuevo mientras consultábamos: no pisar su resultado.
+      // Hace falta porque al diferir ya no los serializa auth-js.
+      if (!vivo || mio !== generacion) return;
+      cb(admin);
+    }, 0);
   });
-  return () => subscription.unsubscribe();
+  return () => { vivo = false; subscription.unsubscribe(); };
 }
