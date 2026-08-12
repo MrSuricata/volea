@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput } from '../types';
 import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
@@ -86,6 +86,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [kind, setKind] = useState<KindFilter>('todos');
   const [aAnular, setAAnular] = useState<LedgerEntry | null>(null);
   const [aCobrar, setACobrar] = useState<{ nombre: string; total: number } | null>(null);
+  const [aBorrarDeuda, setABorrarDeuda] = useState<{ nombre: string; total: number; movs: LedgerEntry[] } | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [ventaAbierta, setVentaAbierta] = useState(false);
@@ -175,7 +176,9 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   // Deudas abiertas (sobre todo lo cargado, sin filtro de período), agrupadas por deudor
   const porCobrar = useMemo(() => {
     let total = 0, count = 0;
-    const porNombre = new Map<string, { nombre: string; total: number; items: number; desde: string }>();
+    // Se guardan los movimientos de cada deudor (no solo el total) para poder
+    // borrar una deuda puntual desde su tarjeta, sin ir a buscarla a la lista.
+    const porNombre = new Map<string, { nombre: string; total: number; items: number; desde: string; movs: LedgerEntry[] }>();
     for (const e of entries) {
       if (e.kind === 'venta' && e.paymentMethod === 'debe' && !e.settledAt && !e.reverted) {
         total += e.amount;
@@ -185,13 +188,15 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         if (grupo) {
           grupo.total += e.amount;
           grupo.items++;
+          grupo.movs.push(e);
           if (e.createdAt < grupo.desde) grupo.desde = e.createdAt;
         } else {
-          porNombre.set(nombre, { nombre, total: e.amount, items: 1, desde: e.createdAt });
+          porNombre.set(nombre, { nombre, total: e.amount, items: 1, desde: e.createdAt, movs: [e] });
         }
       }
     }
     const deudores = Array.from(porNombre.values()).sort((a, b) => b.total - a.total);
+    for (const d of deudores) d.movs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return { total, count, deudores };
   }, [entries]);
 
@@ -363,10 +368,21 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                     >
                       Cobrar
                     </button>
+                    <button
+                      onClick={() => setABorrarDeuda(deudor)}
+                      title={`Borrar deudas de ${deudor.nombre}`}
+                      aria-label={`Borrar deudas de ${deudor.nombre}`}
+                      className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 ))}
               </div>
-              <p className="mt-2 text-[11px] text-gray-400">También podés cobrar desde el bot: «cobré + nombre»</p>
+              <p className="mt-2 text-[11px] text-gray-400">
+                «Cobrar» = entró la plata. El tacho borra la deuda como si la venta nunca hubiera existido
+                (para las cargadas por error). También podés cobrar desde el bot: «cobré + nombre»
+              </p>
             </div>
           )}
 
@@ -523,6 +539,16 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         />
       )}
 
+      {/* Modal de borrar deudas de una persona */}
+      {aBorrarDeuda && (
+        <BorrarDeudaModal
+          deudor={aBorrarDeuda}
+          revertEntry={revertEntry}
+          onClose={() => setABorrarDeuda(null)}
+          onDone={() => { setABorrarDeuda(null); refresh(); }}
+        />
+      )}
+
       {/* Modal de gasto */}
       {gastoAbierto && (
         <GastoModal
@@ -542,6 +568,132 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           onDone={() => { setACobrar(null); refresh(); }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Borrar deudas de una persona. "Borrar" = ANULAR el movimiento: la venta sale
+ * también de los totales, como si nunca hubiera existido. Es lo correcto para lo
+ * cargado por error (que es el caso real: un capuchino de $10 mal anotado).
+ * NO confundir con «Cobrar», que registra que entró la plata.
+ * Se listan los ítems uno por uno porque una persona puede deber varias cosas y
+ * casi siempre se quiere borrar UNA, no todas.
+ */
+function BorrarDeudaModal({ deudor, revertEntry, onClose, onDone }: {
+  deudor: { nombre: string; total: number; movs: LedgerEntry[] };
+  revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [borrando, setBorrando] = useState<string | null>(null);
+  const [borrados, setBorrados] = useState<string[]>([]);
+  const [confirmarTodas, setConfirmarTodas] = useState(false);
+
+  const pendientes = deudor.movs.filter(m => !borrados.includes(m.id));
+  const totalPendiente = pendientes.reduce((s, m) => s + m.amount, 0);
+
+  const borrar = async (ids: string[], etiqueta: string) => {
+    if (borrando) return;
+    setBorrando(etiqueta);
+    try {
+      const hechos: string[] = [];
+      for (const id of ids) {
+        const r = await revertEntry(id);
+        if (!r.ok) {
+          toast.error(r.error || 'No se pudo borrar la deuda');
+          break;
+        }
+        hechos.push(id);
+      }
+      if (hechos.length) {
+        setBorrados(prev => [...prev, ...hechos]);
+        toast.success(hechos.length === 1 ? 'Deuda borrada' : `${hechos.length} deudas borradas`);
+        // Si no queda ninguna, cerrar y refrescar; si quedan, seguir en el modal.
+        if (hechos.length === ids.length && ids.length === pendientes.length) onDone();
+      }
+    } catch (e) {
+      console.error('Error borrando deuda:', e);
+      toast.error('No se pudo borrar la deuda. Probá de nuevo.');
+    } finally {
+      setBorrando(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="absolute inset-0" onClick={() => borrando === null && (borrados.length ? onDone() : onClose())} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Borrar deudas de ${deudor.nombre}`}
+        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">Borrar deuda de {deudor.nombre}</h3>
+          <button
+            onClick={() => (borrados.length ? onDone() : onClose())}
+            disabled={borrando !== null}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-gray-500">
+          Se anula la venta: desaparece de la deuda <strong>y de los totales</strong>, como si nunca se hubiera
+          cargado. Si en realidad te pagó, cerrá esto y usá «Cobrar».
+        </p>
+
+        {pendientes.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-500">No queda ninguna deuda de {deudor.nombre}.</p>
+        ) : (
+          <div className="space-y-2">
+            {pendientes.map(m => (
+              <div key={m.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-display text-sm font-bold text-navy-700">
+                    {m.label}{m.qty > 1 ? ` ×${m.qty}` : ''}
+                  </p>
+                  <p className="text-[11px] text-gray-400">{formatFechaCorta(m.createdAt)} · por {m.reportedBy}</p>
+                </div>
+                <p className="text-sm font-bold tabular-nums text-amber-600 whitespace-nowrap">{formatMoney(m.amount)}</p>
+                <button
+                  onClick={() => void borrar([m.id], m.id)}
+                  disabled={borrando !== null}
+                  title="Borrar esta deuda"
+                  aria-label={`Borrar ${m.label}`}
+                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:text-gray-200"
+                >
+                  {borrando === m.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pendientes.length > 1 && (
+          confirmarTodas ? (
+            <button
+              onClick={() => void borrar(pendientes.map(m => m.id), 'todas')}
+              disabled={borrando !== null}
+              className="mt-4 w-full rounded-lg bg-red-500 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-red-300"
+            >
+              {borrando === 'todas'
+                ? 'Borrando…'
+                : `Sí, borrar las ${pendientes.length} (${formatMoney(totalPendiente)})`}
+            </button>
+          ) : (
+            <button
+              onClick={() => setConfirmarTodas(true)}
+              disabled={borrando !== null}
+              className="mt-4 w-full rounded-lg border border-red-200 py-2.5 font-display text-sm font-bold text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
+            >
+              Borrar las {pendientes.length} deudas ({formatMoney(totalPendiente)})
+            </button>
+          )
+        )}
+      </div>
     </div>
   );
 }
