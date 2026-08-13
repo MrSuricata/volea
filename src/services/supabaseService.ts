@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -534,6 +534,27 @@ export const SupabaseService = {
   async deleteEvent(id: string): Promise<void> {
     if (!supabase) return;
     await conTechoEscritura(supabase.from('events').delete().eq('id', id));
+  },
+
+  // ── Promos ──
+  // Solo lectura desde el sitio: el alta/edición de promos es por SQL. El server
+  // de Mercado Pago lee la MISMA tabla para cobrar el descuento (api/mp/preferencia).
+  async getPromos(): Promise<Promo[]> {
+    if (!supabase || !isSupabaseConnected()) return [];
+    const { data, error } = await supabase
+      .from('promos')
+      .select('id, label, percent, starts_on, ends_on, delivery_note, active')
+      .eq('active', true);
+    if (error) { console.error('Error fetching promos:', error); return []; }
+    return (data || []).map(row => ({
+      id: row.id,
+      label: row.label || '',
+      percent: Number(row.percent) || 0,
+      startsOn: row.starts_on || '',
+      endsOn: row.ends_on || '',
+      deliveryNote: row.delivery_note || '',
+      active: row.active !== false,
+    }));
   },
 
   // ── Orders ──

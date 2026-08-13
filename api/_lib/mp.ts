@@ -80,11 +80,51 @@ export interface ItemPreferencia {
   currency_id: 'UYU';
 }
 
+// ── Promos ──────────────────────────────────────────────────────────────────
+// ⚠ PARIDAD CON EL CLIENTE: src/utils/promo.ts tiene estas MISMAS funciones
+// (precioConPromo / promoVigente / hoyMontevideo). El carrito muestra el total
+// con ellas y esta capa arma lo que MP cobra: si el redondeo o la regla de
+// fechas difieren, el cliente ve un precio y paga otro. Los tests de ambos
+// lados fijan los mismos valores. No se importan cruzado a propósito: api/ se
+// compila aparte en Vercel y src/ no está en ese build.
+
+export interface PromoFila {
+  id: string;
+  percent: number;
+  starts_on: string; // YYYY-MM-DD
+  ends_on: string;
+  active: boolean;
+}
+
+/** "YYYY-MM-DD" de hoy en día de Uruguay (la promo corre con fechas locales). */
+export function hoyMontevideo(ahora: Date = new Date()): string {
+  return ahora.toLocaleDateString('en-CA', { timeZone: 'America/Montevideo' });
+}
+
+/** La promo activa cuya ventana incluye hoy, o null. */
+export function promoVigenteHoy(filas: PromoFila[], hoy: string): PromoFila | null {
+  // Orden por id ANTES de elegir, en espejo con el cliente (src/utils/promo.ts):
+  // con dos promos solapadas, ambos lados tienen que elegir la MISMA.
+  return [...filas].sort((a, b) => a.id.localeCompare(b.id)).find(p =>
+    p.active && Number.isFinite(p.percent) && p.percent > 0 && p.percent < 100 &&
+    p.starts_on <= hoy && hoy <= p.ends_on,
+  ) ?? null;
+}
+
+/** Precio unitario con descuento, redondeado a peso entero POR UNIDAD (MP cobra unit_price × qty). */
+export function precioConPromo(price: number, percent: number): number {
+  return Math.round(price * (100 - percent) / 100);
+}
+
 // Los precios salen SIEMPRE del catálogo (tabla products), jamás del pedido:
 // el pedido lo insertó el cliente anónimo y podría traer precios editados.
+// `descuentoPorciento`: promo vigente (tabla promos) — se aplica ACÁ, sobre el
+// precio del catálogo, para que el descuento que muestra el carrito sea el que
+// MP realmente cobra.
 export function armarItemsPreferencia(
   items: ItemPedidoRow[],
   catalogo: ProductoCatalogo[],
+  descuentoPorciento = 0,
 ): ItemPreferencia[] {
   if (!items.length) throw new Error('El pedido no tiene items');
   return items.map(it => {
@@ -101,6 +141,12 @@ export function armarItemsPreferencia(
     if (!Number.isInteger(it.quantity) || it.quantity < 1) {
       throw new Error(`Cantidad inválida para ${prod.name}`);
     }
+    const conDescuento = descuentoPorciento > 0 && descuentoPorciento < 100
+      ? precioConPromo(prod.price, descuentoPorciento)
+      : prod.price;
+    // La misma guarda de arriba, sobre el precio YA descontado: un percent
+    // absurdo en la tabla promos tampoco puede colar una preferencia de $0.
+    if (conDescuento <= 0) throw new Error(`Precio inválido tras el descuento para ${prod.name}`);
     const variante = [it.selectedSize, it.selectedColor].filter(Boolean).join('/');
     const title = variante ? `${prod.name} (${variante})` : prod.name;
     return {
@@ -109,7 +155,7 @@ export function armarItemsPreferencia(
       // no depender de qué hace su API con el sobrante.
       title: title.slice(0, 250),
       quantity: it.quantity,
-      unit_price: prod.price,
+      unit_price: conDescuento,
       currency_id: 'UYU' as const,
     };
   });

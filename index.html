@@ -142,6 +142,27 @@
       .hero-enter-3 { animation-delay: 0.5s; }
       .hero-enter-4 { animation-delay: 0.7s; }
 
+      /* Banner de promo: rayas diagonales que corren + destello que barre.
+         Las rayas se trasladan EXACTAMENTE un período horizontal del patrón
+         (paso 40px a 45° ⇒ 40·√2 ≈ 56.57px): al terminar, el dibujo calza
+         consigo mismo y el loop no salta de fase (con -33% del contenedor,
+         que no es múltiplo del período, pegaba un salto visible cada vuelta). */
+      .promo-cinta { animation: promoCinta 4s linear infinite; }
+      @keyframes promoCinta { to { transform: translateX(-56.5685px); } }
+      /* left-0 en la clase: sin él, dentro de un flex centrado el absoluto
+         arranca centrado y el translateX(-130%) lo dejaba estacionado a la
+         vista la mitad del ciclo en el banner compacto. */
+      .promo-brillo { left: 0; animation: promoBrillo 3.6s ease-in-out infinite; }
+      @keyframes promoBrillo {
+        0%, 55% { transform: translateX(-170%) skewX(-18deg); }
+        100% { transform: translateX(380%) skewX(-18deg); }
+      }
+      .promo-latido { animation: promoLatido 2.4s ease-in-out infinite; }
+      @keyframes promoLatido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+      @media (prefers-reduced-motion: reduce) {
+        .promo-cinta, .promo-brillo, .promo-latido, .pulse-glow { animation: none; }
+      }
+
       /* Gallery hover */
       .gallery-item { position: relative; overflow: hidden; }
       .gallery-item img { transition: transform 0.6s ease; }

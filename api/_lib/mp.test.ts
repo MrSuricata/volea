@@ -3,11 +3,38 @@ import { createHmac } from 'node:crypto';
 import {
   armarItemsPreferencia,
   armarUrlRetorno,
+  hoyMontevideo,
   mapearEstadoMP,
   mpConfigurado,
+  precioConPromo,
+  promoVigenteHoy,
   totalItems,
   validarFirmaWebhook,
 } from './mp';
+
+describe('promoVigenteHoy', () => {
+  const fila = { id: 'promo-racket-roll-2026', percent: 10, starts_on: '2026-08-17', ends_on: '2026-08-20', active: true };
+
+  it('vigente solo dentro de la ventana, inclusive en ambas puntas (igual que el cliente)', () => {
+    expect(promoVigenteHoy([fila], '2026-08-16')).toBeNull();
+    expect(promoVigenteHoy([fila], '2026-08-17')).toBe(fila);
+    expect(promoVigenteHoy([fila], '2026-08-20')).toBe(fila);
+    expect(promoVigenteHoy([fila], '2026-08-21')).toBeNull();
+  });
+
+  it('inactiva o con percent inválido no aplica', () => {
+    expect(promoVigenteHoy([{ ...fila, active: false }], '2026-08-18')).toBeNull();
+    expect(promoVigenteHoy([{ ...fila, percent: 0 }], '2026-08-18')).toBeNull();
+    expect(promoVigenteHoy([{ ...fila, percent: 100 }], '2026-08-18')).toBeNull();
+    expect(promoVigenteHoy([{ ...fila, percent: NaN }], '2026-08-18')).toBeNull();
+  });
+});
+
+describe('hoyMontevideo', () => {
+  it('devuelve el día local aunque UTC ya haya cambiado de fecha', () => {
+    expect(hoyMontevideo(new Date('2026-08-18T01:30:00Z'))).toBe('2026-08-17');
+  });
+});
 
 describe('mapearEstadoMP', () => {
   it('mapea todos los estados conocidos de MP', () => {
@@ -151,6 +178,40 @@ describe('armarItemsPreferencia', () => {
   it('arma el título sin variante cuando no hay talle/color', () => {
     const items = armarItemsPreferencia([{ product: { id: 'p2' } as never, quantity: 1 }], catalogo);
     expect(items[0].title).toBe('Gorro VOLEA');
+  });
+
+  it('con promo aplica el descuento sobre el precio del CATÁLOGO, redondeado por unidad', () => {
+    const items = armarItemsPreferencia(
+      [
+        { product: { id: 'p1', name: 'x', price: 1 } as never, quantity: 2 }, // precio del pedido: ignorado
+        { product: { id: 'p2' } as never, quantity: 1 },
+      ],
+      catalogo,
+      10,
+    );
+    expect(items[0].unit_price).toBe(891); // 990 × 0.9
+    expect(items[1].unit_price).toBe(495); // 550 × 0.9
+  });
+
+  // ⚠ Valores FIJADOS en espejo con src/utils/promo.test.ts: el carrito muestra
+  // estos números y esta capa es la que cobra. Si difieren, se paga distinto de
+  // lo que se ve.
+  it('paridad de redondeo con el cliente (Math.round por unidad)', () => {
+    expect(precioConPromo(1000, 10)).toBe(900);
+    expect(precioConPromo(1290, 10)).toBe(1161);
+    expect(precioConPromo(995, 10)).toBe(896);   // 895.5 → 896
+    expect(precioConPromo(85, 10)).toBe(77);     // 76.5 → 77
+    expect(precioConPromo(333, 15)).toBe(283);
+  });
+
+  it('un percent absurdo (100 o más) no puede colar una preferencia de $0', () => {
+    // armarItemsPreferencia ignora percks fuera de (0,100)…
+    const sinDesc = armarItemsPreferencia([{ product: { id: 'p2' } as never, quantity: 1 }], catalogo, 100);
+    expect(sinDesc[0].unit_price).toBe(550);
+    // …y si un percent válido deja el precio en 0 (precio chico + 99%), corta.
+    expect(() =>
+      armarItemsPreferencia([{ product: { id: 'p3' } as never, quantity: 1 }], [{ id: 'p3', name: 'Sticker', price: 1 }], 99),
+    ).toThrow(/descuento/i);
   });
 
   it('explota claro si el producto ya no existe en el catálogo', () => {

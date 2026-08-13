@@ -42,6 +42,27 @@ CREATE TABLE IF NOT EXISTS events (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- v10 — Promociones de la tienda. Una sola fila vigente por vez (cliente y server
+-- toman la primera activa cuya ventana incluya HOY en Montevideo). Vive en la DB
+-- porque el descuento lo aplican por igual el carrito (src/utils/promo.ts) y la
+-- preferencia de Mercado Pago (api/mp/preferencia.ts): una sola fuente de verdad
+-- y la promo se prende/apaga sola por fecha. Lectura pública; escritura solo por
+-- SQL/service role (sin políticas de INSERT/UPDATE a propósito).
+CREATE TABLE IF NOT EXISTS promos (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  percent NUMERIC NOT NULL CHECK (percent > 0 AND percent < 100),
+  starts_on DATE NOT NULL,
+  ends_on DATE NOT NULL CHECK (ends_on >= starts_on),
+  delivery_note TEXT DEFAULT '',
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE promos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS promos_public_read ON promos;
+CREATE POLICY promos_public_read ON promos FOR SELECT USING (true);
+
 -- Tabla de clubes
 CREATE TABLE IF NOT EXISTS clubs (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,

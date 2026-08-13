@@ -176,6 +176,22 @@ export interface Event {
 
 export type PaymentStatus = 'iniciado' | 'aprobado' | 'pendiente' | 'rechazado' | 'devuelto';
 
+/**
+ * Promoción de la tienda (tabla promos). Vive en la DB porque el descuento lo
+ * aplican por igual el carrito (cliente) y la preferencia de Mercado Pago
+ * (server): una sola fuente de verdad, se prende y apaga sola por fecha.
+ */
+export interface Promo {
+  id: string;
+  label: string;
+  percent: number;
+  /** YYYY-MM-DD, inclusive, en día de Uruguay. */
+  startsOn: string;
+  endsOn: string;
+  deliveryNote: string;
+  active: boolean;
+}
+
 export interface Order {
   id: string;
   items: CartItem[];

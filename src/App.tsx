@@ -10,7 +10,8 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, SocioName, VentaCajaInput } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
+import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -349,6 +350,8 @@ interface StoreContextType {
   removeProduct: (id: string) => void;
   events: Event[];
   setEvents: (e: Event[]) => void;
+  /** Promos activas (tabla promos). La vigencia por fecha se decide al mostrar. */
+  promos: Promo[];
   orders: Order[];
   setOrders: (o: Order[]) => void;
   addOrder: (o: Order) => Promise<boolean>;
@@ -390,9 +393,39 @@ function useStore() {
   return ctx;
 }
 
+/**
+ * La promo del momento: `activa` descuenta AHORA (el mismo cálculo que cobra
+ * Mercado Pago en el server); `proxima` es la que se anuncia antes de arrancar.
+ */
+function usePromo(): { activa: Promo | null; proxima: Promo | null } {
+  const { promos } = useStore();
+  // `hoy` es ESTADO y se refresca al volver a la pestaña (y cada minuto): calculado
+  // una sola vez quedaba congelado en la fecha de carga — una pestaña abierta el 16
+  // y retomada el 18 no mostraba el descuento, y el pedido por WhatsApp salía a
+  // precio de lista: sobrecobro silencioso. El caso inverso (carrito abierto
+  // cruzando el fin de la promo) mostraba un descuento que MP ya no iba a hacer.
+  const [hoy, setHoy] = useState(hoyMontevideo);
+  useEffect(() => {
+    const tick = () => setHoy(hoyMontevideo());
+    document.addEventListener('visibilitychange', tick); // es evento de document, no de window
+    window.addEventListener('focus', tick);
+    const id = setInterval(tick, 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', tick);
+      window.removeEventListener('focus', tick);
+      clearInterval(id);
+    };
+  }, []);
+  return useMemo(
+    () => ({ activa: promoVigente(promos, hoy), proxima: promoPorVenir(promos, hoy) }),
+    [promos, hoy],
+  );
+}
+
 function StoreProvider({ children }: { children: React.ReactNode }) {
   const [products, _setProducts] = useState<Product[]>([]);
   const [events, _setEvents] = useState<Event[]>([]);
+  const [promos, _setPromos] = useState<Promo[]>([]);
   const [orders, _setOrders] = useState<Order[]>([]);
   const [categories, _setCategories] = useState<Category[]>([]);
   const [clubs, _setClubs] = useState<Club[]>([]);
@@ -489,9 +522,9 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         // se quedan girando eternamente. Con el techo, a los 10s se sigue con el respaldo
         // (snapshot para productos/categorías, INITIAL_* para el resto) y las páginas
         // pueden decir la verdad en vez de un "cargando" infinito.
-        const respaldo: [Product[] | null, Category[] | null, Event[], Club[], Announcement[], Post[], StandingEntry[]] =
-          [null, null, [], [], [], [], []];
-        const [p, c, e, cl, an, po, st] = await conLimite(Promise.all([
+        const respaldo: [Product[] | null, Category[] | null, Event[], Club[], Announcement[], Post[], StandingEntry[], Promo[]] =
+          [null, null, [], [], [], [], [], []];
+        const [p, c, e, cl, an, po, st, pr] = await conLimite(Promise.all([
           SupabaseService.getProducts(),
           SupabaseService.getCategories(),
           SupabaseService.getEvents(),
@@ -499,7 +532,9 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
           SupabaseService.getAnnouncements(),
           SupabaseService.getPosts(),
           SupabaseService.getStandings(),
+          SupabaseService.getPromos(),
         ]), 10000, respaldo);
+        _setPromos(pr);
         // null = fetch falló → snapshot legacy; [] = catálogo vacío a propósito.
         // El snapshot va con import() dinámico a propósito: son 139 KB minificados
         // (shopifyService + shopify-catalog.json) que antes viajaban en el entry y se
@@ -828,7 +863,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   return (
     <StoreContext.Provider value={{
       datosListos,
-      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, orders, setOrders, addOrder,
+      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, promos, orders, setOrders, addOrder,
       posts, savePost, removePost, standings, saveStanding, removeStanding,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
       cart, addToCart, removeFromCart,
@@ -974,7 +1009,9 @@ function Navbar() {
 
 function CartDrawer() {
   const { cart, cartOpen, setCartOpen, removeFromCart, updateCartQuantity } = useStore();
-  const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+  const { activa: promo } = usePromo();
+  // El MISMO cálculo que usa el checkout y que cobra MP (redondeo por unidad).
+  const { subtotal, descuento, total } = totalesConPromo(cart, promo);
 
   if (!cartOpen) return null;
 
@@ -1065,6 +1102,18 @@ function CartDrawer() {
         {/* Footer */}
         {cart.length > 0 && (
           <div className="border-t border-gray-200 p-4 space-y-2">
+            {descuento > 0 && promo && (
+              <>
+                <div className="flex justify-between items-center text-sm text-gray-500">
+                  <span>Subtotal</span>
+                  <span className="line-through">{formatPrice(subtotal)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-semibold text-lime-700">
+                  <span>{promo.label} (−{promo.percent}%)</span>
+                  <span>−{formatPrice(descuento)}</span>
+                </div>
+              </>
+            )}
             <div className="flex justify-between items-center mb-2">
               <span className="font-display font-semibold text-lg">Total</span>
               <span className="font-display font-bold text-xl text-navy-700">{formatPrice(total)}</span>
@@ -1090,6 +1139,7 @@ function CartDrawer() {
 
 function ProductCard({ product }: { product: Product }) {
   const { categories } = useStore();
+  const { activa: promo } = usePromo();
   const totalStock = getTotalStock(product);
   const isNew = (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
   return (
@@ -1116,7 +1166,10 @@ function ProductCard({ product }: { product: Product }) {
           </div>
         )}
         <div className="absolute top-3 left-3 flex flex-col gap-1 z-10">
-          {product.isOffer && (
+          {promo && (
+            <span className="bg-navy-900 text-lime-400 text-xs font-black px-2 py-1 rounded-full">−{promo.percent}%</span>
+          )}
+          {product.isOffer && !promo && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">OFERTA</span>
           )}
           {isNew && totalStock > 0 && (
@@ -1128,9 +1181,21 @@ function ProductCard({ product }: { product: Product }) {
       <div className="p-4">
         <h3 className="font-display font-semibold text-navy-700 group-hover:text-lime-600 transition-colors line-clamp-2">{product.name}</h3>
         <div className="mt-2 flex items-center gap-2">
-          <span className="font-display font-bold text-lg text-navy-700">{formatPrice(product.price)}</span>
-          {product.isOffer && product.originalPrice && (
-            <span className="text-sm text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
+          {/* Con promo vigente: precio descontado (el que se cobra de verdad) y el de
+              lista tachado. La oferta previa del producto no se muestra a la vez para
+              no apilar tres números. */}
+          {promo ? (
+            <>
+              <span className="font-display font-bold text-lg text-navy-700">{formatPrice(precioConPromo(product.price, promo.percent))}</span>
+              <span className="text-sm text-gray-400 line-through">{formatPrice(product.price)}</span>
+            </>
+          ) : (
+            <>
+              <span className="font-display font-bold text-lg text-navy-700">{formatPrice(product.price)}</span>
+              {product.isOffer && product.originalPrice && (
+                <span className="text-sm text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
+              )}
+            </>
           )}
         </div>
         <div className="mt-3 flex items-center justify-between">
@@ -1141,6 +1206,103 @@ function ProductCard({ product }: { product: Product }) {
         </div>
       </div>
     </Link>
+  );
+}
+
+// ─── 6b. PromoBanner ─────────────────────────────────────────────────────────
+
+/**
+ * Banner de la promoción vigente (o por venir), animado: rayas que corren,
+ * destello que barre y el chip del % latiendo. Sale de la tabla promos: aparece
+ * solo cuando hay algo que anunciar y desaparece solo cuando la promo vence.
+ * `compacto`: versión de una línea para la tienda.
+ */
+function PromoBanner({ compacto = false }: { compacto?: boolean }) {
+  const { activa, proxima } = usePromo();
+  const promo = activa ?? proxima;
+  if (!promo) return null;
+  const enCurso = Boolean(activa);
+
+  const rayas = (
+    <>
+      {/* Rayas diagonales en movimiento (300% de ancho para un loop perfecto) */}
+      <div
+        aria-hidden
+        className="promo-cinta pointer-events-none absolute inset-y-0 left-0 w-[300%] opacity-[0.15]"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(-45deg, #ccff00 0 16px, transparent 16px 40px)',
+        }}
+      />
+      {/* Destello que barre cada tanto */}
+      <div
+        aria-hidden
+        className="promo-brillo pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent"
+      />
+    </>
+  );
+
+  if (compacto) {
+    return (
+      <Link
+        to="/tienda"
+        className="relative mb-8 flex items-center justify-center gap-3 overflow-hidden rounded-xl bg-navy-800 px-4 py-3 text-center"
+      >
+        {rayas}
+        {/* aria-hidden: el porcentaje ya está en el label; sin esto el lector lo dice dos veces */}
+        <span aria-hidden className="promo-latido relative rounded-full bg-lime-400 px-2.5 py-0.5 font-display text-sm font-black text-navy-900">
+          −{promo.percent}%
+        </span>
+        <span className="relative font-display text-sm font-bold text-white">
+          {enCurso
+            // "hasta el 20 de agosto": la ventana de un solo día ya formatea "el 20 de..."
+            ? `${promo.label} — hasta ${ventanaPromo({ ...promo, startsOn: promo.endsOn })}`
+            // "Se viene:" adelante — sin eso parecía una promo YA vigente con la grilla sin descontar
+            : `Se viene: ${promo.label} — ${ventanaPromo(promo)}`}
+        </span>
+      </Link>
+    );
+  }
+
+  return (
+    <section className="relative overflow-hidden bg-navy-800 py-10">
+      {rayas}
+      <div className="relative mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 text-center lg:flex-row lg:text-left">
+        {/* El % grande, latiendo */}
+        <div className="promo-latido flex-shrink-0">
+          <div className="flex h-28 w-28 rotate-[-6deg] flex-col items-center justify-center rounded-2xl bg-lime-400 shadow-[0_0_35px_rgba(204,255,0,.35)]">
+            <span className="font-display text-4xl font-black leading-none text-navy-900">−{promo.percent}%</span>
+            <span className="font-display text-[10px] font-black uppercase tracking-widest text-navy-900/70">
+              {enCurso ? 'Ahora' : 'Se viene'}
+            </span>
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <h2 className="font-display text-2xl font-black uppercase leading-tight text-white sm:text-3xl">
+            {promo.label}
+          </h2>
+          <p className="mt-1 font-display text-sm font-bold uppercase tracking-wide text-lime-400">
+            {enCurso
+              ? `Solo hasta ${ventanaPromo({ ...promo, startsOn: promo.endsOn })} — después vuelve al precio de siempre`
+              : `${ventanaPromo(promo)} — andá eligiendo`}
+          </p>
+          {promo.deliveryNote && (
+            <p className="mt-3 inline-flex items-start gap-2 text-sm leading-snug text-gray-300">
+              <Package size={16} className="mt-0.5 flex-shrink-0 text-lime-400" />
+              <span>{promo.deliveryNote}</span>
+            </p>
+          )}
+        </div>
+
+        <Link
+          to="/tienda"
+          className="pulse-glow relative flex-shrink-0 rounded-lg bg-lime-400 px-8 py-3.5 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300"
+        >
+          {enCurso ? 'Comprar con descuento' : 'Ir viendo la colección'}
+        </Link>
+      </div>
+    </section>
   );
 }
 
@@ -1384,6 +1546,11 @@ function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* ── 1a. Promo ───────────────────────────────────────────────────────
+          Pegada al hero, ANTES del torneo: es una ventana de venta con fecha de
+          vencimiento. Sale de la tabla promos y desaparece sola al vencer. */}
+      <PromoBanner />
 
       {/* ── 1b. Torneo destacado ────────────────────────────────────────────
           Va PEGADO al hero a propósito: es lo primero que se ve al bajar, que es
@@ -1873,6 +2040,7 @@ function ShopPage() {
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
       <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Nuestra colección</h1>
       <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <PromoBanner compacto />
 
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 mb-8">
@@ -1954,6 +2122,7 @@ function ShopPage() {
 function ProductDetailPage() {
   const { id } = useParams();
   const { products, categories, addToCart, setCartOpen, datosListos } = useStore();
+  const { activa: promoActiva } = usePromo();
   const navigate = useNavigate();
   const product = products.find(p => p.id === id);
   usePageMeta({
@@ -2103,14 +2272,28 @@ function ProductDetailPage() {
             <span className="text-xs text-gray-400 font-mono">SKU: {product.sku}</span>
           </div>
           <h1 className="font-display text-3xl font-bold text-navy-700 mb-3">{product.name}</h1>
-          <div className="flex items-center gap-3 mb-6">
-            <span className="font-display text-3xl font-bold text-navy-700">{formatPrice(product.price)}</span>
-            {product.isOffer && product.originalPrice && (
+          <div className="flex items-center gap-3 mb-6 flex-wrap">
+            {/* Con promo vigente manda la promo: precio descontado + lista tachado.
+                (La oferta propia del producto no se apila, para no mostrar 3 números.) */}
+            {promoActiva ? (
               <>
-                <span className="text-lg text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                  -{Math.round((1 - product.price / product.originalPrice) * 100)}%
+                <span className="font-display text-3xl font-bold text-navy-700">{formatPrice(precioConPromo(product.price, promoActiva.percent))}</span>
+                <span className="text-lg text-gray-400 line-through">{formatPrice(product.price)}</span>
+                <span className="bg-navy-900 text-lime-400 text-xs font-black px-2 py-1 rounded-full">
+                  −{promoActiva.percent}% hasta {ventanaPromo({ ...promoActiva, startsOn: promoActiva.endsOn })}
                 </span>
+              </>
+            ) : (
+              <>
+                <span className="font-display text-3xl font-bold text-navy-700">{formatPrice(product.price)}</span>
+                {product.isOffer && product.originalPrice && (
+                  <>
+                    <span className="text-lg text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
+                    <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                      -{Math.round((1 - product.price / product.originalPrice) * 100)}%
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -2736,6 +2919,7 @@ function ContactPage() {
 
 function CheckoutPage() {
   const { cart, clearCart, addOrder, datosListos } = useStore();
+  const { activa: promo } = usePromo();
   usePageMeta({
     title: 'Finalizar pedido',
     description: 'Completá tus datos y enviá tu pedido: te contactamos por WhatsApp para coordinar la entrega y el pago.',
@@ -2766,7 +2950,9 @@ function CheckoutPage() {
   }, []);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const total = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+  // Con promo vigente el total del pedido es el DESCONTADO — el mismo número que
+  // muestra el carrito y que Mercado Pago recalcula del catálogo en el server.
+  const { subtotal, descuento, total } = totalesConPromo(cart, promo);
 
   // El carrito se rehidrata al final de la carga inicial, y la web ahora se muestra a los
   // 4s aunque los datos no hayan llegado. Sin esta guarda, quien vuelve al checkout
@@ -2854,7 +3040,14 @@ function CheckoutPage() {
       `🛍 *Productos:*`,
       ...cart.map(i => `  • ${i.product.name} (${[i.selectedSize, i.selectedColor].filter(Boolean).join('/') || 'Único'}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
       ``,
+      // Con promo, el desglose va explícito en el mensaje: Gastón/Pauli cobran
+      // leyendo esto, y un total menor que la suma de los renglones sin
+      // explicación parece un error.
+      ...(descuento > 0 && promo
+        ? [`Subtotal: ${formatPrice(subtotal)}`, `🏷 *${promo.label} (−${promo.percent}%): −${formatPrice(descuento)}*`]
+        : []),
       `💰 *Total: ${formatPrice(total)}*`,
+      ...(promo?.deliveryNote ? [``, `🚚 ${promo.deliveryNote}`] : []),
       ``,
       `_¡Hola! Quiero coordinar la entrega y el pago de este pedido._`,
     ].filter(Boolean).join('\n');
@@ -2923,11 +3116,36 @@ function CheckoutPage() {
                 </span>
               </div>
             ))}
-            <div className="border-t border-gray-200 pt-4 flex justify-between items-center">
-              <span className="font-display text-lg font-semibold">Total</span>
-              <span className="font-display text-2xl font-bold text-navy-700">{formatPrice(total)}</span>
+            <div className="border-t border-gray-200 pt-4 space-y-1">
+              {descuento > 0 && promo && (
+                <>
+                  <div className="flex justify-between items-center text-sm text-gray-500">
+                    <span>Subtotal</span>
+                    <span className="line-through">{formatPrice(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-semibold text-lime-700">
+                    <span>{promo.label} (−{promo.percent}%)</span>
+                    <span>−{formatPrice(descuento)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="font-display text-lg font-semibold">Total</span>
+                <span className="font-display text-2xl font-bold text-navy-700">{formatPrice(total)}</span>
+              </div>
             </div>
           </div>
+
+          {/* Entrega en Carmelo durante el torneo (nota de la promo) */}
+          {promo?.deliveryNote && (
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-lime-300 bg-lime-50 p-4">
+              <Package size={20} className="mt-0.5 flex-shrink-0 text-lime-700" />
+              <p className="text-sm text-navy-700">
+                <span className="font-display font-bold">Entrega sin costo:</span> {promo.deliveryNote}{' '}
+                Si te sirve, anotalo en las notas del pedido.
+              </p>
+            </div>
+          )}
 
           {/* Cómo funciona */}
           <div className="mt-6 bg-gradient-to-br from-navy-700 to-navy-900 rounded-xl p-6 text-white">

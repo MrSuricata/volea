@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { armarItemsPreferencia, mpConfigurado } from '../_lib/mp';
+import { armarItemsPreferencia, hoyMontevideo, mpConfigurado, promoVigenteHoy } from '../_lib/mp';
 import { clienteAdmin } from '../_lib/supabaseAdmin';
 
 // BASE_URL es opcional: solo hace falta si el dominio cambia.
@@ -29,9 +29,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: catalogo, error: errCat } = await db.from('products').select('id, name, price').in('id', ids as string[]);
   if (errCat || !catalogo) return res.status(500).json({ error: 'No se pudo leer el catálogo' });
 
+  // Promo vigente (tabla promos, la misma fuente que muestra el carrito): el
+  // descuento se aplica ACÁ, sobre los precios del catálogo, para que MP cobre
+  // exactamente el total que el cliente vio. Si esta lectura falla se CORTA con
+  // 500 en vez de seguir sin descuento: seguir cobraría de MÁS respecto de lo
+  // que el carrito mostró, que es el peor desenlace posible de un checkout.
+  const { data: promos, error: errPromo } = await db
+    .from('promos')
+    .select('id, percent, starts_on, ends_on, active')
+    .eq('active', true);
+  if (errPromo) return res.status(500).json({ error: 'No se pudo verificar las promociones' });
+  const promo = promoVigenteHoy(promos ?? [], hoyMontevideo());
+
   let items;
   try {
-    items = armarItemsPreferencia(pedido.items ?? [], catalogo);
+    items = armarItemsPreferencia(pedido.items ?? [], catalogo, promo?.percent ?? 0);
   } catch (e) {
     return res.status(422).json({ error: e instanceof Error ? e.message : 'Pedido inválido' });
   }
@@ -46,6 +58,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify({
         items,
+        // Las preferencias de MP no vencen por defecto: una creada a las 23:50 del
+        // último día de una promo se podía pagar con descuento días después. 24h
+        // alcanza de sobra para terminar un checkout.
+        expires: true,
+        expiration_date_to: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         external_reference: pedido.id,
         back_urls: {
           success: `${baseUrl()}/api/mp/retorno`,
