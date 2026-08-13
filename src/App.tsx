@@ -1309,67 +1309,57 @@ function HomePage() {
             aria-label={`${torneoDestacado.name}, ${rangoFechas(torneoDestacado.date, torneoDestacado.endDate)}`}
             className="hero-enter hero-enter-4 group absolute right-8 top-1/2 z-10 hidden -translate-y-1/2 opacity-0 xl:block 2xl:right-16"
           >
-            <div className="relative -rotate-[5deg] transition-transform duration-500 ease-out group-hover:rotate-0 group-hover:scale-[1.04]">
-              {/* Halo que respira detrás del cartel */}
+            <div className="relative -rotate-[3deg] transition-transform duration-500 ease-out group-hover:rotate-0 group-hover:scale-[1.03]">
+              {/* Halo detrás del cartel. Sin animate-pulse: latía todo el bloque,
+                  incluido el texto, y eso era buena parte de lo que se veía raro. */}
               <div
                 aria-hidden
-                className="absolute -inset-6 animate-pulse rounded-2xl bg-fuchsia-500/25 blur-2xl"
+                className="absolute -inset-5 rounded-2xl bg-fuchsia-600/20 blur-2xl"
               />
               <div
-                className="relative rounded-xl border-2 border-fuchsia-500 bg-navy-900/85 px-7 py-6 text-center backdrop-blur-sm"
-                style={{ boxShadow: '0 0 18px rgba(217,70,239,.55), inset 0 0 22px rgba(217,70,239,.18)' }}
+                className="relative w-[248px] rounded-xl border border-fuchsia-400/80 bg-navy-900/90 px-6 py-7 text-center"
+                style={{ boxShadow: '0 0 0 1px rgba(217,70,239,.25), 0 0 24px rgba(217,70,239,.35)' }}
               >
-                {/* Scanlines: el detalle que lo termina de mandar a los 90 */}
+                {/* Scanlines bien suaves: apenas una textura, no una trama visible. */}
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 rounded-xl opacity-25"
+                  className="pointer-events-none absolute inset-0 rounded-xl opacity-[0.07]"
                   style={{
-                    backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.14) 0 1px, transparent 1px 4px)',
+                    backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.9) 0 1px, transparent 1px 5px)',
                   }}
                 />
                 <p
-                  className="font-display text-[11px] font-black uppercase tracking-[0.35em] text-cyan-300"
-                  style={{ textShadow: '0 0 10px rgba(103,232,249,.85)' }}
+                  className="font-display text-[10px] font-black uppercase tracking-[0.4em] text-cyan-300"
+                  style={{ textShadow: '0 0 12px rgba(103,232,249,.7)' }}
                 >
                   {torneoEnCurso ? 'Se está jugando' : 'Se viene'}
                 </p>
-                <p className="mt-3 font-display text-sm font-black uppercase tracking-[0.4em] text-white/70">
+                <p className="mt-4 font-display text-[11px] font-black uppercase tracking-[0.5em] text-white/50">
                   VOLEA
                 </p>
-                {/* Aberración cromática: dos copias corridas en cian y magenta */}
-                <div className="relative mt-1">
-                  <span
-                    aria-hidden
-                    className="absolute inset-0 font-display text-4xl font-black uppercase leading-none text-cyan-400/70"
-                    style={{ transform: 'translate(-2px, 1px)' }}
-                  >
-                    Racket<br />Roll
-                  </span>
-                  <span
-                    aria-hidden
-                    className="absolute inset-0 font-display text-4xl font-black uppercase leading-none text-fuchsia-500/70"
-                    style={{ transform: 'translate(2px, -1px)' }}
-                  >
-                    Racket<br />Roll
-                  </span>
-                  <span
-                    className="relative font-display text-4xl font-black uppercase leading-none text-white"
-                    style={{ textShadow: '0 0 12px rgba(236,72,153,.95), 0 0 32px rgba(236,72,153,.55)' }}
-                  >
-                    Racket<br />Roll
-                  </span>
-                </div>
-                <div aria-hidden className="mx-auto my-4 h-px w-16 bg-gradient-to-r from-transparent via-fuchsia-400 to-transparent" />
+                {/* La aberración cromática se hace con text-shadow sobre UN solo
+                    elemento: con capas superpuestas los fantasmas caían 4-6px
+                    corridos en vertical y el título se veía borroso, no glitcheado. */}
                 <p
-                  className="font-display text-lg font-black uppercase text-lime-400"
-                  style={{ textShadow: '0 0 12px rgba(163,230,53,.7)' }}
+                  className="mt-1 font-display text-[38px] font-black uppercase leading-[0.9] text-white"
+                  style={{
+                    textShadow:
+                      '-2px 0 0 rgba(34,211,238,.85), 2px 0 0 rgba(217,70,239,.85), 0 0 22px rgba(236,72,153,.45)',
+                  }}
+                >
+                  Racket<br />Roll
+                </p>
+                <div aria-hidden className="mx-auto my-5 h-px w-20 bg-gradient-to-r from-transparent via-fuchsia-400/80 to-transparent" />
+                <p
+                  className="font-display text-base font-black uppercase tracking-wide text-lime-400"
+                  style={{ textShadow: '0 0 14px rgba(163,230,53,.55)' }}
                 >
                   {diasCortos(torneoDestacado.date, torneoDestacado.endDate)}
                 </p>
-                <p className="mt-1 font-display text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                <p className="mt-1.5 font-display text-[10px] font-bold uppercase tracking-[0.3em] text-gray-400">
                   {torneoDestacado.city?.split(',')[0] || torneoDestacado.location}
                 </p>
-                <p className="mt-4 font-display text-xs font-bold uppercase tracking-wider text-fuchsia-300 transition-colors group-hover:text-fuchsia-200">
+                <p className="mt-5 font-display text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300 transition-colors group-hover:text-white">
                   Ver info →
                 </p>
               </div>
