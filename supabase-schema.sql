@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS events (
   max_participants INTEGER,
   status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming', 'past')),
   category TEXT DEFAULT 'tournament' CHECK (category IN ('tournament', 'clinic', 'social')),
+  -- v10: teléfono de inscripciones (arma el botón de WhatsApp de la home) y último
+  -- día para eventos de varios días (sin él, un torneo de 3 días se archiva solo el
+  -- segundo día). NULL = evento de un solo día.
+  phone TEXT DEFAULT '',
+  end_date DATE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

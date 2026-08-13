@@ -168,6 +168,10 @@ export interface Event {
   maxParticipants?: number;
   status: 'upcoming' | 'past';
   category: 'tournament' | 'clinic' | 'social';
+  /** Teléfono de inscripciones/consultas. Alimenta el botón de la home. */
+  phone?: string;
+  /** Último día, en eventos de varios días. Vacío = arranca y termina en `date`. */
+  endDate?: string;
 }
 
 export type PaymentStatus = 'iniciado' | 'aprobado' | 'pendiente' | 'rechazado' | 'devuelto';

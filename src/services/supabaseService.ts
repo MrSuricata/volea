@@ -511,6 +511,8 @@ export const SupabaseService = {
       maxParticipants: row.max_participants || undefined,
       status: row.status || 'upcoming',
       category: row.category || 'tournament',
+      phone: row.phone || '',
+      endDate: row.end_date || '',
     }));
   },
 
@@ -523,6 +525,8 @@ export const SupabaseService = {
         image_url: e.imageUrl, maps_url: e.mapsUrl,
         max_participants: e.maxParticipants || null,
         status: e.status, category: e.category,
+        phone: e.phone || null,
+        end_date: e.endDate || null,
       }, { onConflict: 'id' }));
     }
   },

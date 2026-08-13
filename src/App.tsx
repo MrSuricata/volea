@@ -124,6 +124,66 @@ const avisarTorneos = (mensaje: string) => toast.error(mensaje);
 
 const formatPrice = (price: number): string => `$ ${price.toLocaleString('es-UY')}`;
 
+const TZ_UY = 'America/Montevideo';
+
+/** "SÁB 22 DE AGOSTO" — la fecha del torneo en el bloque de la home. */
+const fechaTorneo = (iso: string): string => {
+  // Se fuerza mediodía UTC: con "2026-08-22" a secas, el navegador lo toma como
+  // medianoche UTC y en Uruguay (UTC-3) lo muestra como el día anterior.
+  const d = new Date(`${iso}T12:00:00Z`);
+  if (isNaN(d.getTime())) return '';
+  // es-UY devuelve "sáb, 22 de agosto": se limpian el punto y la coma del formato.
+  return d.toLocaleDateString('es-UY', { weekday: 'short', day: 'numeric', month: 'long', timeZone: TZ_UY })
+    .replace('.', '')
+    .replace(',', '')
+    .toUpperCase();
+};
+
+/** "torneo" / "clínica" / "encuentro", para el chip del bloque de la home. */
+const categoriaEvento = (c: Event['category']): string =>
+  c === 'clinic' ? 'clínica' : c === 'social' ? 'encuentro' : 'torneo';
+
+/** "SÁB 22 AL LUN 24 DE AGOSTO" (o un solo día si no hay fecha de cierre). */
+const rangoFechas = (desde: string, hasta?: string): string => {
+  const ini = fechaTorneo(desde);
+  if (!hasta || hasta === desde) return ini;
+  // Mismo mes: no se repite ("SÁB 22 AL LUN 24 DE AGOSTO").
+  const mes = ini.slice(ini.indexOf(' DE '));
+  const fin = fechaTorneo(hasta);
+  return fin.endsWith(mes) ? `${ini.replace(mes, '')} AL ${fin}` : `${ini} AL ${fin}`;
+};
+
+/** "22 de agosto de 2026" — fecha larga de la ficha de un evento. */
+const fechaEventoLarga = (iso: string): string => {
+  const d = new Date(`${iso}T12:00:00Z`); // mediodía UTC: ver fechaTorneo
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ_UY });
+};
+
+/** "22 al 24 de agosto de 2026" — rango en la ficha de un evento. */
+const rangoLargo = (desde: string, hasta?: string): string => {
+  const ini = fechaEventoLarga(desde);
+  if (!hasta || hasta === desde) return ini;
+  const fin = fechaEventoLarga(hasta);
+  // Mismo mes y año: se escribe solo el día de inicio ("22 al 24 de agosto de 2026").
+  const resto = ini.slice(ini.indexOf(' de '));
+  return fin.endsWith(resto) ? `${ini.replace(resto, '')} al ${fin}` : `${ini} al ${fin}`;
+};
+
+/**
+ * Teléfono uruguayo → número para wa.me. "092 103 276" → "59892103276".
+ * Devuelve null si no queda algo con pinta de celular, así el botón de WhatsApp
+ * no se dibuja apuntando a la nada.
+ */
+const waUruguay = (tel: string | undefined): string | null => {
+  const soloDigitos = (tel || '').replace(/\D/g, '').replace(/^00/, '');
+  if (!soloDigitos) return null;
+  const conPais = soloDigitos.startsWith('598') ? soloDigitos : `598${soloDigitos.replace(/^0+/, '')}`;
+  // Largo EXACTO (598 + 8 dígitos): el campo es texto libre, y con ">= 11" un
+  // "092 103 276 / 099 123 456" armaba un número pegoteado que no existe.
+  return conPais.length === 11 ? conPais : null;
+};
+
 const getTotalStock = (product: Product): number =>
   Object.values(product.stockBySize).reduce((sum, qty) => sum + qty, 0);
 
@@ -1071,7 +1131,7 @@ function ProductCard({ product }: { product: Product }) {
 // ─── 7. HomePage ─────────────────────────────────────────────────────────────
 
 function HomePage() {
-  const { products, categories, posts, standings, announcements, datosListos } = useStore();
+  const { products, categories, posts, standings, announcements, events, datosListos } = useStore();
   const heroBgY = useParallax(120);
   const heroTextY = useParallax(-40);
 
@@ -1093,6 +1153,22 @@ function HomePage() {
   const MOSTRAR_CAMINO_MUNDIAL = false;
 
   const activeAnnouncements = announcements.filter(a => a.active);
+
+  // Torneo que se muestra pegado al hero. Se elige solo: el próximo por fecha entre
+  // los que todavía no pasaron. Cuando termina, la sección desaparece sin tocar nada.
+  // Se compara contra el día de HOY (no contra el instante) para que el torneo siga
+  // anunciado durante su propio día en vez de esfumarse a las 00:00.
+  const torneoDestacado = useMemo(() => {
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY });
+    return events
+      // Se mide contra el ÚLTIMO día: un torneo de varios días tiene que seguir
+      // anunciado mientras se juega, no desaparecer al arrancar el segundo día.
+      .filter(e => e.status === 'upcoming' && (e.endDate || e.date) >= hoy)
+      .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+  }, [events]);
+  const waTorneo = waUruguay(torneoDestacado?.phone);
+  const torneoEnCurso = !!torneoDestacado &&
+    torneoDestacado.date <= new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY });
 
   const categoryIcons: Record<string, React.ReactNode> = {
     'Remeras': <Zap size={26} />,
@@ -1212,6 +1288,101 @@ function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* ── 1b. Torneo destacado ────────────────────────────────────────────
+          Va PEGADO al hero a propósito: es lo primero que se ve al bajar, que es
+          para lo que existe. Se dibuja sola desde `events`: aparece cuando hay un
+          torneo próximo y desaparece cuando pasa, sin tocar código. */}
+      {torneoDestacado && (
+        <section className="relative overflow-hidden bg-navy-900 py-14">
+          {/* Guiño noventoso al flyer, sin copiarlo: grilla en fuga + halos de color */}
+          <div
+            aria-hidden
+            className="absolute inset-0 opacity-[0.18]"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(163,230,53,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(236,72,153,.5) 1px, transparent 1px)',
+              backgroundSize: '48px 48px',
+              maskImage: 'linear-gradient(to bottom, transparent, black 40%, black 60%, transparent)',
+              WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 40%, black 60%, transparent)',
+            }}
+          />
+          <div aria-hidden className="pointer-events-none absolute -left-24 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full bg-fuchsia-500/20 blur-3xl" />
+          <div aria-hidden className="pointer-events-none absolute -right-24 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full bg-lime-400/20 blur-3xl" />
+
+          <div className="relative mx-auto max-w-5xl px-4">
+            <Reveal>
+              <div className="rounded-2xl border border-lime-400/30 bg-navy-800/70 p-6 backdrop-blur-sm sm:p-8">
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
+                  {/* El flyer, si lo subieron. Se muestra completo (object-contain):
+                      recortarlo se comería las categorías y el precio. */}
+                  {torneoDestacado.imageUrl && (
+                    <a
+                      href="#/eventos"
+                      className="mx-auto w-full max-w-[220px] flex-shrink-0 lg:mx-0"
+                      aria-label={`Ver ${torneoDestacado.name}`}
+                    >
+                      <img
+                        src={torneoDestacado.imageUrl}
+                        alt={`Flyer de ${torneoDestacado.name}`}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full rounded-xl border border-navy-600 object-contain shadow-lg"
+                        onError={handleImgError}
+                      />
+                    </a>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    {/* Etiqueta según lo que sea (torneo/clínica/social) y según
+                        el momento: mientras se juega no puede decir "próximo". */}
+                    <span className="inline-flex items-center gap-2 rounded-full bg-lime-400 px-3 py-1 font-display text-xs font-black uppercase tracking-wider text-navy-900">
+                      {torneoEnCurso ? 'Se está jugando' : `Próximo ${categoriaEvento(torneoDestacado.category)}`}
+                    </span>
+                    <h2 className="mt-3 font-display text-3xl font-black uppercase leading-none text-white sm:text-4xl">
+                      {torneoDestacado.name}
+                    </h2>
+                    <p className="mt-2 font-display text-sm font-bold uppercase tracking-wide text-fuchsia-400">
+                      {rangoFechas(torneoDestacado.date, torneoDestacado.endDate)} · {torneoDestacado.location}
+                    </p>
+                    <p className="mt-4 max-w-xl text-sm leading-relaxed text-gray-300">
+                      {torneoDestacado.description}
+                    </p>
+                  </div>
+
+                  <div className="flex w-full flex-col gap-3 lg:w-56 lg:flex-shrink-0">
+                    {waTorneo && (
+                      <a
+                        href={`https://wa.me/${waTorneo}?text=${encodeURIComponent(`Hola! Quiero inscribirme al ${torneoDestacado.name}`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300"
+                      >
+                        <MessageCircle size={18} /> Inscribirme
+                      </a>
+                    )}
+                    {/* Gateado con waTorneo, igual que el botón: si en el campo hay
+                        texto que no es un teléfono, no se dibuja un tel: roto. */}
+                    {waTorneo && torneoDestacado.phone && (
+                      <a
+                        href={`tel:${torneoDestacado.phone.replace(/\s/g, '')}`}
+                        className="text-center font-display text-sm font-bold text-white transition-colors hover:text-lime-400"
+                      >
+                        {torneoDestacado.phone}
+                      </a>
+                    )}
+                    <Link
+                      to="/eventos"
+                      className="text-center text-xs font-semibold text-gray-400 underline-offset-2 transition-colors hover:text-white hover:underline"
+                    >
+                      Ver todos los eventos
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      )}
 
       {/* ── 2. Cómo comprar ─────────────────────────────────────────────── */}
       <section className="bg-navy-700 py-16">
@@ -1987,9 +2158,14 @@ function EventsPage() {
     description: 'Torneos, clínicas y encuentros de pickleball en Uruguay. Mirá el calendario y sumate al próximo evento VOLEA.',
   });
 
+  // Un evento es pasado recién cuando terminó su ÚLTIMO día, comparando por día en
+  // Uruguay. Antes usaba new Date(event.date) < new Date(): "2026-08-22" se parsea
+  // como medianoche UTC (21:00 del 21 acá), así que un torneo de varios días
+  // aparecía en gris como "Finalizado" desde la noche anterior y durante todo el
+  // campeonato — justo cuando más se lo busca.
   const isEventPast = (event: Event) => {
-    const eventDate = new Date(event.date);
-    return eventDate < new Date();
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY });
+    return (event.endDate || event.date) < hoy;
   };
 
   const filtered = filter === 'all' ? events : events.filter(e => e.category === filter);
@@ -2057,13 +2233,33 @@ function EventsPage() {
                   </div>
                   <h3 className="font-display text-lg font-bold text-navy-700 mb-2">{evt.name}</h3>
                   <div className="space-y-1 text-sm text-gray-500 mb-3">
-                    <p className="flex items-center gap-2"><Calendar size={14} /> {new Date(evt.date).toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })} - {evt.time}hs</p>
+                    {/* Rango completo en eventos de varios días, y sin "- hs" colgado
+                        cuando no hay hora cargada (un torneo de 3 días no tiene una). */}
+                    <p className="flex items-center gap-2"><Calendar size={14} /> {rangoLargo(evt.date, evt.endDate)}{evt.time ? ` - ${evt.time}hs` : ''}</p>
                     <p className="flex items-center gap-2"><MapPin size={14} /> {evt.location}, {evt.city}</p>
                     {evt.maxParticipants && (
                       <p className="flex items-center gap-2"><Users size={14} /> Máx. {evt.maxParticipants} participantes</p>
                     )}
                   </div>
-                  <p className="text-gray-500 text-sm line-clamp-2">{evt.description}</p>
+                  {/* line-clamp-2 cortaba la descripción en la segunda línea y se
+                      comía el precio, las categorías y el teléfono — justo lo que
+                      alguien viene a buscar acá. */}
+                  <p className="text-gray-500 text-sm whitespace-pre-line">{evt.description}</p>
+                  {waUruguay(evt.phone) && (
+                    <a
+                      href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Quiero inscribirme al ${evt.name}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500"
+                    >
+                      <MessageCircle size={16} /> Inscribirme por WhatsApp
+                    </a>
+                  )}
+                  {evt.phone && (
+                    <p className="mt-2 text-center text-sm text-gray-500">
+                      Consultas al <a href={`tel:${evt.phone.replace(/\s/g, '')}`} className="font-semibold text-navy-700 hover:text-lime-700">{evt.phone}</a>
+                    </p>
+                  )}
                   {evt.mapsUrl && (
                     <a
                       href={evt.mapsUrl}
@@ -2107,7 +2303,9 @@ function EventsPage() {
                   </div>
                   <h3 className="font-display text-lg font-bold text-navy-700 mb-2">{evt.name}</h3>
                   <div className="space-y-1 text-sm text-gray-500">
-                    <p className="flex items-center gap-2"><Calendar size={14} /> {new Date(evt.date).toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                    {/* fechaEventoLarga y no new Date(iso): "2026-05-10" se parsea como
+                        medianoche UTC y en Uruguay se mostraba el día ANTERIOR. */}
+                    <p className="flex items-center gap-2"><Calendar size={14} /> {fechaEventoLarga(evt.date)}</p>
                     <p className="flex items-center gap-2"><MapPin size={14} /> {evt.location}, {evt.city}</p>
                   </div>
                 </div>
@@ -3585,7 +3783,8 @@ function AdminPage() {
                     {events.map(evt => (
                       <tr key={evt.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm">{evt.name}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{new Date(evt.date).toLocaleDateString('es-UY')}</td>
+                        {/* rangoLargo y no new Date(): mostraba un día menos por UTC */}
+                        <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{rangoLargo(evt.date, evt.endDate)}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">{evt.location}, {evt.city}</td>
                         <td className="px-4 py-3">
                           <span className="bg-navy-700/10 text-navy-700 text-xs font-bold px-2 py-1 rounded-full capitalize">
@@ -3624,6 +3823,7 @@ function AdminPage() {
             {eventModal && (
               <EventModal
                 event={editingEvent}
+                uploadImage={(f) => SupabaseService.uploadImage(f, 'events')}
                 onClose={() => { setEventModal(false); setEditingEvent(null); }}
                 onSave={(evt) => {
                   if (editingEvent) {
@@ -4206,9 +4406,10 @@ function ConfirmDialog({ title, message, onCancel, onConfirm }: {
 // ─── EventModal ──────────────────────────────────────────────────────────────
 
 function EventModal({
-  event, onClose, onSave
+  event, uploadImage, onClose, onSave
 }: {
   event: Event | null;
+  uploadImage: (f: File) => Promise<string | null>;
   onClose: () => void;
   onSave: (e: Event) => void;
 }) {
@@ -4226,12 +4427,35 @@ function EventModal({
       maxParticipants: undefined,
       status: 'upcoming',
       category: 'tournament',
+      phone: '',
     }
   );
+  const [subiendo, setSubiendo] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(form);
+  };
+
+  // Subir el flyer desde el celular: antes solo se podía pegar una URL, que en la
+  // práctica significaba no poder poner la imagen.
+  const handleArchivo = async (file: File | undefined) => {
+    if (!file || subiendo) return;
+    setSubiendo(true);
+    try {
+      const url = await uploadImage(file);
+      if (!url) {
+        toast.error('No se pudo subir la imagen. Verificá tu sesión de admin.');
+        return;
+      }
+      setForm(f => ({ ...f, imageUrl: url }));
+      toast.success('Imagen subida ✓');
+    } catch (err) {
+      console.error('Error subiendo imagen del evento:', err);
+      toast.error('No se pudo subir la imagen. Probá de nuevo.');
+    } finally {
+      setSubiendo(false);
+    }
   };
 
   return (
@@ -4268,6 +4492,19 @@ function EventModal({
                 className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
               />
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-navy-700 mb-1">Último día</label>
+              <input
+                type="date"
+                min={form.date || undefined}
+                value={form.endDate || ''}
+                onChange={e => setForm({ ...form, endDate: e.target.value })}
+                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+              />
+              <p className="mt-1 text-[11px] text-gray-400">Solo si dura varios días.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-navy-700 mb-1">Hora</label>
               <input
@@ -4309,15 +4546,44 @@ function EventModal({
               className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none"
             />
           </div>
+          <div>
+            <label className="block text-sm font-semibold text-navy-700 mb-1">Imagen / flyer</label>
+            <div className="flex items-center gap-3">
+              {form.imageUrl && (
+                <img src={form.imageUrl} alt="" className="h-20 w-20 flex-shrink-0 rounded-lg border border-gray-200 object-cover" />
+              )}
+              <div className="min-w-0 flex-1">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-navy-700 transition-colors hover:border-lime-400">
+                  {subiendo ? 'Subiendo…' : form.imageUrl ? 'Cambiar imagen' : 'Subir imagen'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={subiendo}
+                    onChange={e => { void handleArchivo(e.target.files?.[0]); e.target.value = ''; }}
+                  />
+                </label>
+                <input
+                  type="text"
+                  placeholder="…o pegá una URL"
+                  value={form.imageUrl}
+                  onChange={e => setForm({ ...form, imageUrl: e.target.value })}
+                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors text-sm"
+                />
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">URL Imagen</label>
+              <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono de inscripciones</label>
               <input
                 type="text"
-                value={form.imageUrl}
-                onChange={e => setForm({ ...form, imageUrl: e.target.value })}
+                placeholder="092 103 276"
+                value={form.phone || ''}
+                onChange={e => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
               />
+              <p className="mt-1 text-[11px] text-gray-400">Arma el botón de WhatsApp en la home.</p>
             </div>
             <div>
               <label className="block text-sm font-semibold text-navy-700 mb-1">URL Maps</label>
