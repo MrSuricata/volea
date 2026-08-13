@@ -139,6 +139,22 @@ const fechaTorneo = (iso: string): string => {
     .toUpperCase();
 };
 
+/** "22·23·24 AGO" — los días sueltos para el cartel neón del hero. */
+const diasCortos = (desde: string, hasta?: string): string => {
+  const d1 = new Date(`${desde}T12:00:00Z`);
+  if (isNaN(d1.getTime())) return '';
+  const mes = d1.toLocaleDateString('es-UY', { month: 'short', timeZone: TZ_UY }).replace('.', '').toUpperCase();
+  const d2 = hasta ? new Date(`${hasta}T12:00:00Z`) : null;
+  if (!d2 || isNaN(d2.getTime()) || d2 <= d1) return `${d1.getUTCDate()} ${mes}`;
+  const mes2 = d2.toLocaleDateString('es-UY', { month: 'short', timeZone: TZ_UY }).replace('.', '').toUpperCase();
+  // Si cruza de mes hay que nombrar los dos, o "30·31·1 AGO" miente.
+  if (mes2 !== mes) return `${d1.getUTCDate()} ${mes} AL ${d2.getUTCDate()} ${mes2}`;
+  // Hasta 4 días se listan uno por uno ("22·23·24"); más que eso, rango ("22 AL 28").
+  const dias: number[] = [];
+  for (let t = d1.getTime(); t <= d2.getTime(); t += 86400000) dias.push(new Date(t).getUTCDate());
+  return dias.length <= 4 ? `${dias.join('·')} ${mes}` : `${dias[0]} AL ${dias[dias.length - 1]} ${mes}`;
+};
+
 /** "torneo" / "clínica" / "encuentro", para el chip del bloque de la home. */
 const categoriaEvento = (c: Event['category']): string =>
   c === 'clinic' ? 'clínica' : c === 'social' ? 'encuentro' : 'torneo';
@@ -1279,6 +1295,87 @@ function HomePage() {
             ))}
           </div>
         </motion.div>
+
+        {/* ── Cartel neón del torneo ───────────────────────────────────────
+            Ocupa el aire que queda a la derecha del hero (el texto vive en un
+            max-w-3xl dentro de un max-w-7xl). Sale del MISMO dato que el bloque
+            de abajo: si no hay torneo próximo, no existe.
+            Se dibuja desde xl (no lg): a 1024px rozaba la caja del <h1>. Abajo de
+            ese ancho el hero ya está lleno y el anuncio completo aparece igual
+            apenas se baja un scroll. */}
+        {torneoDestacado && (
+          <Link
+            to="/eventos"
+            aria-label={`${torneoDestacado.name}, ${rangoFechas(torneoDestacado.date, torneoDestacado.endDate)}`}
+            className="hero-enter hero-enter-4 group absolute right-8 top-1/2 z-10 hidden -translate-y-1/2 opacity-0 xl:block 2xl:right-16"
+          >
+            <div className="relative -rotate-[5deg] transition-transform duration-500 ease-out group-hover:rotate-0 group-hover:scale-[1.04]">
+              {/* Halo que respira detrás del cartel */}
+              <div
+                aria-hidden
+                className="absolute -inset-6 animate-pulse rounded-2xl bg-fuchsia-500/25 blur-2xl"
+              />
+              <div
+                className="relative rounded-xl border-2 border-fuchsia-500 bg-navy-900/85 px-7 py-6 text-center backdrop-blur-sm"
+                style={{ boxShadow: '0 0 18px rgba(217,70,239,.55), inset 0 0 22px rgba(217,70,239,.18)' }}
+              >
+                {/* Scanlines: el detalle que lo termina de mandar a los 90 */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-xl opacity-25"
+                  style={{
+                    backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.14) 0 1px, transparent 1px 4px)',
+                  }}
+                />
+                <p
+                  className="font-display text-[11px] font-black uppercase tracking-[0.35em] text-cyan-300"
+                  style={{ textShadow: '0 0 10px rgba(103,232,249,.85)' }}
+                >
+                  {torneoEnCurso ? 'Se está jugando' : 'Se viene'}
+                </p>
+                <p className="mt-3 font-display text-sm font-black uppercase tracking-[0.4em] text-white/70">
+                  VOLEA
+                </p>
+                {/* Aberración cromática: dos copias corridas en cian y magenta */}
+                <div className="relative mt-1">
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 font-display text-4xl font-black uppercase leading-none text-cyan-400/70"
+                    style={{ transform: 'translate(-2px, 1px)' }}
+                  >
+                    Racket<br />Roll
+                  </span>
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 font-display text-4xl font-black uppercase leading-none text-fuchsia-500/70"
+                    style={{ transform: 'translate(2px, -1px)' }}
+                  >
+                    Racket<br />Roll
+                  </span>
+                  <span
+                    className="relative font-display text-4xl font-black uppercase leading-none text-white"
+                    style={{ textShadow: '0 0 12px rgba(236,72,153,.95), 0 0 32px rgba(236,72,153,.55)' }}
+                  >
+                    Racket<br />Roll
+                  </span>
+                </div>
+                <div aria-hidden className="mx-auto my-4 h-px w-16 bg-gradient-to-r from-transparent via-fuchsia-400 to-transparent" />
+                <p
+                  className="font-display text-lg font-black uppercase text-lime-400"
+                  style={{ textShadow: '0 0 12px rgba(163,230,53,.7)' }}
+                >
+                  {diasCortos(torneoDestacado.date, torneoDestacado.endDate)}
+                </p>
+                <p className="mt-1 font-display text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                  {torneoDestacado.city?.split(',')[0] || torneoDestacado.location}
+                </p>
+                <p className="mt-4 font-display text-xs font-bold uppercase tracking-wider text-fuchsia-300 transition-colors group-hover:text-fuchsia-200">
+                  Ver info →
+                </p>
+              </div>
+            </div>
+          </Link>
+        )}
 
         {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
