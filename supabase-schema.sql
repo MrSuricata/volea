@@ -38,9 +38,41 @@ CREATE TABLE IF NOT EXISTS events (
   -- segundo día). NULL = evento de un solo día.
   phone TEXT DEFAULT '',
   end_date DATE,
+  -- v11: inscripción online (form público) y sus categorías ("Singles A,Doble Mixto B,...")
+  inscripciones_abiertas BOOLEAN NOT NULL DEFAULT false,
+  categorias TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- v11 — Inscripciones online a eventos. SIN políticas para anon a propósito: los
+-- datos personales (nombre, celular) no son legibles públicamente. El público
+-- escribe SOLO vía la RPC inscribir_evento (SECURITY DEFINER con validaciones y
+-- topes de longitud; mismo celular en el mismo evento actualiza en vez de
+-- duplicar) y lee SOLO el número agregado vía contar_inscriptos. El admin ve y
+-- administra vía is_admin(). Las definiciones completas de ambas RPCs viven en
+-- las migraciones inscripciones_online / inscripciones_celular_con_espacios.
+CREATE TABLE IF NOT EXISTS inscripciones (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  nombre TEXT NOT NULL,
+  celular TEXT NOT NULL,
+  email TEXT DEFAULT '',
+  categorias TEXT NOT NULL,
+  pareja TEXT DEFAULT '',
+  dupr_id TEXT DEFAULT '',
+  notas TEXT DEFAULT '',
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'confirmada', 'baja')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS inscripciones_event_idx ON inscripciones (event_id, created_at);
+ALTER TABLE inscripciones ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS inscripciones_admin_select ON inscripciones;
+CREATE POLICY inscripciones_admin_select ON inscripciones FOR SELECT USING (is_admin());
+DROP POLICY IF EXISTS inscripciones_admin_update ON inscripciones;
+CREATE POLICY inscripciones_admin_update ON inscripciones FOR UPDATE USING (is_admin());
+DROP POLICY IF EXISTS inscripciones_admin_delete ON inscripciones;
+CREATE POLICY inscripciones_admin_delete ON inscripciones FOR DELETE USING (is_admin());
 
 -- v10 — Promociones de la tienda. Una sola fila vigente por vez (cliente y server
 -- toman la primera activa cuya ventana incluya HOY en Montevideo). Vive en la DB

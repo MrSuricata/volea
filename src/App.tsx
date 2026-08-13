@@ -10,7 +10,7 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
@@ -1613,14 +1613,28 @@ function HomePage() {
                   </div>
 
                   <div className="flex w-full flex-col gap-3 lg:w-56 lg:flex-shrink-0">
+                    {/* Con inscripción online abierta, ese es el botón principal;
+                        WhatsApp queda como alternativa. */}
+                    {torneoDestacado.inscripcionesAbiertas && (
+                      <Link
+                        to={`/inscripcion/${torneoDestacado.id}`}
+                        className="pulse-glow flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300"
+                      >
+                        <Check size={18} /> Inscribirme online
+                      </Link>
+                    )}
                     {waTorneo && (
                       <a
                         href={`https://wa.me/${waTorneo}?text=${encodeURIComponent(`Hola! Quiero inscribirme al ${torneoDestacado.name}`)}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300"
+                        className={
+                          torneoDestacado.inscripcionesAbiertas
+                            ? 'flex items-center justify-center gap-2 rounded-lg border border-white/25 px-5 py-2.5 font-display text-sm font-bold text-white transition-colors hover:border-lime-400 hover:text-lime-400'
+                            : 'flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300'
+                        }
                       >
-                        <MessageCircle size={18} /> Inscribirme
+                        <MessageCircle size={18} /> {torneoDestacado.inscripcionesAbiertas ? 'O por WhatsApp' : 'Inscribirme'}
                       </a>
                     )}
                     {/* Gateado con waTorneo, igual que el botón: si en el campo hay
@@ -2525,14 +2539,30 @@ function EventsPage() {
                       alguien viene a buscar acá. */}
                   <p className="text-gray-500 text-sm whitespace-pre-line">{evt.description}</p>
                   {waUruguay(evt.phone) && (
-                    <a
-                      href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Quiero inscribirme al ${evt.name}`)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500"
-                    >
-                      <MessageCircle size={16} /> Inscribirme por WhatsApp
-                    </a>
+                    <>
+                      {/* Con el form online abierto, ese es el camino principal y
+                          WhatsApp queda como alternativa. */}
+                      {evt.inscripcionesAbiertas && (
+                        <Link
+                          to={`/inscripcion/${evt.id}`}
+                          className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500"
+                        >
+                          <Check size={16} /> Inscribirme online
+                        </Link>
+                      )}
+                      <a
+                        href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Quiero inscribirme al ${evt.name}`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-display text-sm font-bold transition-colors ${
+                          evt.inscripcionesAbiertas
+                            ? 'mt-2 border border-gray-200 text-navy-700 hover:bg-gray-50'
+                            : 'mt-4 bg-lime-400 text-navy-700 hover:bg-lime-500'
+                        }`}
+                      >
+                        <MessageCircle size={16} /> {evt.inscripcionesAbiertas ? 'O por WhatsApp' : 'Inscribirme por WhatsApp'}
+                      </a>
+                    </>
                   )}
                   {evt.phone && (
                     <p className="mt-2 text-center text-sm text-gray-500">
@@ -2911,6 +2941,254 @@ function ContactPage() {
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── 11b. InscripcionPage ────────────────────────────────────────────────────
+
+/**
+ * Inscripción online a un evento. Público: escribe vía la RPC inscribir_evento
+ * (los datos personales nunca son legibles por anon) y muestra el contador en
+ * vivo de inscriptos. El DUPR ID se pide opcional: es el único dato que falta
+ * para que los partidos del torneo suban a DUPR.
+ */
+function InscripcionPage() {
+  const { eventId } = useParams();
+  const { events, datosListos } = useStore();
+  const evt = events.find(e => e.id === eventId);
+
+  const [form, setForm] = useState({ nombre: '', celular: '', email: '', pareja: '', duprId: '', notas: '' });
+  const [cats, setCats] = useState<string[]>([]);
+  const [catLibre, setCatLibre] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [listo, setListo] = useState<null | { actualizada: boolean }>(null);
+  const [inscriptos, setInscriptos] = useState<number | null>(null);
+
+  usePageMeta({
+    title: evt ? `Inscripción — ${evt.name} | VOLEA` : 'Inscripción | VOLEA',
+    description: evt ? `Inscribite online al ${evt.name} en ${evt.location}.` : 'Inscripción a eventos VOLEA.',
+  });
+
+  // Contador en vivo: al entrar y después de inscribirse.
+  useEffect(() => {
+    if (!eventId) return;
+    let vivo = true;
+    SupabaseService.contarInscriptos(eventId).then(n => { if (vivo && n !== null) setInscriptos(n); });
+    return () => { vivo = false; };
+  }, [eventId, listo]);
+
+  const opcionesCategorias = (evt?.categorias || '').split(',').map(c => c.trim()).filter(Boolean);
+  const categoriasElegidas = opcionesCategorias.length > 0 ? cats.join(', ') : catLibre.trim();
+  const hayDobles = categoriasElegidas.toLowerCase().includes('doble');
+  const puedeEnviar = form.nombre.trim() !== '' && form.celular.trim() !== '' && categoriasElegidas !== '' && !enviando;
+
+  const toggleCat = (c: string) =>
+    setCats(prev => (prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]));
+
+  const enviar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!puedeEnviar || !evt) return;
+    setEnviando(true);
+    try {
+      const r = await SupabaseService.inscribirEvento({
+        eventId: evt.id,
+        nombre: form.nombre.trim(),
+        celular: form.celular.trim(),
+        categorias: categoriasElegidas,
+        email: form.email.trim(),
+        pareja: form.pareja.trim(),
+        duprId: form.duprId.trim(),
+        notas: form.notas.trim(),
+      });
+      if (!r.ok) {
+        toast.error(r.error || 'No pudimos enviar tu inscripción. Probá de nuevo.');
+        return;
+      }
+      setListo({ actualizada: r.actualizada === true });
+    } catch (err) {
+      console.error('Error inscribiendo:', err);
+      toast.error('No pudimos enviar tu inscripción. Probá de nuevo.');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  if (!evt && !datosListos) {
+    return (
+      <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
+        <CalendarDays size={64} strokeWidth={1} className="mx-auto text-gray-300 mb-4 animate-pulse" />
+        <h1 className="font-display text-2xl font-bold text-navy-700">Cargando el evento…</h1>
+      </div>
+    );
+  }
+  if (!evt) {
+    return (
+      <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
+        <h1 className="font-display text-2xl font-bold text-navy-700 mb-4">No encontramos ese evento</h1>
+        <Link to="/eventos" className="text-lime-800 hover:text-lime-700 font-semibold inline-flex items-center gap-1">
+          Ver todos los eventos <ArrowRight size={16} />
+        </Link>
+      </div>
+    );
+  }
+  if (!evt.inscripcionesAbiertas) {
+    return (
+      <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
+        <h1 className="font-display text-2xl font-bold text-navy-700 mb-2">{evt.name}</h1>
+        <p className="text-gray-500 mb-6">Las inscripciones online de este evento están cerradas.</p>
+        {waUruguay(evt.phone) && (
+          <a
+            href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Consulta por el ${evt.name}`)}`}
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-lime-400 px-6 py-3 font-display font-bold text-navy-700 hover:bg-lime-500 transition-colors"
+          >
+            <MessageCircle size={18} /> Consultar por WhatsApp
+          </a>
+        )}
+      </div>
+    );
+  }
+
+  if (listo) {
+    const wa = waUruguay(evt.phone);
+    return (
+      <div className="fade-in max-w-2xl mx-auto px-4 py-20 text-center">
+        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Check size={40} className="text-green-500" />
+        </div>
+        <h1 className="font-display text-3xl font-bold text-navy-700 mb-3">
+          {listo.actualizada ? '¡Inscripción actualizada!' : '¡Ya estás anotado!'}
+        </h1>
+        <p className="text-gray-500 mb-2">
+          {listo.actualizada
+            ? 'Ya tenías una inscripción con este celular: la actualizamos con estos datos.'
+            : `Te esperamos en el ${evt.name}.`}
+        </p>
+        <p className="text-gray-500 mb-8">La organización te va a contactar para coordinar el pago.</p>
+        {wa && (
+          <a
+            href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola! Me inscribí online al ${evt.name} (soy ${form.nombre.trim()}). Quiero coordinar el pago.`)}`}
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-lime-400 px-8 py-3 font-display font-bold text-navy-700 hover:bg-lime-500 transition-colors"
+          >
+            <MessageCircle size={18} /> Coordinar el pago por WhatsApp
+          </a>
+        )}
+        <div className="mt-8">
+          <Link to="/eventos" className="text-sm text-gray-400 hover:text-navy-700 underline-offset-2 hover:underline">
+            Volver a eventos
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const inputCls = 'w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors';
+  const labelCls = 'block text-sm font-semibold text-navy-700 mb-1';
+
+  return (
+    <div className="fade-in max-w-3xl mx-auto px-4 py-12">
+      <Link to="/eventos" className="text-sm text-gray-400 hover:text-navy-700">← Eventos</Link>
+      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2 mb-1">Inscripción — {evt.name}</h1>
+      <p className="text-gray-500 mb-1">
+        {rangoLargo(evt.date, evt.endDate)} · {evt.location}{evt.city ? `, ${evt.city}` : ''}
+      </p>
+      {inscriptos !== null && inscriptos > 0 && (
+        <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-lime-50 px-3 py-1 text-sm font-semibold text-lime-800">
+          <Users size={14} /> Ya hay {inscriptos} {inscriptos === 1 ? 'inscripto' : 'inscriptos'}
+        </p>
+      )}
+      <div className="w-16 h-1 bg-lime-400 mb-8 mt-2" />
+
+      <form onSubmit={enviar} className="space-y-5">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="insc-nombre" className={labelCls}>Nombre y apellido *</label>
+            <input id="insc-nombre" type="text" required value={form.nombre}
+              onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} />
+          </div>
+          <div>
+            <label htmlFor="insc-celular" className={labelCls}>Celular (WhatsApp) *</label>
+            <input id="insc-celular" type="tel" required placeholder="099 123 456" value={form.celular}
+              onChange={e => setForm({ ...form, celular: e.target.value })} className={inputCls} />
+          </div>
+        </div>
+
+        <div>
+          <span className={labelCls}>Categorías *</span>
+          {opcionesCategorias.length > 0 ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {opcionesCategorias.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => toggleCat(c)}
+                    aria-pressed={cats.includes(c)}
+                    className={`rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors ${
+                      cats.includes(c)
+                        ? 'border-navy-700 bg-navy-700 text-white'
+                        : 'border-gray-200 text-navy-700 hover:border-navy-700'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-gray-400">Tocá todas las categorías en las que jugás.</p>
+            </>
+          ) : (
+            <input type="text" placeholder="Ej: Doble Masculino B" value={catLibre}
+              onChange={e => setCatLibre(e.target.value)} className={inputCls} />
+          )}
+        </div>
+
+        {hayDobles && (
+          <div>
+            <label htmlFor="insc-pareja" className={labelCls}>Tu pareja / compañero</label>
+            <input id="insc-pareja" type="text" placeholder="Nombre de tu compañero/a (si ya lo tenés)"
+              value={form.pareja} onChange={e => setForm({ ...form, pareja: e.target.value })} className={inputCls} />
+            <p className="mt-1 text-xs text-gray-400">Si jugás más de un doble con parejas distintas, aclaralo en las notas.</p>
+          </div>
+        )}
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="insc-email" className={labelCls}>Email</label>
+            <input id="insc-email" type="email" value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} />
+          </div>
+          <div>
+            <label htmlFor="insc-dupr" className={labelCls}>Tu DUPR ID <span className="font-normal text-gray-400">(opcional)</span></label>
+            <input id="insc-dupr" type="text" placeholder="Ej: 7XZ4V2" value={form.duprId}
+              onChange={e => setForm({ ...form, duprId: e.target.value })} className={inputCls} />
+            <p className="mt-1 text-xs text-gray-400">
+              ¿No tenés? Creá tu cuenta gratis en{' '}
+              <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
+              y tus partidos contarán para tu rating mundial.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="insc-notas" className={labelCls}>Notas</label>
+          <textarea id="insc-notas" rows={3} placeholder="Lo que quieras aclarar: parejas por categoría, horarios, etc."
+            value={form.notas} onChange={e => setForm({ ...form, notas: e.target.value })}
+            className={`${inputCls} resize-none`} />
+        </div>
+
+        <button
+          type="submit"
+          disabled={!puedeEnviar}
+          className="pulse-glow w-full rounded-lg bg-lime-400 py-4 font-display text-lg font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:bg-gray-200 disabled:text-gray-400"
+        >
+          {enviando ? 'Enviando…' : 'Enviar inscripción'}
+        </button>
+        <p className="text-center text-xs text-gray-400">
+          El pago se coordina después con la organización{evt.phone ? ` (${evt.phone})` : ''}.
+        </p>
+      </form>
     </div>
   );
 }
@@ -3628,6 +3906,7 @@ function AdminPage() {
   const [eventModal, setEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [deleteEventConfirm, setDeleteEventConfirm] = useState<string | null>(null);
+  const [inscriptosEvent, setInscriptosEvent] = useState<Event | null>(null);
 
   // Club modal state
   const [clubModal, setClubModal] = useState(false);
@@ -4112,6 +4391,15 @@ function AdminPage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
+                            {evt.inscripcionesAbiertas && (
+                              <button
+                                onClick={() => setInscriptosEvent(evt)}
+                                title="Ver inscriptos"
+                                className="text-lime-700 hover:text-lime-500 transition-colors"
+                              >
+                                <Users size={16} />
+                              </button>
+                            )}
                             <button
                               onClick={() => { setEditingEvent(evt); setEventModal(true); }}
                               className="text-navy-700 hover:text-lime-500 transition-colors"
@@ -4149,6 +4437,11 @@ function AdminPage() {
                   setEditingEvent(null);
                 }}
               />
+            )}
+
+            {/* Inscriptos del evento */}
+            {inscriptosEvent && (
+              <InscriptosModal event={inscriptosEvent} onClose={() => setInscriptosEvent(null)} />
             )}
 
             {/* Delete Event Confirm */}
@@ -4717,6 +5010,113 @@ function ConfirmDialog({ title, message, onCancel, onConfirm }: {
   );
 }
 
+// ─── InscriptosModal ─────────────────────────────────────────────────────────
+
+/** Lista de inscriptos de un evento, con cambio de estado y WhatsApp directo. */
+function InscriptosModal({ event, onClose }: { event: Event; onClose: () => void }) {
+  const [filas, setFilas] = useState<Inscripcion[] | null>(null);
+  const [fallo, setFallo] = useState(false);
+  const [cambiando, setCambiando] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    const data = await SupabaseService.getInscripciones(event.id);
+    if (data === null) setFallo(true);
+    else { setFallo(false); setFilas(data); }
+  }, [event.id]);
+
+  useEffect(() => { void cargar(); }, [cargar]);
+
+  const cambiarEstado = async (id: string, estado: Inscripcion['estado']) => {
+    if (cambiando) return;
+    setCambiando(id);
+    try {
+      const ok = await SupabaseService.setEstadoInscripcion(id, estado);
+      if (!ok) { toast.error('No se pudo actualizar. Verificá tu sesión.'); return; }
+      await cargar();
+    } finally {
+      setCambiando(null);
+    }
+  };
+
+  const activos = (filas ?? []).filter(f => f.estado !== 'baja');
+  const bajas = (filas ?? []).filter(f => f.estado === 'baja');
+  const ESTADO_CHIP: Record<Inscripcion['estado'], string> = {
+    pendiente: 'bg-amber-50 text-amber-700',
+    confirmada: 'bg-green-50 text-green-700',
+    baja: 'bg-gray-100 text-gray-500',
+  };
+
+  const fila = (i: Inscripcion) => (
+    <div key={i.id} className={`rounded-xl border border-gray-100 p-3 ${i.estado === 'baja' ? 'opacity-50' : ''}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-display font-bold text-navy-700">{i.nombre}</span>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${ESTADO_CHIP[i.estado]}`}>{i.estado}</span>
+        {i.duprId && <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">DUPR {i.duprId}</span>}
+      </div>
+      <p className="mt-1 text-sm text-gray-600">{i.categorias}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-gray-400">
+        {waUruguay(i.celular) ? (
+          <a href={`https://wa.me/${waUruguay(i.celular)}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">
+            {i.celular}
+          </a>
+        ) : <span>{i.celular}</span>}
+        {i.email && <span>{i.email}</span>}
+        {i.pareja && <span>pareja: {i.pareja}</span>}
+        <span>{new Date(i.createdAt).toLocaleString('es-UY', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Montevideo' })}</span>
+      </div>
+      {i.notas && <p className="mt-1 text-xs italic text-gray-500">"{i.notas}"</p>}
+      <div className="mt-2 flex gap-2">
+        {i.estado !== 'confirmada' && (
+          <button onClick={() => void cambiarEstado(i.id, 'confirmada')} disabled={cambiando !== null}
+            className="rounded-lg bg-green-50 px-3 py-1 text-xs font-bold text-green-700 hover:bg-green-100 disabled:opacity-50">
+            {cambiando === i.id ? '…' : 'Confirmar'}
+          </button>
+        )}
+        {i.estado !== 'pendiente' && (
+          <button onClick={() => void cambiarEstado(i.id, 'pendiente')} disabled={cambiando !== null}
+            className="rounded-lg bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+            A pendiente
+          </button>
+        )}
+        {i.estado !== 'baja' && (
+          <button onClick={() => void cambiarEstado(i.id, 'baja')} disabled={cambiando !== null}
+            className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500 hover:bg-gray-200 disabled:opacity-50">
+            Dar de baja
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 p-4">
+          <h2 className="font-display text-lg font-bold text-navy-700">
+            Inscriptos — {event.name}{filas ? ` (${activos.length})` : ''}
+          </h2>
+          <button onClick={onClose} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700"><X size={20} /></button>
+        </div>
+        <div className="flex-1 space-y-2 overflow-y-auto p-4">
+          {fallo && <p className="py-8 text-center text-sm text-gray-400">No se pudieron cargar. Verificá tu sesión de admin.</p>}
+          {!fallo && filas === null && <p className="py-8 text-center text-sm text-gray-400">Cargando…</p>}
+          {filas !== null && filas.length === 0 && (
+            <p className="py-8 text-center text-sm text-gray-500">Todavía no hay inscriptos. Compartí el link: volea.vercel.app/#/inscripcion/{event.id}</p>
+          )}
+          {activos.map(fila)}
+          {bajas.length > 0 && (
+            <>
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">Bajas ({bajas.length})</p>
+              {bajas.map(fila)}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── EventModal ──────────────────────────────────────────────────────────────
 
 function EventModal({
@@ -4742,6 +5142,8 @@ function EventModal({
       status: 'upcoming',
       category: 'tournament',
       phone: '',
+      inscripcionesAbiertas: false,
+      categorias: '',
     }
   );
   const [subiendo, setSubiendo] = useState(false);
@@ -4943,6 +5345,34 @@ function EventModal({
                 <option value="social">Social</option>
               </select>
             </div>
+          </div>
+
+          {/* Inscripción online */}
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.inscripcionesAbiertas === true}
+                onChange={e => setForm({ ...form, inscripcionesAbiertas: e.target.checked })}
+                className="accent-lime-500 w-4 h-4"
+              />
+              <span className="text-sm font-semibold text-navy-700">Inscripción online abierta</span>
+            </label>
+            {form.inscripcionesAbiertas && (
+              <div>
+                <label className="block text-sm font-semibold text-navy-700 mb-1">Categorías (separadas por coma)</label>
+                <textarea
+                  rows={2}
+                  placeholder="Singles A,Singles B,Doble Mixto A,…"
+                  value={form.categorias || ''}
+                  onChange={e => setForm({ ...form, categorias: e.target.value })}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none text-sm"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Se muestran como botones en el formulario. Vacío = campo de texto libre.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -5615,6 +6045,7 @@ function AnimatedRoutes() {
       <Route path="/torneos" element={<PageTransition><TorneosListaRoute /></PageTransition>} />
       <Route path="/torneos/:id" element={<PageTransition><TorneoDetalleRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
+      <Route path="/inscripcion/:eventId" element={<PageTransition><InscripcionPage /></PageTransition>} />
       <Route path="/mapa" element={<PageTransition><MapPage /></PageTransition>} />
       <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />
       <Route path="/checkout" element={<PageTransition><CheckoutPage /></PageTransition>} />

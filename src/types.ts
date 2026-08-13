@@ -172,6 +172,40 @@ export interface Event {
   phone?: string;
   /** Último día, en eventos de varios días. Vacío = arranca y termina en `date`. */
   endDate?: string;
+  /** true = el form público de inscripción está abierto para este evento. */
+  inscripcionesAbiertas?: boolean;
+  /** Categorías del evento, separadas por coma ("Singles A,Doble Mixto B"). */
+  categorias?: string;
+}
+
+/**
+ * Inscripción online a un evento (tabla inscripciones). El público solo escribe
+ * vía la RPC inscribir_evento y solo lee el contador: los datos personales son
+ * visibles únicamente para admins.
+ */
+export interface Inscripcion {
+  id: string;
+  eventId: string;
+  nombre: string;
+  celular: string;
+  email: string;
+  categorias: string;
+  pareja: string;
+  duprId: string;
+  notas: string;
+  estado: 'pendiente' | 'confirmada' | 'baja';
+  createdAt: string;
+}
+
+export interface InscripcionInput {
+  eventId: string;
+  nombre: string;
+  celular: string;
+  categorias: string;
+  email?: string;
+  pareja?: string;
+  duprId?: string;
+  notas?: string;
 }
 
 export type PaymentStatus = 'iniciado' | 'aprobado' | 'pendiente' | 'rechazado' | 'devuelto';

@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -513,6 +513,8 @@ export const SupabaseService = {
       category: row.category || 'tournament',
       phone: row.phone || '',
       endDate: row.end_date || '',
+      inscripcionesAbiertas: row.inscripciones_abiertas === true,
+      categorias: row.categorias || '',
     }));
   },
 
@@ -527,6 +529,8 @@ export const SupabaseService = {
         status: e.status, category: e.category,
         phone: e.phone || null,
         end_date: e.endDate || null,
+        inscripciones_abiertas: e.inscripcionesAbiertas === true,
+        categorias: e.categorias || '',
       }, { onConflict: 'id' }));
     }
   },
@@ -534,6 +538,74 @@ export const SupabaseService = {
   async deleteEvent(id: string): Promise<void> {
     if (!supabase) return;
     await conTechoEscritura(supabase.from('events').delete().eq('id', id));
+  },
+
+  // ── Inscripciones ──
+  /**
+   * Alta pública de inscripción (RPC inscribir_evento, corre como anon).
+   * Sin isSupabaseConnected(): misma regla que las escrituras del admin — se
+   * intenta siempre que haya cliente, el probe frío da falsos negativos.
+   */
+  async inscribirEvento(i: InscripcionInput): Promise<{ ok: boolean; actualizada?: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('inscribir_evento', {
+      p_event_id: i.eventId,
+      p_nombre: i.nombre,
+      p_celular: i.celular,
+      p_categorias: i.categorias,
+      p_email: i.email || '',
+      p_pareja: i.pareja || '',
+      p_dupr_id: i.duprId || '',
+      p_notas: i.notas || '',
+    }));
+    if (error) {
+      console.error('Error inscribiendo:', error);
+      return { ok: false, error: 'No pudimos enviar tu inscripción. Probá de nuevo en un rato.' };
+    }
+    return {
+      ok: data?.ok === true,
+      actualizada: data?.actualizada === true,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+    };
+  },
+
+  /** Cuántos inscriptos tiene un evento (número agregado, apto público). */
+  async contarInscriptos(eventId: string): Promise<number | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.rpc('contar_inscriptos', { p_event_id: eventId }));
+    if (error) return null;
+    return typeof data === 'number' ? data : null;
+  },
+
+  /** Lista de inscriptos de un evento — solo admins (RLS con is_admin()). */
+  async getInscripciones(eventId: string): Promise<Inscripcion[] | null> {
+    if (!supabase) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('inscripciones').select('*').eq('event_id', eventId).order('created_at', { ascending: true }),
+    );
+    if (error) { console.error('Error fetching inscripciones:', error); return null; }
+    return (data || []).map(row => ({
+      id: row.id,
+      eventId: row.event_id,
+      nombre: row.nombre || '',
+      celular: row.celular || '',
+      email: row.email || '',
+      categorias: row.categorias || '',
+      pareja: row.pareja || '',
+      duprId: row.dupr_id || '',
+      notas: row.notas || '',
+      estado: row.estado || 'pendiente',
+      createdAt: row.created_at || '',
+    }));
+  },
+
+  async setEstadoInscripcion(id: string, estado: Inscripcion['estado']): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('inscripciones').update({ estado }).eq('id', id));
+    if (error) { console.error('Error updating inscripción:', error); return false; }
+    return true;
   },
 
   // ── Promos ──
