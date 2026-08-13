@@ -1294,21 +1294,28 @@ function HomePage() {
               </div>
             ))}
           </div>
-        </motion.div>
 
-        {/* ── Cartel neón del torneo ───────────────────────────────────────
-            Ocupa el aire que queda a la derecha del hero (el texto vive en un
-            max-w-3xl dentro de un max-w-7xl). Sale del MISMO dato que el bloque
-            de abajo: si no hay torneo próximo, no existe.
-            Se dibuja desde xl (no lg): a 1024px rozaba la caja del <h1>. Abajo de
-            ese ancho el hero ya está lleno y el anuncio completo aparece igual
-            apenas se baja un scroll. */}
-        {torneoDestacado && (
-          <Link
-            to="/eventos"
-            aria-label={`${torneoDestacado.name}, ${rangoFechas(torneoDestacado.date, torneoDestacado.endDate)}`}
-            className="hero-enter hero-enter-4 group absolute right-8 top-1/2 z-10 hidden -translate-y-1/2 opacity-0 xl:block 2xl:right-16"
-          >
+          {/* ── Cartel neón del torneo ─────────────────────────────────────
+              Vive DENTRO de este contenedor (y no suelto en la <section>) a
+              propósito: así se centra contra el bloque de texto en vez de contra
+              el alto total del hero — colgado de la sección quedaba ~140px más
+              abajo, a la altura de las mini-stats — y además acompaña el parallax.
+              Ocupa el aire de la derecha (el texto vive en un max-w-3xl dentro de
+              este max-w-7xl).
+              Sale del MISMO dato que el bloque de abajo: si no hay torneo próximo,
+              no existe. Se dibuja desde xl: a 1024px rozaba la caja del <h1>. */}
+          {torneoDestacado && (
+            /* El contenedor POSICIONA y el <Link> de adentro ANIMA, separados a
+               propósito: .hero-enter termina en transform: translateY(0), que
+               pisaba el -translate-y-1/2 del centrado. Con ambas cosas en el mismo
+               elemento el cartel quedaba media altura más abajo (su borde superior
+               caía justo donde tenía que estar el centro). */
+            <div className="absolute right-4 top-1/2 z-10 hidden -translate-y-1/2 xl:block 2xl:right-0">
+            <Link
+              to="/eventos"
+              aria-label={`${torneoDestacado.name}, ${rangoFechas(torneoDestacado.date, torneoDestacado.endDate)}`}
+              className="hero-enter hero-enter-4 group block opacity-0"
+            >
             <div className="relative -rotate-[3deg] transition-transform duration-500 ease-out group-hover:rotate-0 group-hover:scale-[1.03]">
               {/* Halo detrás del cartel. Sin animate-pulse: latía todo el bloque,
                   incluido el texto, y eso era buena parte de lo que se veía raro. */}
@@ -1317,8 +1324,8 @@ function HomePage() {
                 className="absolute -inset-5 rounded-2xl bg-fuchsia-600/20 blur-2xl"
               />
               <div
-                className="relative w-[248px] rounded-xl border border-fuchsia-400/80 bg-navy-900/90 px-6 py-7 text-center"
-                style={{ boxShadow: '0 0 0 1px rgba(217,70,239,.25), 0 0 24px rgba(217,70,239,.35)' }}
+                className="relative w-[320px] rounded-2xl border border-fuchsia-400/80 bg-navy-900/90 px-8 py-9 text-center"
+                style={{ boxShadow: '0 0 0 1px rgba(217,70,239,.25), 0 0 30px rgba(217,70,239,.35)' }}
               >
                 {/* Scanlines bien suaves: apenas una textura, no una trama visible. */}
                 <div
@@ -1329,43 +1336,45 @@ function HomePage() {
                   }}
                 />
                 <p
-                  className="font-display text-[10px] font-black uppercase tracking-[0.4em] text-cyan-300"
+                  className="font-display text-xs font-black uppercase tracking-[0.4em] text-cyan-300"
                   style={{ textShadow: '0 0 12px rgba(103,232,249,.7)' }}
                 >
                   {torneoEnCurso ? 'Se está jugando' : 'Se viene'}
                 </p>
-                <p className="mt-4 font-display text-[11px] font-black uppercase tracking-[0.5em] text-white/50">
+                <p className="mt-5 font-display text-sm font-black uppercase tracking-[0.5em] text-white/50">
                   VOLEA
                 </p>
                 {/* La aberración cromática se hace con text-shadow sobre UN solo
                     elemento: con capas superpuestas los fantasmas caían 4-6px
                     corridos en vertical y el título se veía borroso, no glitcheado. */}
                 <p
-                  className="mt-1 font-display text-[38px] font-black uppercase leading-[0.9] text-white"
+                  className="mt-1.5 font-display text-[52px] font-black uppercase leading-[0.88] text-white"
                   style={{
                     textShadow:
-                      '-2px 0 0 rgba(34,211,238,.85), 2px 0 0 rgba(217,70,239,.85), 0 0 22px rgba(236,72,153,.45)',
+                      '-2px 0 0 rgba(34,211,238,.85), 2px 0 0 rgba(217,70,239,.85), 0 0 26px rgba(236,72,153,.45)',
                   }}
                 >
                   Racket<br />Roll
                 </p>
-                <div aria-hidden className="mx-auto my-5 h-px w-20 bg-gradient-to-r from-transparent via-fuchsia-400/80 to-transparent" />
+                <div aria-hidden className="mx-auto my-6 h-px w-24 bg-gradient-to-r from-transparent via-fuchsia-400/80 to-transparent" />
                 <p
-                  className="font-display text-base font-black uppercase tracking-wide text-lime-400"
+                  className="font-display text-xl font-black uppercase tracking-wide text-lime-400"
                   style={{ textShadow: '0 0 14px rgba(163,230,53,.55)' }}
                 >
                   {diasCortos(torneoDestacado.date, torneoDestacado.endDate)}
                 </p>
-                <p className="mt-1.5 font-display text-[10px] font-bold uppercase tracking-[0.3em] text-gray-400">
+                <p className="mt-2 font-display text-xs font-bold uppercase tracking-[0.3em] text-gray-400">
                   {torneoDestacado.city?.split(',')[0] || torneoDestacado.location}
                 </p>
-                <p className="mt-5 font-display text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300 transition-colors group-hover:text-white">
+                <p className="mt-5 font-display text-xs font-bold uppercase tracking-[0.2em] text-fuchsia-300 transition-colors group-hover:text-white">
                   Ver info →
                 </p>
               </div>
             </div>
-          </Link>
-        )}
+            </Link>
+            </div>
+          )}
+        </motion.div>
 
         {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
