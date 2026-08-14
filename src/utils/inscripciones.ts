@@ -19,6 +19,17 @@ export const marcaVisitaInscripciones = (): string => {
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 };
 
+// La marca ANTERIOR se congela una vez por carga de página: si se capturara en
+// cada montaje de la pestaña, el chip «nueva» moriría al ir a otra pestaña y
+// volver (y con el doble-mount de StrictMode en dev, directamente no aparecía).
+let marcaPreviaCongelada: string | null = null;
+
+/** Marca de la visita anterior a esta carga de página (para el chip «nueva»). */
+export const marcaVisitaPrevia = (): string => {
+  if (marcaPreviaCongelada === null) marcaPreviaCongelada = marcaVisitaInscripciones();
+  return marcaPreviaCongelada;
+};
+
 export function categoriasDe(i: Inscripcion): string[] {
   return i.categorias.split(',').map(c => c.trim()).filter(Boolean);
 }

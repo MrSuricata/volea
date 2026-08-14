@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ClipboardList, RefreshCw, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Event, Inscripcion } from '../types';
 import { SupabaseService } from '../services/supabaseService';
-import { armarSeccionesCategoria, categoriasDe, parejaDe, MARCA_INSC_VISTAS, marcaVisitaInscripciones } from '../utils/inscripciones';
+import { armarSeccionesCategoria, categoriasDe, parejaDe, MARCA_INSC_VISTAS, marcaVisitaPrevia } from '../utils/inscripciones';
 import { fechaHumana } from '../utils/fechas';
 import { waUruguay } from '../utils/telefono';
 
@@ -41,11 +41,11 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const [cambiando, setCambiando] = useState<string | null>(null);
   const [vista, setVista] = useState<'recientes' | 'categorias'>('recientes');
 
-  // La marca de visita ANTERIOR pinta el chip «nueva»; al montar se pisa con
-  // ahora (el badge del panel se apaga vía alVerla).
-  const marcaPreviaRef = useRef<string>('');
+  // La marca de visita ANTERIOR (congelada por carga de página, ver utils)
+  // pinta el chip «nueva»; al montar se pisa la guardada con ahora y el badge
+  // del panel se apaga vía alVerla.
   useEffect(() => {
-    marcaPreviaRef.current = marcaVisitaInscripciones();
+    marcaVisitaPrevia(); // congela la previa antes de pisarla
     localStorage.setItem(MARCA_INSC_VISTAS, new Date().toISOString());
     alVerla();
     // Solo al montar: alVerla es estable a efectos prácticos (setState del padre).
@@ -87,7 +87,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const activos = (filas ?? []).filter(f => f.estado !== 'baja');
   const bajas = (filas ?? []).filter(f => f.estado === 'baja');
   const recientes = [...activos].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const esNueva = (i: Inscripcion) => i.createdAt > marcaPreviaRef.current;
+  const esNueva = (i: Inscripcion) => i.createdAt > marcaVisitaPrevia();
   const linkPublico = evt ? `volea.vercel.app/#/inscripcion/${evt.id}` : '';
 
   const parejasDeFila = (i: Inscripcion): { categoria: string; pareja: string }[] =>
