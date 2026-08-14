@@ -2958,12 +2958,23 @@ function InscripcionPage() {
   const { events, datosListos } = useStore();
   const evt = events.find(e => e.id === eventId);
 
-  const [form, setForm] = useState({ nombre: '', celular: '', email: '', pareja: '', duprId: '', notas: '' });
+  const [form, setForm] = useState({ nombre: '', celular: '', email: '', duprId: '', notas: '' });
   const [cats, setCats] = useState<string[]>([]);
   const [catLibre, setCatLibre] = useState('');
+  // Pareja POR categoría de dobles: {"Doble Mixto A": "Nombre"}. Quien juega
+  // mixto y su categoría de género carga un compañero para cada una.
+  const [parejas, setParejas] = useState<Record<string, string>>({});
   const [enviando, setEnviando] = useState(false);
   const [listo, setListo] = useState<null | { actualizada: boolean }>(null);
   const [inscriptos, setInscriptos] = useState<number | null>(null);
+  // Nombres del padrón como sugerencias (datalist): induce la grafía canónica
+  // sin bloquear texto libre. rk_jugadores es de lectura pública (los muestra el ranking).
+  const [nombresPadron, setNombresPadron] = useState<string[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    SupabaseService.getJugadoresNombres().then(ns => { if (vivo) setNombresPadron(ns); });
+    return () => { vivo = false; };
+  }, []);
 
   usePageMeta({
     title: evt ? `Inscripción — ${evt.name} | VOLEA` : 'Inscripción | VOLEA',
@@ -2980,11 +2991,16 @@ function InscripcionPage() {
 
   const opcionesCategorias = (evt?.categorias || '').split(',').map(c => c.trim()).filter(Boolean);
   const categoriasElegidas = opcionesCategorias.length > 0 ? cats.join(', ') : catLibre.trim();
-  const hayDobles = categoriasElegidas.toLowerCase().includes('doble');
+  // Un campo de pareja por cada categoría de dobles elegida (dobles = contiene "doble").
+  const catsDobles = (opcionesCategorias.length > 0 ? cats : [catLibre.trim()])
+    .filter(c => c.toLowerCase().includes('doble'));
   const puedeEnviar = form.nombre.trim() !== '' && form.celular.trim() !== '' && categoriasElegidas !== '' && !enviando;
 
-  const toggleCat = (c: string) =>
+  const toggleCat = (c: string) => {
+    // Al destildar una categoría se descarta su pareja (si vuelve, la escribe de nuevo).
+    if (cats.includes(c)) setParejas(p => { const { [c]: _, ...resto } = p; return resto; });
     setCats(prev => (prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]));
+  };
 
   const enviar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2997,7 +3013,11 @@ function InscripcionPage() {
         celular: form.celular.trim(),
         categorias: categoriasElegidas,
         email: form.email.trim(),
-        pareja: form.pareja.trim(),
+        parejas: Object.fromEntries(
+          Object.entries(parejas)
+            .filter(([c, v]) => catsDobles.includes(c) && v.trim() !== '')
+            .map(([c, v]) => [c, v.trim()]),
+        ),
         duprId: form.duprId.trim(),
         notas: form.notas.trim(),
       });
@@ -3105,7 +3125,7 @@ function InscripcionPage() {
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-nombre" className={labelCls}>Nombre y apellido *</label>
-            <input id="insc-nombre" type="text" required value={form.nombre}
+            <input id="insc-nombre" type="text" required value={form.nombre} list="padron-nombres"
               onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} />
           </div>
           <div>
@@ -3144,12 +3164,19 @@ function InscripcionPage() {
           )}
         </div>
 
-        {hayDobles && (
-          <div>
-            <label htmlFor="insc-pareja" className={labelCls}>Tu pareja / compañero</label>
-            <input id="insc-pareja" type="text" placeholder="Nombre de tu compañero/a (si ya lo tenés)"
-              value={form.pareja} onChange={e => setForm({ ...form, pareja: e.target.value })} className={inputCls} />
-            <p className="mt-1 text-xs text-gray-400">Si jugás más de un doble con parejas distintas, aclaralo en las notas.</p>
+        {catsDobles.length > 0 && (
+          <div className="space-y-3">
+            {catsDobles.map(c => (
+              <div key={c}>
+                <label htmlFor={`insc-pareja-${c}`} className={labelCls}>Tu pareja para {c}</label>
+                <input id={`insc-pareja-${c}`} type="text" list="padron-nombres"
+                  placeholder="Nombre de tu compañero/a (si ya lo tenés)"
+                  value={parejas[c] ?? ''}
+                  onChange={e => setParejas(p => ({ ...p, [c]: e.target.value }))}
+                  className={inputCls} />
+              </div>
+            ))}
+            <p className="text-xs text-gray-400">Dejá vacío el que todavía no tenés confirmado.</p>
           </div>
         )}
 
@@ -3188,6 +3215,11 @@ function InscripcionPage() {
         <p className="text-center text-xs text-gray-400">
           El pago se coordina después con la organización{evt.phone ? ` (${evt.phone})` : ''}.
         </p>
+        {nombresPadron.length > 0 && (
+          <datalist id="padron-nombres">
+            {[...new Set(nombresPadron)].map(n => <option key={n} value={n} />)}
+          </datalist>
+        )}
       </form>
     </div>
   );
