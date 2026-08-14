@@ -10,6 +10,7 @@ import {
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
+import { waUruguay } from './utils/telefono';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
@@ -192,14 +193,7 @@ const rangoLargo = (desde: string, hasta?: string): string => {
  * Devuelve null si no queda algo con pinta de celular, así el botón de WhatsApp
  * no se dibuja apuntando a la nada.
  */
-const waUruguay = (tel: string | undefined): string | null => {
-  const soloDigitos = (tel || '').replace(/\D/g, '').replace(/^00/, '');
-  if (!soloDigitos) return null;
-  const conPais = soloDigitos.startsWith('598') ? soloDigitos : `598${soloDigitos.replace(/^0+/, '')}`;
-  // Largo EXACTO (598 + 8 dígitos): el campo es texto libre, y con ">= 11" un
-  // "092 103 276 / 099 123 456" armaba un número pegoteado que no existe.
-  return conPais.length === 11 ? conPais : null;
-};
+// waUruguay vive en utils/telefono (lo comparte la pestaña Inscripciones).
 
 const getTotalStock = (product: Product): number =>
   Object.values(product.stockBySize).reduce((sum, qty) => sum + qty, 0);
