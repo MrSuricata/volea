@@ -7,6 +7,8 @@ import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
 import { formatVariant, stockTotal, variantesConStock, VENTAS_RAPIDAS, ventaRapidaAcumulada } from '../utils/caja';
 import type { VentaRapida } from '../utils/caja';
+import { sugerirDeudores } from '../utils/nombres';
+import { SupabaseService } from '../services/supabaseService';
 
 const TZ = 'America/Montevideo';
 
@@ -91,6 +93,17 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [exporting, setExporting] = useState(false);
   const [ventaAbierta, setVentaAbierta] = useState(false);
   const [gastoAbierto, setGastoAbierto] = useState(false);
+
+  // Nombres del padrón de jugadores para sugerir deudores sin duplicar
+  // ("Hernán" ≠ "Hernan"). Se cargan la primera vez que se abre el modal de
+  // venta y quedan cacheados para la vida de la pestaña.
+  const [nombresPadron, setNombresPadron] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!ventaAbierta || nombresPadron !== null) return;
+    let vivo = true;
+    void SupabaseService.getJugadoresNombres().then(ns => { if (vivo) setNombresPadron(ns); });
+    return () => { vivo = false; };
+  }, [ventaAbierta, nombresPadron]);
 
   // Secuencia de fetches: si una respuesta vieja llega después de una nueva
   // (ej: refresh disparado justo antes de confirmar una anulación), se ignora.
@@ -534,6 +547,13 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         <VentaModal
           products={products}
           registrar={registrarVenta}
+          deudoresAbiertos={porCobrar.deudores
+            .filter(d => d.nombre !== 'Sin nombre')
+            .map(d => ({ nombre: d.nombre, saldo: d.total }))}
+          nombresSugeridos={[
+            ...entries.filter(e => e.debtorName).map(e => e.debtorName as string),
+            ...(nombresPadron ?? []),
+          ]}
           onClose={() => setVentaAbierta(false)}
           onDone={() => { setVentaAbierta(false); refresh(); }}
         />
@@ -828,9 +848,13 @@ function FotoProducto({ producto }: { producto: Product }) {
  * el bot) o ítem suelto. Si la RPC falla (ej: "sin stock: quedan N"), el modal
  * queda abierto para corregir.
  */
-function VentaModal({ products, registrar, onClose, onDone }: {
+function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, onClose, onDone }: {
   products: Product[];
   registrar: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
+  /** Deudores con deuda abierta (nombre + saldo), para elegir con un toque. */
+  deudoresAbiertos: { nombre: string; saldo: number }[];
+  /** Nombres conocidos (deudores históricos + padrón) para sugerir al escribir. */
+  nombresSugeridos: string[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -859,6 +883,16 @@ function VentaModal({ products, registrar, onClose, onDone }: {
   const [metodo, setMetodo] = useState<VentaCajaInput['payment'] | null>(null);
   const [deudor, setDeudor] = useState('');
   const [registrando, setRegistrando] = useState(false);
+
+  // Sugerencias de deudor: matching sin tildes y tolerante a typos, deudores
+  // abiertos primero con su saldo. Si el texto ya es exactamente un nombre
+  // sugerido (recién elegido con un toque), no se repite abajo.
+  const sugerenciasDeudor = useMemo(() => {
+    if (metodo !== 'debe') return [];
+    const q = deudor.trim();
+    if (q === '') return [];
+    return sugerirDeudores(deudoresAbiertos, nombresSugeridos, q).filter(s => s.nombre !== q);
+  }, [metodo, deudor, deudoresAbiertos, nombresSugeridos]);
 
   // Solo productos activos con algo para vender
   const candidatos = useMemo(() => {
@@ -1177,6 +1211,20 @@ function VentaModal({ products, registrar, onClose, onDone }: {
             {metodo === 'debe' && (
               <div className="mt-2">
                 <label htmlFor="venta-deudor" className={labelClass}>¿Quién debe?</label>
+                {deudor.trim() === '' && deudoresAbiertos.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {deudoresAbiertos.slice(0, 8).map(d => (
+                      <button
+                        key={d.nombre}
+                        type="button"
+                        onClick={() => setDeudor(d.nombre)}
+                        className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100"
+                      >
+                        {d.nombre} · {formatMoney(d.saldo)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <input
                   id="venta-deudor"
                   type="text"
@@ -1185,7 +1233,26 @@ function VentaModal({ products, registrar, onClose, onDone }: {
                   placeholder="Nombre y apellido"
                   className={inputClass}
                 />
-                <p className="mt-1 text-[11px] text-gray-400">Queda en «Por cobrar»; se cobra desde el bot con «cobré + nombre».</p>
+                {sugerenciasDeudor.length > 0 && (
+                  <div className="mt-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
+                    {sugerenciasDeudor.map(s => (
+                      <button
+                        key={s.nombre}
+                        type="button"
+                        onClick={() => setDeudor(s.nombre)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                      >
+                        <span className="font-semibold text-navy-700">{s.nombre}</span>
+                        {s.saldo !== null && (
+                          <span className="whitespace-nowrap text-xs font-bold text-amber-600">ya debe {formatMoney(s.saldo)}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona); se cobra con «Cobrar» o desde el bot.
+                </p>
               </div>
             )}
           </div>
