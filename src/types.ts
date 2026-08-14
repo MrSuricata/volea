@@ -190,7 +190,10 @@ export interface Inscripcion {
   celular: string;
   email: string;
   categorias: string;
+  /** Legacy: campo único de pareja de las inscripciones viejas. */
   pareja: string;
+  /** Pareja por categoría de dobles: {"Doble Mixto A": "Nombre"}. */
+  parejas: Record<string, string>;
   duprId: string;
   notas: string;
   estado: 'pendiente' | 'confirmada' | 'baja';
@@ -204,6 +207,7 @@ export interface InscripcionInput {
   categorias: string;
   email?: string;
   pareja?: string;
+  parejas?: Record<string, string>;
   duprId?: string;
   notas?: string;
 }

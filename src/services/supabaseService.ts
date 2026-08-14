@@ -555,6 +555,7 @@ export const SupabaseService = {
       p_categorias: i.categorias,
       p_email: i.email || '',
       p_pareja: i.pareja || '',
+      p_parejas: i.parejas || {},
       p_dupr_id: i.duprId || '',
       p_notas: i.notas || '',
     }));
@@ -594,6 +595,7 @@ export const SupabaseService = {
       email: row.email || '',
       categorias: row.categorias || '',
       pareja: row.pareja || '',
+      parejas: row.parejas && typeof row.parejas === 'object' && !Array.isArray(row.parejas) ? row.parejas : {},
       duprId: row.dupr_id || '',
       notas: row.notas || '',
       estado: row.estado || 'pendiente',
@@ -606,6 +608,37 @@ export const SupabaseService = {
     const { error } = await conTechoEscritura(supabase.from('inscripciones').update({ estado }).eq('id', id));
     if (error) { console.error('Error updating inscripción:', error); return false; }
     return true;
+  },
+
+  /**
+   * Cuántas inscripciones entraron después de `desdeISO` (badge del admin).
+   * Head count, sin filas: barato para consultarlo al montar el panel.
+   */
+  async getInscripcionesNuevas(desdeISO: string): Promise<number | null> {
+    if (!supabase) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const res = await conTechoLectura(
+      supabase.from('inscripciones').select('id', { count: 'exact', head: true }).gt('created_at', desdeISO),
+    );
+    if (res.error) return null;
+    return ('count' in res ? res.count : 0) ?? 0;
+  },
+
+  /**
+   * Nombres del padrón (rk_jugadores, lectura pública) + alias, para datalists
+   * del form de inscripción y sugerencias de deudor en la Caja.
+   */
+  async getJugadoresNombres(): Promise<string[]> {
+    if (!supabase) return [];
+    const { data, error } = await conTechoLectura(supabase.from('rk_jugadores').select('nombre, alias'));
+    if (error || !data) return [];
+    const out: string[] = [];
+    for (const j of data as { nombre?: string; alias?: unknown }[]) {
+      if (typeof j.nombre === 'string' && j.nombre) out.push(j.nombre);
+      if (Array.isArray(j.alias)) for (const a of j.alias) if (typeof a === 'string' && a) out.push(a);
+    }
+    return out;
   },
 
   // ── Promos ──
