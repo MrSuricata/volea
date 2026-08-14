@@ -1,33 +1,10 @@
 import type { Jugador } from './tipos';
 import { nuevoId } from './tipos';
+// normalizar/distancia viven en utils/nombres (compartidas con Caja e
+// inscripciones); se re-exportan para no tocar los import sites del motor.
+import { distancia, normalizar } from '../../utils/nombres';
 
-// Baja a minusculas, saca diacriticos (incluida la tilde de la ñ) y colapsa espacios. Solo para comparar.
-export function normalizar(nombre: string): string {
-  return nombre
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-// Levenshtein clasico (una fila), suficiente para nombres cortos.
-export function distancia(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const fila = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    let prev = fila[0];
-    fila[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const temp = fila[j];
-      const costo = a[i - 1] === b[j - 1] ? 0 : 1;
-      fila[j] = Math.min(fila[j] + 1, fila[j - 1] + 1, prev + costo);
-      prev = temp;
-    }
-  }
-  return fila[n];
-}
+export { distancia, normalizar };
 
 // ----- Busqueda y mantenimiento del padron -----
 
