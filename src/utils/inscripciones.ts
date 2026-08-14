@@ -5,6 +5,20 @@
 import type { Inscripcion } from '../types';
 import { normalizar } from './nombres';
 
+// ── Marca de "última visita" del badge de nuevas ──
+// Vive acá (y no en AdminInscripcionesTab) para que AdminPage y BarraAdmin
+// puedan consultar el badge sin arrastrar el chunk lazy de la pestaña.
+
+/** localStorage: ISO de la última vez que este navegador miró la pestaña. */
+export const MARCA_INSC_VISTAS = 'volea_insc_vistas';
+
+/** Marca de última visita; si nunca se visitó, una semana atrás. */
+export const marcaVisitaInscripciones = (): string => {
+  const guardada = localStorage.getItem(MARCA_INSC_VISTAS);
+  if (guardada && !isNaN(Date.parse(guardada))) return guardada;
+  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+};
+
 export function categoriasDe(i: Inscripcion): string[] {
   return i.categorias.split(',').map(c => c.trim()).filter(Boolean);
 }

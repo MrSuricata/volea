@@ -3,19 +3,9 @@ import { ClipboardList, RefreshCw, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Event, Inscripcion } from '../types';
 import { SupabaseService } from '../services/supabaseService';
-import { armarSeccionesCategoria, categoriasDe, parejaDe } from '../utils/inscripciones';
+import { armarSeccionesCategoria, categoriasDe, parejaDe, MARCA_INSC_VISTAS, marcaVisitaInscripciones } from '../utils/inscripciones';
 import { fechaHumana } from '../utils/fechas';
 import { waUruguay } from '../utils/telefono';
-
-/** localStorage: ISO de la última vez que este navegador miró la pestaña. */
-export const MARCA_INSC_VISTAS = 'volea_insc_vistas';
-
-/** Default de la marca cuando nunca se visitó: una semana atrás. */
-export const marcaVisitaInscripciones = (): string => {
-  const guardada = localStorage.getItem(MARCA_INSC_VISTAS);
-  if (guardada && !isNaN(Date.parse(guardada))) return guardada;
-  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-};
 
 const ESTADO_CHIP: Record<Inscripcion['estado'], string> = {
   pendiente: 'bg-amber-50 text-amber-700',

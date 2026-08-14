@@ -7,10 +7,11 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
+import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
@@ -76,6 +77,7 @@ const AdminTorneosTab = lazyConRecarga(() =>
 const AdminCajaTab = lazyConRecarga(() =>
   import('./components/AdminCajaTab').then((m) => ({ default: m.AdminCajaTab })),
 );
+const AdminInscripcionesTab = lazyConRecarga(() => import('./components/AdminInscripcionesTab'));
 const AdminSociosTab = lazyConRecarga(() =>
   import('./components/AdminSociosTab').then((m) => ({ default: m.AdminSociosTab })),
 );
@@ -3932,7 +3934,26 @@ function AdminPage() {
   const [eventModal, setEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [deleteEventConfirm, setDeleteEventConfirm] = useState<string | null>(null);
-  const [inscriptosEvent, setInscriptosEvent] = useState<Event | null>(null);
+
+  // Badge de inscripciones nuevas desde la última visita a la pestaña (marca
+  // en localStorage). Se consulta al montar y al volver el foco; la pestaña lo
+  // apaga con alVerla. inscEventoAtajo = evento preseleccionado al llegar desde
+  // el botón de la tabla de Eventos.
+  const [inscNuevas, setInscNuevas] = useState(0);
+  const [inscEventoAtajo, setInscEventoAtajo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let vivo = true;
+    const consultar = () => {
+      void SupabaseService.getInscripcionesNuevas(marcaVisitaInscripciones()).then(n => {
+        if (vivo && n !== null) setInscNuevas(n);
+      });
+    };
+    consultar();
+    const onVis = () => { if (!document.hidden) consultar(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { vivo = false; document.removeEventListener('visibilitychange', onVis); };
+  }, [isAdmin]);
 
   // Club modal state
   const [clubModal, setClubModal] = useState(false);
@@ -4117,6 +4138,7 @@ function AdminPage() {
     { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={18} /> },
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
+    { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={18} /> },
     { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
     { id: 'socios', label: 'Socios', icon: <Users size={18} /> },
     { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
@@ -4175,6 +4197,11 @@ function AdminPage() {
               }`}
             >
               {tab.icon} {tab.label}
+              {tab.id === 'inscripciones' && inscNuevas > 0 && (
+                <span className="ml-auto rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">
+                  {inscNuevas}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -4419,7 +4446,7 @@ function AdminPage() {
                           <div className="flex items-center gap-2">
                             {evt.inscripcionesAbiertas && (
                               <button
-                                onClick={() => setInscriptosEvent(evt)}
+                                onClick={() => { setInscEventoAtajo(evt.id); setActiveTab('inscripciones'); }}
                                 title="Ver inscriptos"
                                 className="text-lime-700 hover:text-lime-500 transition-colors"
                               >
@@ -4465,10 +4492,6 @@ function AdminPage() {
               />
             )}
 
-            {/* Inscriptos del evento */}
-            {inscriptosEvent && (
-              <InscriptosModal event={inscriptosEvent} onClose={() => setInscriptosEvent(null)} />
-            )}
 
             {/* Delete Event Confirm */}
             {deleteEventConfirm && (
@@ -4861,6 +4884,19 @@ function AdminPage() {
           </div>
         )}
 
+        {/* Inscripciones Tab (recientes + por categoría, con badge de nuevas) */}
+        {activeTab === 'inscripciones' && (
+          <div className="fade-in">
+            <Suspense fallback={cargandoTab}>
+              <AdminInscripcionesTab
+                events={events}
+                eventoInicialId={inscEventoAtajo}
+                alVerla={() => setInscNuevas(0)}
+              />
+            </Suspense>
+          </div>
+        )}
+
         {/* Caja Tab (ventas/gastos del bot de Telegram) */}
         {activeTab === 'caja' && (
           <div className="fade-in">
@@ -5030,113 +5066,6 @@ function ConfirmDialog({ title, message, onCancel, onConfirm }: {
           >
             Eliminar
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── InscriptosModal ─────────────────────────────────────────────────────────
-
-/** Lista de inscriptos de un evento, con cambio de estado y WhatsApp directo. */
-function InscriptosModal({ event, onClose }: { event: Event; onClose: () => void }) {
-  const [filas, setFilas] = useState<Inscripcion[] | null>(null);
-  const [fallo, setFallo] = useState(false);
-  const [cambiando, setCambiando] = useState<string | null>(null);
-
-  const cargar = useCallback(async () => {
-    const data = await SupabaseService.getInscripciones(event.id);
-    if (data === null) setFallo(true);
-    else { setFallo(false); setFilas(data); }
-  }, [event.id]);
-
-  useEffect(() => { void cargar(); }, [cargar]);
-
-  const cambiarEstado = async (id: string, estado: Inscripcion['estado']) => {
-    if (cambiando) return;
-    setCambiando(id);
-    try {
-      const ok = await SupabaseService.setEstadoInscripcion(id, estado);
-      if (!ok) { toast.error('No se pudo actualizar. Verificá tu sesión.'); return; }
-      await cargar();
-    } finally {
-      setCambiando(null);
-    }
-  };
-
-  const activos = (filas ?? []).filter(f => f.estado !== 'baja');
-  const bajas = (filas ?? []).filter(f => f.estado === 'baja');
-  const ESTADO_CHIP: Record<Inscripcion['estado'], string> = {
-    pendiente: 'bg-amber-50 text-amber-700',
-    confirmada: 'bg-green-50 text-green-700',
-    baja: 'bg-gray-100 text-gray-500',
-  };
-
-  const fila = (i: Inscripcion) => (
-    <div key={i.id} className={`rounded-xl border border-gray-100 p-3 ${i.estado === 'baja' ? 'opacity-50' : ''}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-display font-bold text-navy-700">{i.nombre}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${ESTADO_CHIP[i.estado]}`}>{i.estado}</span>
-        {i.duprId && <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">DUPR {i.duprId}</span>}
-      </div>
-      <p className="mt-1 text-sm text-gray-600">{i.categorias}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-gray-400">
-        {waUruguay(i.celular) ? (
-          <a href={`https://wa.me/${waUruguay(i.celular)}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">
-            {i.celular}
-          </a>
-        ) : <span>{i.celular}</span>}
-        {i.email && <span>{i.email}</span>}
-        {i.pareja && <span>pareja: {i.pareja}</span>}
-        <span>{new Date(i.createdAt).toLocaleString('es-UY', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Montevideo' })}</span>
-      </div>
-      {i.notas && <p className="mt-1 text-xs italic text-gray-500">"{i.notas}"</p>}
-      <div className="mt-2 flex gap-2">
-        {i.estado !== 'confirmada' && (
-          <button onClick={() => void cambiarEstado(i.id, 'confirmada')} disabled={cambiando !== null}
-            className="rounded-lg bg-green-50 px-3 py-1 text-xs font-bold text-green-700 hover:bg-green-100 disabled:opacity-50">
-            {cambiando === i.id ? '…' : 'Confirmar'}
-          </button>
-        )}
-        {i.estado !== 'pendiente' && (
-          <button onClick={() => void cambiarEstado(i.id, 'pendiente')} disabled={cambiando !== null}
-            className="rounded-lg bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50">
-            A pendiente
-          </button>
-        )}
-        {i.estado !== 'baja' && (
-          <button onClick={() => void cambiarEstado(i.id, 'baja')} disabled={cambiando !== null}
-            className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500 hover:bg-gray-200 disabled:opacity-50">
-            Dar de baja
-          </button>
-        )}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 p-4">
-          <h2 className="font-display text-lg font-bold text-navy-700">
-            Inscriptos — {event.name}{filas ? ` (${activos.length})` : ''}
-          </h2>
-          <button onClick={onClose} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700"><X size={20} /></button>
-        </div>
-        <div className="flex-1 space-y-2 overflow-y-auto p-4">
-          {fallo && <p className="py-8 text-center text-sm text-gray-400">No se pudieron cargar. Verificá tu sesión de admin.</p>}
-          {!fallo && filas === null && <p className="py-8 text-center text-sm text-gray-400">Cargando…</p>}
-          {filas !== null && filas.length === 0 && (
-            <p className="py-8 text-center text-sm text-gray-500">Todavía no hay inscriptos. Compartí el link: volea.vercel.app/#/inscripcion/{event.id}</p>
-          )}
-          {activos.map(fila)}
-          {bajas.length > 0 && (
-            <>
-              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">Bajas ({bajas.length})</p>
-              {bajas.map(fila)}
-            </>
-          )}
         </div>
       </div>
     </div>
@@ -5755,6 +5684,18 @@ function BarraAdmin() {
   // cerrar el menú al navegar (si quedó abierto en la página anterior)
   useEffect(() => { setAbierta(false); }, [pathname]);
 
+  // Badge de inscripciones nuevas también acá: el socio se entera sin entrar
+  // al panel. Head count barato, una vez por montaje.
+  const [inscNuevas, setInscNuevas] = useState(0);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let vivo = true;
+    void SupabaseService.getInscripcionesNuevas(marcaVisitaInscripciones()).then(n => {
+      if (vivo && n !== null) setInscNuevas(n);
+    });
+    return () => { vivo = false; };
+  }, [isAdmin]);
+
   if (!isAdmin || pathname.startsWith('/admin')) return null;
 
   const irA = (tab: string) => {
@@ -5767,6 +5708,7 @@ function BarraAdmin() {
     { tab: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={16} /> },
     { tab: 'products', label: 'Productos', icon: <Package size={16} /> },
     { tab: 'orders', label: 'Pedidos', icon: <ShoppingCart size={16} /> },
+    { tab: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
     { tab: 'torneos', label: 'Torneos', icon: <Trophy size={16} /> },
     { tab: 'galeria', label: 'Galería', icon: <Images size={16} /> },
     { tab: 'blog', label: 'Blog', icon: <Newspaper size={16} /> },
@@ -5780,6 +5722,9 @@ function BarraAdmin() {
         className="flex items-center gap-2 bg-navy-700 hover:bg-navy-800 text-white border-2 border-lime-400 font-display font-bold text-sm py-2.5 px-4 rounded-full shadow-lg transition-all hover:scale-105"
       >
         <Settings size={16} className="text-lime-400" /> Admin
+        {inscNuevas > 0 && (
+          <span className="rounded-full bg-lime-400 px-1.5 py-0.5 text-[10px] font-bold text-navy-700">{inscNuevas}</span>
+        )}
         <ChevronDown size={14} className={`transition-transform ${abierta ? '' : 'rotate-180'}`} />
       </button>
       {abierta && (
@@ -5791,6 +5736,9 @@ function BarraAdmin() {
               className="flex items-center gap-3 text-white hover:bg-navy-800 hover:text-lime-400 font-display font-semibold text-sm py-2 px-3 rounded-lg transition-colors text-left"
             >
               <span className="text-lime-400">{a.icon}</span> {a.label}
+              {a.tab === 'inscripciones' && inscNuevas > 0 && (
+                <span className="ml-auto rounded-full bg-lime-400 px-1.5 py-0.5 text-[10px] font-bold text-navy-700">{inscNuevas}</span>
+              )}
             </button>
           ))}
         </div>
