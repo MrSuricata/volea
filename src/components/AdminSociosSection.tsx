@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Users, Plus, Trash2, Check, X, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SocioMove, SocioMoveInput, SocioName } from '../types';
-import { esCuotaFutura, ventasBrutasSocios, impactosGasto, impactosPago, impactosVenta } from '../utils/socios';
+import { armarCuotas, esCuotaFutura, ventasBrutasSocios, impactosGasto, impactosPago, impactosVenta } from '../utils/socios';
 
 const NOMBRES: Record<SocioName, string> = { brian: 'Brian', paula: 'Paula', gaston: 'Gastón' };
 const SOCIOS: SocioName[] = ['brian', 'paula', 'gaston'];
@@ -29,6 +29,13 @@ const fmtFecha = (ymd: string) => {
   return d && m && y ? `${d}/${m}/${y.slice(2)}` : ymd;
 };
 
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/** "2026-09-15" → "sep-26" (para el preview de cuotas) */
+const mesCorto = (ymd: string) => {
+  const [y, m] = ymd.split('-').map(Number);
+  return y && m ? `${MESES_CORTOS[m - 1]}-${String(y).slice(2)}` : ymd;
+};
+
 const hoyISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -44,19 +51,23 @@ type FormState = {
   de: SocioName;
   para: SocioName;
   cobrador: SocioName;
+  /** Solo gastos: cantidad de cuotas mensuales (el monto es el TOTAL de la compra). */
+  cuotas: string;
 };
 
 const FORM_INICIAL: FormState = {
   tipo: 'gasto', area: 'marca', descripcion: '', monto: '', fecha: hoyISO(),
-  pagador: 'brian', de: 'brian', para: 'gaston', cobrador: 'gaston',
+  pagador: 'brian', de: 'brian', para: 'gaston', cobrador: 'gaston', cuotas: '1',
 };
 
-export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete }: {
+export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDelete, onDeleteGrupo }: {
   moves: SocioMove[] | null;
   loading: boolean;
   onRefresh: () => void;
-  onAdd: (input: SocioMoveInput) => Promise<boolean>;
+  /** Alta atómica: las cuotas de una compra entran todas juntas o ninguna. */
+  onAddMany: (inputs: SocioMoveInput[]) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
+  onDeleteGrupo: (grupo: string) => Promise<boolean>;
 }) {
   const [filterArea, setFilterArea] = useState<'todas' | SocioMove['area']>('todas');
   const [filterTipo, setFilterTipo] = useState<'todos' | SocioMove['tipo']>('todos');
@@ -124,7 +135,18 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
     return impactosPago(montoNum, form.de, form.para);
   }, [form.tipo, form.pagador, form.de, form.para, form.cobrador, montoNum, montoOk]);
 
-  const formValido = montoOk &&
+  // Cuotas (solo gastos): el monto es el TOTAL; se divide con armarCuotas.
+  const cuotasNum = Math.floor(Number(form.cuotas) || 1);
+  const cuotasOk = form.tipo !== 'gasto'
+    || (cuotasNum >= 1 && cuotasNum <= 36 && (!montoOk || montoNum >= cuotasNum * 0.01));
+  const cuotasPreview = useMemo(
+    () => (form.tipo === 'gasto' && montoOk && cuotasOk && cuotasNum > 1
+      ? armarCuotas(montoNum, cuotasNum, form.fecha || hoyISO())
+      : null),
+    [form.tipo, form.fecha, montoNum, montoOk, cuotasNum, cuotasOk],
+  );
+
+  const formValido = montoOk && cuotasOk &&
     (form.tipo === 'gasto' ? form.descripcion.trim().length > 0
       : form.tipo === 'pago' ? form.de !== form.para
       : true);
@@ -132,27 +154,65 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
   const handleSave = async () => {
     if (!formValido || !preview || saving) return;
     setSaving(true);
-    const ok = await onAdd({
-      area: form.tipo === 'pago' ? 'marca' : form.area,
-      tipo: form.tipo,
-      descripcion: form.descripcion.trim()
-        || (form.tipo === 'pago' ? `Pago ${NOMBRES[form.de]} a ${NOMBRES[form.para]}`
-          : form.tipo === 'venta' ? 'Venta' : ''),
-      monto: montoNum,
-      fecha: form.fecha || null,
-      pagador: form.tipo === 'gasto' ? form.pagador : null,
-      de: form.tipo === 'pago' ? form.de : null,
-      para: form.tipo === 'pago' ? form.para : form.tipo === 'venta' ? form.cobrador : null,
-      impBrian: preview.brian,
-      impPaula: preview.paula,
-      impGaston: preview.gaston,
-    });
+    let inputs: SocioMoveInput[];
+    if (form.tipo === 'gasto' && cuotasNum > 1) {
+      // Compra en cuotas: una fila por mes, mismo pagador, reparto por cuota
+      // (cada fila cierra en 0 sola) y un grupo compartido para borrarlas juntas.
+      const grupo = 'cuo-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+      const desc = form.descripcion.trim();
+      inputs = armarCuotas(montoNum, cuotasNum, form.fecha || hoyISO()).map((c, i) => {
+        const imp = impactosGasto(c.monto, form.pagador);
+        return {
+          area: form.area,
+          tipo: 'gasto' as const,
+          descripcion: `${desc} (cuota ${i + 1}/${cuotasNum})`,
+          monto: c.monto,
+          fecha: c.fecha,
+          pagador: form.pagador,
+          de: null,
+          para: null,
+          impBrian: imp.brian,
+          impPaula: imp.paula,
+          impGaston: imp.gaston,
+          cuotaGrupo: grupo,
+        };
+      });
+    } else {
+      inputs = [{
+        area: form.tipo === 'pago' ? 'marca' : form.area,
+        tipo: form.tipo,
+        descripcion: form.descripcion.trim()
+          || (form.tipo === 'pago' ? `Pago ${NOMBRES[form.de]} a ${NOMBRES[form.para]}`
+            : form.tipo === 'venta' ? 'Venta' : ''),
+        monto: montoNum,
+        fecha: form.fecha || null,
+        pagador: form.tipo === 'gasto' ? form.pagador : null,
+        de: form.tipo === 'pago' ? form.de : null,
+        para: form.tipo === 'pago' ? form.para : form.tipo === 'venta' ? form.cobrador : null,
+        impBrian: preview.brian,
+        impPaula: preview.paula,
+        impGaston: preview.gaston,
+      }];
+    }
+    const ok = await onAddMany(inputs);
     setSaving(false);
     if (!ok) { toast.error('No se pudo guardar el movimiento'); return; }
-    toast.success(form.tipo === 'gasto' ? 'Gasto agregado a las cuentas'
+    toast.success(form.tipo === 'gasto'
+      ? (cuotasNum > 1 ? `Gasto en ${cuotasNum} cuotas agregado a las cuentas` : 'Gasto agregado a las cuentas')
       : form.tipo === 'venta' ? 'Venta repartida entre los socios' : 'Pago registrado');
     setShowForm(false);
     setForm({ ...FORM_INICIAL, fecha: hoyISO() });
+    onRefresh();
+  };
+
+  const handleDeleteGrupo = async (grupo: string) => {
+    if (deleting) return;
+    setDeleting(true);
+    const ok = await onDeleteGrupo(grupo);
+    setDeleting(false);
+    setDeleteConfirm(null);
+    if (!ok) { toast.error('No se pudieron borrar las cuotas'); return; }
+    toast.success('Compra en cuotas borrada entera');
     onRefresh();
   };
 
@@ -389,10 +449,25 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                         {deleteConfirm === m.id ? (
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-red-600 font-semibold whitespace-nowrap">¿Borrar?</span>
-                            <button onClick={() => handleDelete(m.id)} disabled={deleting}
-                              className="text-red-500 hover:text-red-700 disabled:text-gray-300 transition-colors" title="Confirmar">
-                              <Check size={15} />
-                            </button>
+                            {m.cuotaGrupo ? (
+                              // Fila de una compra en cuotas: elegir entre esta sola o todas.
+                              <>
+                                <button onClick={() => handleDelete(m.id)} disabled={deleting}
+                                  className="text-xs font-bold text-red-500 hover:text-red-700 disabled:text-gray-300 transition-colors whitespace-nowrap">
+                                  esta
+                                </button>
+                                <button onClick={() => handleDeleteGrupo(m.cuotaGrupo!)} disabled={deleting}
+                                  className="text-xs font-bold text-red-500 hover:text-red-700 disabled:text-gray-300 transition-colors whitespace-nowrap"
+                                  title="Borrar todas las cuotas de esta compra">
+                                  las {(moves || []).filter(x => x.cuotaGrupo === m.cuotaGrupo).length}
+                                </button>
+                              </>
+                            ) : (
+                              <button onClick={() => handleDelete(m.id)} disabled={deleting}
+                                className="text-red-500 hover:text-red-700 disabled:text-gray-300 transition-colors" title="Confirmar">
+                                <Check size={15} />
+                              </button>
+                            )}
                             <button onClick={() => setDeleteConfirm(null)} disabled={deleting}
                               className="text-gray-400 hover:text-navy-700 transition-colors" title="Cancelar">
                               <X size={15} />
@@ -522,10 +597,10 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                 </>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={form.tipo === 'gasto' ? 'grid grid-cols-3 gap-3' : 'grid grid-cols-2 gap-3'}>
                 <div>
                   <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-                    {form.tipo === 'venta' ? 'Total vendido ($)' : 'Monto ($)'}
+                    {form.tipo === 'venta' ? 'Total vendido ($)' : form.tipo === 'gasto' ? 'Total ($)' : 'Monto ($)'}
                   </label>
                   <input type="number" min="0" step="0.01" value={form.monto} placeholder="0"
                     onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} className={selectCls} />
@@ -535,7 +610,27 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAdd, onDelete 
                   <input type="date" value={form.fecha}
                     onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} className={selectCls} />
                 </div>
+                {form.tipo === 'gasto' && (
+                  <div>
+                    <label className="block text-xs font-display font-semibold text-gray-500 uppercase mb-1">Cuotas</label>
+                    <input type="number" min={1} max={36} step={1} value={form.cuotas}
+                      onChange={e => setForm(f => ({ ...f, cuotas: e.target.value }))} className={selectCls} />
+                  </div>
+                )}
               </div>
+
+              {!cuotasOk && montoOk && (
+                <p className="text-xs text-red-500">Cuotas: entero entre 1 y 36 (y que cada cuota no quede en cero).</p>
+              )}
+              {cuotasPreview && (
+                <p className="text-xs text-gray-500">
+                  {cuotasNum} cuotas de <b>{money2(cuotasPreview[0].monto)}</b>
+                  {cuotasPreview[cuotasNum - 1].monto !== cuotasPreview[0].monto &&
+                    ` (última ${money2(cuotasPreview[cuotasNum - 1].monto)})`}
+                  {' — '}{mesCorto(cuotasPreview[0].fecha)} a {mesCorto(cuotasPreview[cuotasNum - 1].fecha)}.
+                  La primera vence el mes de la fecha elegida; en «Al día de hoy» solo cuentan las vencidas.
+                </p>
+              )}
 
               {preview && (
                 <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm">

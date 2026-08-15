@@ -412,20 +412,27 @@ export const SupabaseService = {
       impPaula: Number(row.imp_paula) || 0,
       impGaston: Number(row.imp_gaston) || 0,
       source: row.source || '',
+      cuotaGrupo: row.cuota_grupo ?? null,
       createdAt: row.created_at || '',
     }));
   },
 
-  async addSocioMove(input: SocioMoveInput): Promise<boolean> {
-    if (!supabase) return false;
-    // Los saldos siempre tienen que cerrar en cero: se rechaza cualquier alta
-    // cuyo reparto no cuadre (protege la contabilidad ante bugs del form).
-    const suma = input.impBrian + input.impPaula + input.impGaston;
-    if (Math.abs(suma) > 0.04 || !(input.monto > 0)) {
-      console.error('Movimiento de socios inválido:', input);
-      return false;
+  /**
+   * Alta de movimientos de socios. Acepta varios (las cuotas de una compra van
+   * juntas) y hace UN solo insert: o entran todas o ninguna. Cada fila tiene
+   * que cerrar en cero por su cuenta — se rechaza cualquier alta cuyo reparto
+   * no cuadre (protege la contabilidad ante bugs del form).
+   */
+  async addSocioMoves(inputs: SocioMoveInput[]): Promise<boolean> {
+    if (!supabase || inputs.length === 0) return false;
+    for (const input of inputs) {
+      const suma = input.impBrian + input.impPaula + input.impGaston;
+      if (Math.abs(suma) > 0.04 || !(input.monto > 0)) {
+        console.error('Movimiento de socios inválido:', input);
+        return false;
+      }
     }
-    const { error } = await conTechoEscritura(supabase.from('socio_moves').insert({
+    const filas = inputs.map(input => ({
       area: input.area,
       tipo: input.tipo,
       fecha: input.fecha,
@@ -439,8 +446,10 @@ export const SupabaseService = {
       imp_paula: input.impPaula,
       imp_gaston: input.impGaston,
       source: 'web',
+      cuota_grupo: input.cuotaGrupo ?? null,
     }));
-    if (error) { console.error('Error adding socio move:', error); return false; }
+    const { error } = await conTechoEscritura(supabase.from('socio_moves').insert(filas));
+    if (error) { console.error('Error adding socio moves:', error); return false; }
     return true;
   },
 
@@ -448,6 +457,14 @@ export const SupabaseService = {
     if (!supabase) return false;
     const { error } = await conTechoEscritura(supabase.from('socio_moves').delete().eq('id', id));
     if (error) { console.error('Error deleting socio move:', error); return false; }
+    return true;
+  },
+
+  /** Borra TODAS las cuotas de una compra (mismo cuota_grupo). */
+  async deleteSocioMovesGrupo(grupo: string): Promise<boolean> {
+    if (!supabase || !grupo) return false;
+    const { error } = await conTechoEscritura(supabase.from('socio_moves').delete().eq('cuota_grupo', grupo));
+    if (error) { console.error('Error deleting cuotas:', error); return false; }
     return true;
   },
 

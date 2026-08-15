@@ -7,11 +7,12 @@ import { AdminLiquidarCajaModal } from './AdminLiquidarCajaModal';
 import { exportCajaExcel } from '../utils/cajaExcel';
 
 /** Pestaña Socios: cuentas entre socios + números del negocio (separada de la Caja del bot). */
-export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, deleteSocioMove, liquidarCaja }: {
+export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMoves, deleteSocioMove, deleteSocioMovesGrupo, liquidarCaja }: {
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
-  addSocioMove: (input: SocioMoveInput) => Promise<boolean>;
+  addSocioMoves: (inputs: SocioMoveInput[]) => Promise<boolean>;
   deleteSocioMove: (id: string) => Promise<boolean>;
+  deleteSocioMovesGrupo: (grupo: string) => Promise<boolean>;
   liquidarCaja: (ids: string[], moves: SocioLiquidacionMove[]) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [moves, setMoves] = useState<SocioMove[] | null>(null);
@@ -81,8 +82,9 @@ export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMove, d
         moves={moves}
         loading={loading}
         onRefresh={refresh}
-        onAdd={addSocioMove}
+        onAddMany={addSocioMoves}
         onDelete={deleteSocioMove}
+        onDeleteGrupo={deleteSocioMovesGrupo}
       />
 
       {showLiquidar && (

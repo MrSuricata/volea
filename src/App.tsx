@@ -4922,8 +4922,9 @@ function AdminPage() {
             <AdminSociosTab
               loadLedgerFull={loadLedgerFull}
               loadSocioMoves={SupabaseService.getSocioMoves}
-              addSocioMove={SupabaseService.addSocioMove}
+              addSocioMoves={SupabaseService.addSocioMoves}
               deleteSocioMove={SupabaseService.deleteSocioMove}
+              deleteSocioMovesGrupo={SupabaseService.deleteSocioMovesGrupo}
               liquidarCaja={SupabaseService.liquidarCaja}
             />
           </Suspense>

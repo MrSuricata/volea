@@ -129,6 +129,8 @@ export interface SocioMove {
   impPaula: number;
   impGaston: number;
   source: string;
+  /** Cuotas de una misma compra comparten este id; null = movimiento suelto. */
+  cuotaGrupo: string | null;
   createdAt: string;
 }
 
@@ -145,6 +147,7 @@ export interface SocioMoveInput {
   impBrian: number;
   impPaula: number;
   impGaston: number;
+  cuotaGrupo?: string | null;
 }
 
 export interface CartItem {
