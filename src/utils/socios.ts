@@ -39,6 +39,30 @@ export function impactosVenta(monto: number, cobrador: SocioName) {
   return imp;
 }
 
+export interface Cuota { monto: number; fecha: string }
+
+/**
+ * Divide una compra en n cuotas mensuales. La cuota se redondea a centésimos y
+ * la ÚLTIMA absorbe la diferencia (la suma da exacto el total). Fechas: mismo
+ * día que la primera, con tope de fin de mes (31/8 → 30/9), como la tarjeta.
+ * La fecha se inyecta (nada de Date.now() acá adentro): tests deterministas.
+ */
+export function armarCuotas(total: number, n: number, primeraISO: string): Cuota[] {
+  const [y, m, d] = primeraISO.split('-').map(Number);
+  const base = Math.round((total / n) * 100) / 100;
+  const cuotas: Cuota[] = [];
+  for (let i = 0; i < n; i++) {
+    const mesIdx = (m - 1) + i;
+    const yy = y + Math.floor(mesIdx / 12);
+    const mm = (mesIdx % 12) + 1;
+    const ultimoDia = new Date(yy, mm, 0).getDate();
+    const dd = Math.min(d, ultimoDia);
+    cuotas.push({ monto: base, fecha: `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}` });
+  }
+  cuotas[n - 1] = { ...cuotas[n - 1], monto: Math.round((total - base * (n - 1)) * 100) / 100 };
+  return cuotas;
+}
+
 const MES_NUM: Record<string, number> = {
   ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6,
   JULIO: 7, AGOSTO: 8, SEPTIEMBRE: 9, OCTUBRE: 10, NOVIEMBRE: 11, DICIEMBRE: 12,
