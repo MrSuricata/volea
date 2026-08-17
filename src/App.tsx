@@ -2963,14 +2963,9 @@ function InscripcionPage() {
   const [enviando, setEnviando] = useState(false);
   const [listo, setListo] = useState<null | { actualizada: boolean }>(null);
   const [inscriptos, setInscriptos] = useState<number | null>(null);
-  // Nombres del padrón como sugerencias (datalist): induce la grafía canónica
-  // sin bloquear texto libre. rk_jugadores es de lectura pública (los muestra el ranking).
-  const [nombresPadron, setNombresPadron] = useState<string[]>([]);
-  useEffect(() => {
-    let vivo = true;
-    SupabaseService.getJugadoresNombres().then(ns => { if (vivo) setNombresPadron(ns); });
-    return () => { vivo = false; };
-  }, []);
+  // OJO: acá NO hay datalist de nombres a propósito (pedido de Brian 17/8):
+  // autocompletar en el form PÚBLICO dejaba enumerar todos los nombres del
+  // padrón. El aviso de abajo devuelve solo un boolean, sin listar a nadie.
 
   // Aviso "ya estás anotado": chequeo por nombre (boolean pelado, sin datos de
   // nadie) con debounce, para que no se duplique gente que se anotó por otra
@@ -3137,7 +3132,7 @@ function InscripcionPage() {
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-nombre" className={labelCls}>Nombre y apellido *</label>
-            <input id="insc-nombre" type="text" required value={form.nombre} list="padron-nombres"
+            <input id="insc-nombre" type="text" required value={form.nombre}
               onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} />
           </div>
           <div>
@@ -3195,7 +3190,7 @@ function InscripcionPage() {
             {catsDobles.map(c => (
               <div key={c}>
                 <label htmlFor={`insc-pareja-${c}`} className={labelCls}>Tu pareja para {c}</label>
-                <input id={`insc-pareja-${c}`} type="text" list="padron-nombres"
+                <input id={`insc-pareja-${c}`} type="text"
                   placeholder="Nombre de tu compañero/a (si ya lo tenés)"
                   value={parejas[c] ?? ''}
                   onChange={e => setParejas(p => ({ ...p, [c]: e.target.value }))}
@@ -3241,11 +3236,6 @@ function InscripcionPage() {
         <p className="text-center text-xs text-gray-400">
           El pago se coordina después con la organización{evt.phone ? ` (${evt.phone})` : ''}.
         </p>
-        {nombresPadron.length > 0 && (
-          <datalist id="padron-nombres">
-            {[...new Set(nombresPadron)].map(n => <option key={n} value={n} />)}
-          </datalist>
-        )}
       </form>
     </div>
   );
