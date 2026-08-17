@@ -55,6 +55,21 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // Registro de pago (solo eventos con tarifa) y buscador de jugadores.
   const [pagando, setPagando] = useState<Inscripcion | null>(null);
   const [busqueda, setBusqueda] = useState('');
+  // Tocar una tarjeta del semáforo abre esa categoría en la vista Por categoría
+  // (scroll + resaltado breve).
+  const [catDestacada, setCatDestacada] = useState<string | null>(null);
+  useEffect(() => {
+    if (!catDestacada || vista !== 'categorias') return;
+    document.getElementById('sec-' + catDestacada.replace(/\s+/g, '-'))
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const t = setTimeout(() => setCatDestacada(null), 2500);
+    return () => clearTimeout(t);
+  }, [catDestacada, vista]);
+  const abrirCategoria = (c: string) => {
+    setBusqueda('');
+    setVista('categorias');
+    setCatDestacada(c);
+  };
   // Nombres del padrón para los datalist del modal (se cargan al abrirlo por primera vez).
   const [nombresPadron, setNombresPadron] = useState<string[] | null>(null);
   useEffect(() => {
@@ -354,8 +369,13 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           </p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {armadoOrdenado.map(a => (
-              <div key={a.categoria}
-                className={`rounded-xl border border-gray-100 bg-white px-3 py-2 ${a.totalPersonas === 0 ? 'opacity-50' : ''}`}>
+              <button key={a.categoria} type="button"
+                onClick={() => a.totalPersonas > 0 && abrirCategoria(a.categoria)}
+                disabled={a.totalPersonas === 0}
+                title={a.totalPersonas > 0 ? `Ver ${a.categoria}` : undefined}
+                className={`rounded-xl border border-gray-100 bg-white px-3 py-2 text-left transition-colors ${
+                  a.totalPersonas === 0 ? 'opacity-50' : 'cursor-pointer hover:border-lime-400 hover:bg-lime-50/50'
+                }`}>
                 <div className="flex items-center gap-1.5">
                   <span className={`h-2 w-2 shrink-0 rounded-full ${PUNTO_NIVEL[a.nivel]}`} />
                   <p className="truncate font-display text-xs font-bold text-navy-700">{a.categoria}</p>
@@ -367,7 +387,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
                       ? `${a.unidades} ${a.unidades === 1 ? 'dupla' : 'duplas'}${a.buscanPareja > 0 ? ` + ${a.buscanPareja} busca${a.buscanPareja > 1 ? 'n' : ''}` : ''}`
                       : `${a.unidades} ${a.unidades === 1 ? 'jugador' : 'jugadores'}`}
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -448,7 +468,11 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
       {evt && filas !== null && filas.length > 0 && vista === 'categorias' && (
         <div className="space-y-3">
           {secciones.map(sec => (
-            <div key={sec.categoria} className={`rounded-2xl border border-gray-100 bg-white p-4 ${sec.total === 0 ? 'opacity-60' : ''}`}>
+            <div key={sec.categoria}
+              id={'sec-' + sec.categoria.replace(/\s+/g, '-')}
+              className={`scroll-mt-20 rounded-2xl border bg-white p-4 transition-shadow ${
+                catDestacada === sec.categoria ? 'border-lime-400 ring-2 ring-lime-400/60' : 'border-gray-100'
+              } ${sec.total === 0 ? 'opacity-60' : ''}`}>
               <div className="flex items-center gap-2">
                 <h3 className="font-display font-bold text-navy-700">{sec.categoria}</h3>
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
