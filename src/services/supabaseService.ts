@@ -620,6 +620,46 @@ export const SupabaseService = {
     }));
   },
 
+  /**
+   * Alta manual desde el admin (inscripciones que llegan por WhatsApp): insert
+   * directo con la policy de admins, sin las validaciones del form público
+   * (celular opcional; sirve aunque las inscripciones online estén cerradas).
+   */
+  async addInscripcionAdmin(i: InscripcionInput & { estado: Inscripcion['estado'] }): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('inscripciones').insert({
+      event_id: i.eventId,
+      nombre: i.nombre.trim(),
+      celular: (i.celular || '').trim(),
+      email: (i.email || '').trim(),
+      categorias: i.categorias,
+      pareja: '',
+      parejas: i.parejas || {},
+      dupr_id: (i.duprId || '').trim(),
+      notas: (i.notas || '').trim(),
+      estado: i.estado,
+    }));
+    if (error) { console.error('Error alta inscripción admin:', error); return false; }
+    return true;
+  },
+
+  /** Edición completa de una inscripción desde el admin (no toca el `pareja` legacy). */
+  async updateInscripcionAdmin(id: string, i: InscripcionInput & { estado: Inscripcion['estado'] }): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('inscripciones').update({
+      nombre: i.nombre.trim(),
+      celular: (i.celular || '').trim(),
+      email: (i.email || '').trim(),
+      categorias: i.categorias,
+      parejas: i.parejas || {},
+      dupr_id: (i.duprId || '').trim(),
+      notas: (i.notas || '').trim(),
+      estado: i.estado,
+    }).eq('id', id));
+    if (error) { console.error('Error edición inscripción admin:', error); return false; }
+    return true;
+  },
+
   async setEstadoInscripcion(id: string, estado: Inscripcion['estado']): Promise<boolean> {
     if (!supabase) return false;
     const { error } = await conTechoEscritura(supabase.from('inscripciones').update({ estado }).eq('id', id));
