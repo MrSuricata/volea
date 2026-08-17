@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardList, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Users } from 'lucide-react';
 import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import {
   armarSeccionesCategoria, buscanPareja, categoriasDe, faltaInscribirse, parejaDe, resumenArmado,
   MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
 } from '../utils/inscripciones';
+import { distancia, normalizar } from '../utils/nombres';
 import { fechaHumana } from '../utils/fechas';
 import { waUruguay } from '../utils/telefono';
 
@@ -403,9 +404,12 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
 
       {editando !== null && evt && (
         <InscripcionModal
+          key={editando === 'nueva' ? 'nueva' : editando.id}
           evento={evt}
           inicial={editando === 'nueva' ? null : editando}
+          existentes={activos}
           nombresPadron={nombresPadron ?? []}
+          onEditarExistente={i => setEditando(i)}
           onClose={() => setEditando(null)}
           onDone={() => { setEditando(null); void cargar(); }}
         />
@@ -421,10 +425,14 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
  * Sin las restricciones del form público: celular opcional y sirve aunque las
  * inscripciones online estén cerradas.
  */
-function InscripcionModal({ evento, inicial, nombresPadron, onClose, onDone }: {
+function InscripcionModal({ evento, inicial, existentes, nombresPadron, onEditarExistente, onClose, onDone }: {
   evento: Event;
   inicial: Inscripcion | null;
+  /** Inscripciones activas del evento, para avisar duplicados al escribir el nombre. */
+  existentes: Inscripcion[];
   nombresPadron: string[];
+  /** Saltar a editar la inscripción existente en vez de duplicarla. */
+  onEditarExistente: (i: Inscripcion) => void;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -458,6 +466,27 @@ function InscripcionModal({ evento, inicial, nombresPadron, onClose, onDone }: {
 
   const catsDobles = cats.filter(c => c.toLowerCase().includes('doble'));
   const valido = form.nombre.trim() !== '' && cats.length > 0 && !guardando;
+
+  // Aviso de duplicado: mismo nombre normalizado (sin tildes/mayúsculas) que
+  // una inscripción existente → alerta con qué juega y con quién, y salto a
+  // editarla. Nombre PARECIDO (typo de 1-2 letras) → aviso más suave.
+  const duplicada = useMemo(() => {
+    const q = normalizar(form.nombre);
+    if (!q) return null;
+    return existentes.find(i => i.id !== inicial?.id && normalizar(i.nombre) === q) ?? null;
+  }, [form.nombre, existentes, inicial]);
+  const parecida = useMemo(() => {
+    if (duplicada) return null;
+    const q = normalizar(form.nombre);
+    if (q.length < 5) return null;
+    return existentes.find(i => i.id !== inicial?.id && distancia(normalizar(i.nombre), q) <= 2) ?? null;
+  }, [form.nombre, existentes, inicial, duplicada]);
+
+  const resumenDe = (i: Inscripcion) =>
+    categoriasDe(i).map(c => {
+      const p = parejaDe(i, c);
+      return `${c}${p ? ` con ${p}` : ''}`;
+    });
 
   const toggleCat = (c: string) => {
     if (cats.includes(c)) setParejas(p => { const { [c]: _, ...resto } = p; return resto; });
@@ -520,6 +549,33 @@ function InscripcionModal({ evento, inicial, nombresPadron, onClose, onDone }: {
                 onChange={e => setForm(f => ({ ...f, celular: e.target.value }))} className={inputCls} />
             </div>
           </div>
+
+          {duplicada && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-sm font-bold text-amber-800">⚠ {duplicada.nombre} ya está anotado en este torneo</p>
+              <div className="mt-1 space-y-0.5 text-xs text-amber-800">
+                {resumenDe(duplicada).map(linea => <p key={linea}>· {linea}</p>)}
+              </div>
+              <button type="button" onClick={() => onEditarExistente(duplicada)}
+                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 font-display text-xs font-bold text-white hover:bg-amber-700">
+                Editar esa inscripción (no crear otra)
+              </button>
+            </div>
+          )}
+          {parecida && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+              <p className="text-sm font-semibold text-gray-700">
+                ¿Es la misma persona que <span className="font-bold text-navy-700">{parecida.nombre}</span>? Ya está anotado:
+              </p>
+              <div className="mt-1 space-y-0.5 text-xs text-gray-600">
+                {resumenDe(parecida).map(linea => <p key={linea}>· {linea}</p>)}
+              </div>
+              <button type="button" onClick={() => onEditarExistente(parecida)}
+                className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5 font-display text-xs font-bold text-navy-700 hover:border-navy-700">
+                Sí, editar esa inscripción
+              </button>
+            </div>
+          )}
           <div>
             <span className={labelCls}>Categorías *</span>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
