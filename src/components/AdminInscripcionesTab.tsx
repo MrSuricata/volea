@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Lightbulb, Pencil, Plus, RefreshCw, Users } from 'lucide-react';
+import { ClipboardList, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Users } from 'lucide-react';
+import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
 import type { Event, Inscripcion } from '../types';
 import { SupabaseService } from '../services/supabaseService';
@@ -82,6 +83,20 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const refrescar = async () => {
     setRefrescando(true);
     try { await cargar(); } finally { setRefrescando(false); }
+  };
+
+  const [exportando, setExportando] = useState(false);
+  const exportar = async () => {
+    if (!evt || !filas || exportando) return;
+    setExportando(true);
+    try {
+      await exportPlanillaExcel(evt, filas);
+    } catch (e) {
+      console.error('Error exportando planilla:', e);
+      toast.error('No se pudo generar el Excel');
+    } finally {
+      setExportando(false);
+    }
   };
 
   const cambiarEstado = async (id: string, estado: Inscripcion['estado']) => {
@@ -196,6 +211,11 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           <button onClick={() => setEditando('nueva')} disabled={!evt}
             className="inline-flex items-center gap-1.5 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300 disabled:opacity-50">
             <Plus size={14} /> Nueva inscripción
+          </button>
+          <button onClick={() => void exportar()} disabled={exportando || !evt || !filas || filas.length === 0}
+            title="Descarga el Excel con el formato de la planilla (hojas DOBLES y SINGLES)"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 hover:border-navy-700 disabled:opacity-50">
+            <FileDown size={14} /> {exportando ? 'Exportando…' : 'Exportar planilla'}
           </button>
           <button onClick={() => void refrescar()} disabled={refrescando}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 hover:border-navy-700 disabled:opacity-50">
