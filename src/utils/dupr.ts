@@ -10,10 +10,16 @@ import { distancia, normalizar } from './nombres';
 const ID_VALIDO = /^[A-Za-z0-9-]{4,20}$/;
 /** Un rating DUPR es un número entre 1 y 8 con hasta 3 decimales (3.6 / 3.600 / 3,6). */
 const RATING_CRUDO = /^\d(?:[.,]\d{1,3})?$/;
+/** DUPR pegado sin punto, como lo copia la app: "4285" = 4.285. */
+const RATING_MILESIMAS = /^[1-8]\d{3}$/;
 
-/** "3.600" y "3,6" son 3.6 (el DUPR va de 1 a 8: nunca es tres mil seiscientos). */
+/**
+ * "3.600", "3,6" y "3600" son todos 3.6 (el DUPR va de 1 a 8: nunca es tres
+ * mil seiscientos, así que 4 dígitos son milésimas pegadas).
+ */
 export function parsearRating(txt: string): number | null {
   const limpio = txt.trim().replace(',', '.');
+  if (RATING_MILESIMAS.test(limpio)) return Number(limpio) / 1000;
   if (!RATING_CRUDO.test(limpio)) return null;
   const n = Number(limpio);
   return Number.isFinite(n) && n >= 1 && n <= 8 ? n : null;
@@ -43,44 +49,35 @@ export function parsearDuprPegado(texto: string): FilaDupr[] {
     const bajo = cruda.toLowerCase();
     if (i === 0 && bajo.includes('dupr') && (bajo.includes('nombre') || bajo.includes('jugador'))) continue;
 
-    // Una coma ENTRE DÍGITOS es decimal ("3,45"), nunca separador de campos:
-    // los nombres no tienen números. Se normaliza antes de cortar.
-    const normalizada = cruda.replace(/(\d),(\d)/g, '$1.$2');
-    let partes = normalizada.split(/\s*[,;\t]\s*|\s{2,}/).map(p => p.trim()).filter(Boolean);
-    // "Franco Montero 3.6" (un solo espacio, como se escribe en WhatsApp): si
-    // quedó todo junto, se corta por el último espacio cuando la cola es un
-    // rating o un ID válido.
-    if (partes.length === 1) {
-      const corte = partes[0].lastIndexOf(' ');
-      if (corte > 0) {
-        const cola = partes[0].slice(corte + 1);
-        // Sin separador explícito, la cola solo se toma como DUPR si es un
-        // rating o un ID CON algún dígito: si no, "Ana Lopez" partiría el
-        // apellido como si fuera un ID.
-        if (parsearRating(cola) !== null || (ID_VALIDO.test(cola) && /\d/.test(cola))) {
-          partes = [partes[0].slice(0, corte).trim(), cola];
-        }
-      }
-    }
     const linea = i + 1;
-    const nombre = partes[0];
-    if (partes.length < 2) {
+    // Una coma ENTRE DÍGITOS es decimal ("3,45"), nunca separador de campos:
+    // los nombres no tienen números. Los demás separadores (, ; : tab) pasan a
+    // espacio y se trabaja con tokens: así da igual cómo se pegue la lista.
+    const tokens = cruda
+      .replace(/(\d),(\d)/g, '$1.$2')
+      .split(/[,;:\t\s]+/)
+      .map(t => t.trim())
+      .filter(t => t !== '' && !/^(dupr|id|rating)$/i.test(t)); // ruido de "3495 dupr YXWQDP"
+
+    // El nombre termina donde empieza el primer dato: un rating, o un ID que
+    // trae algún dígito. Un token de solo letras NO alcanza para cortar (si no,
+    // "Ana Lopez" tomaría el apellido como ID); pero DESPUÉS del corte sí vale
+    // como ID, porque los DUPR ID a veces son solo letras (YXWQDP).
+    const esRating = (t: string) => parsearRating(t) !== null;
+    const corte = tokens.findIndex(t => esRating(t) || (ID_VALIDO.test(t) && /\d/.test(t)));
+    if (corte <= 0) {
       filas.push({ linea, nombre: cruda, duprId: '', rating: null, error: 'falta el DUPR (ID o rating)' });
       continue;
     }
 
+    const nombre = tokens.slice(0, corte).join(' ');
     let duprId = '';
     let rating: number | null = null;
     let error: string | undefined;
-    for (const campo of partes.slice(1)) {
-      const comoRating = parsearRating(campo);
-      if (comoRating !== null) { rating ??= comoRating; continue; }
-      if (ID_VALIDO.test(campo)) { if (duprId === '') duprId = campo; continue; }
+    for (const campo of tokens.slice(corte)) {
+      if (rating === null && esRating(campo)) { rating = parsearRating(campo); continue; }
+      if (duprId === '' && ID_VALIDO.test(campo)) { duprId = campo.toUpperCase(); continue; }
       error ??= `«${campo}» no es un DUPR ID ni un rating`;
-    }
-    if (duprId === '' && rating === null) {
-      filas.push({ linea, nombre, duprId, rating, error: error ?? 'no se entiende el DUPR' });
-      continue;
     }
     filas.push({ linea, nombre, duprId, rating, error });
   }

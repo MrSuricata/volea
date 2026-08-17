@@ -13,10 +13,42 @@ describe('parsearRating', () => {
     expect(parsearRating('3.600')).toBe(3.6);
     expect(parsearRating('3,6')).toBe(3.6);
   });
+  it('4 dígitos pegados son milésimas, como los copia la app de DUPR', () => {
+    expect(parsearRating('4285')).toBe(4.285);
+    expect(parsearRating('2950')).toBe(2.95);
+  });
   it('rechaza lo que no es un DUPR (fuera de 1-8 o con letras)', () => {
-    expect(parsearRating('3600')).toBeNull();
+    expect(parsearRating('9100')).toBeNull();
     expect(parsearRating('9.1')).toBeNull();
     expect(parsearRating('ABC123')).toBeNull();
+    expect(parsearRating('123')).toBeNull();
+  });
+});
+
+describe('formato real que pega Brian', () => {
+  it('"nombre rating id" con espacios simples, y ":" como separador', () => {
+    expect(parsearDuprPegado('cristian rodriguez 4285 M2EZED')[0])
+      .toMatchObject({ nombre: 'cristian rodriguez', rating: 4.285, duprId: 'M2EZED' });
+    expect(parsearDuprPegado('veronica sosa 3.054 XKQN5X')[0])
+      .toMatchObject({ nombre: 'veronica sosa', rating: 3.054, duprId: 'XKQN5X' });
+    expect(parsearDuprPegado('Sandra rigos: WX7PEL')[0])
+      .toMatchObject({ nombre: 'Sandra rigos', duprId: 'WX7PEL', rating: null });
+    expect(parsearDuprPegado('OSCAR FRIDELLA 3186  QXDN6R ')[0])
+      .toMatchObject({ nombre: 'OSCAR FRIDELLA', rating: 3.186, duprId: 'QXDN6R' });
+  });
+
+  it('DUPR ID de SOLO letras después del rating, y la palabra "dupr" como ruido', () => {
+    expect(parsearDuprPegado('rosana ahlers 3495 dupr YXWQDP')[0])
+      .toMatchObject({ nombre: 'rosana ahlers', rating: 3.495, duprId: 'YXWQDP' });
+    expect(parsearDuprPegado('MAXIMILIANO BUENAHORA 2957 DYJYWL')[0])
+      .toMatchObject({ nombre: 'MAXIMILIANO BUENAHORA', rating: 2.957, duprId: 'DYJYWL' });
+    expect(parsearDuprPegado('PEPE PIOMBO 3350 YMQOKP')[0])
+      .toMatchObject({ nombre: 'PEPE PIOMBO', rating: 3.35, duprId: 'YMQOKP' });
+  });
+
+  it('sigue sin partir apellidos: "Ana Lopez" no tiene DUPR', () => {
+    expect(parsearDuprPegado('Ana Lopez')[0].error).toBeTruthy();
+    expect(parsearDuprPegado('NICOLAS G.')[0].error).toBeTruthy();
   });
 });
 
