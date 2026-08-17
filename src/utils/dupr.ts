@@ -93,7 +93,10 @@ export interface TopeCategoria {
   suma: number | null;
 }
 
-export const TOPES_APU: Record<string, TopeCategoria> = {
+export type TopesEvento = Record<string, TopeCategoria>;
+
+/** Topes por defecto (reglamento APU) si el evento todavía no definió los suyos. */
+export const TOPES_APU: TopesEvento = {
   'Doble Masculino B': { individual: 3.6, suma: 7.0 },
   'Doble Mixto B': { individual: 3.6, suma: 7.0 },
   'Doble Femenino B': { individual: 3.3, suma: 6.5 },
@@ -121,8 +124,12 @@ export interface ChequeoTope {
  * categoría. `sin-datos` = falta el DUPR de alguien, así que no se puede
  * afirmar nada — la UI lo muestra distinto de un incumplimiento.
  */
-export function chequearTope(categoria: string, jugadores: { nombre: string; rating: number | null }[]): ChequeoTope {
-  const tope = TOPES_APU[categoria];
+export function chequearTope(
+  categoria: string,
+  jugadores: { nombre: string; rating: number | null }[],
+  topes?: TopesEvento | null,
+): ChequeoTope {
+  const tope = (topes ?? TOPES_APU)[categoria];
   if (!tope) return { estado: 'sin-tope', suma: null, quienesExceden: [], detalle: 'sin tope' };
   if (jugadores.length === 0 || jugadores.some(j => j.rating === null)) {
     return { estado: 'sin-datos', tope, suma: null, quienesExceden: [], detalle: 'falta DUPR' };
@@ -209,6 +216,49 @@ export function matchearDupr(filas: FilaDupr[], padron: JugadorPadron[]): MatchD
     const teniaAlgo = (cambiaId && !!exacto.duprId) || (cambiaRating && exacto.rating != null);
     return { ...base, estado: teniaAlgo ? ('actualiza' as const) : ('nuevo' as const), jugador };
   });
+}
+
+export interface AlertaTope {
+  categoria: string;
+  tipo: 'individual' | 'suma';
+  detalle: string;
+}
+
+/**
+ * Todos los incumplimientos de tope del evento, para el aviso de arriba:
+ * jugadores que superan el máximo individual de una categoría en la que están
+ * anotados, y duplas armadas cuya suma se pasa. Sin rating no se afirma nada.
+ */
+export function alertasDeTopes(
+  porCategoria: { categoria: string; jugadores: { nombre: string; rating: number | null }[]; duplas: { nombres: [string, string]; ratings: [number | null, number | null] }[] }[],
+  topes: TopesEvento,
+): AlertaTope[] {
+  const out: AlertaTope[] = [];
+  for (const cat of porCategoria) {
+    const tope = topes[cat.categoria];
+    if (!tope) continue;
+    for (const j of cat.jugadores) {
+      if (j.rating !== null && j.rating > tope.individual) {
+        out.push({
+          categoria: cat.categoria, tipo: 'individual',
+          detalle: `${j.nombre} tiene ${j.rating.toFixed(3)} y el máximo es ${tope.individual.toFixed(3)}`,
+        });
+      }
+    }
+    if (tope.suma === null) continue;
+    for (const d of cat.duplas) {
+      const [ra, rb] = d.ratings;
+      if (ra === null || rb === null) continue;
+      const suma = Math.round((ra + rb) * 1000) / 1000;
+      if (suma > tope.suma) {
+        out.push({
+          categoria: cat.categoria, tipo: 'suma',
+          detalle: `${d.nombres[0]} + ${d.nombres[1]} suman ${suma.toFixed(3)} y el máximo es ${tope.suma.toFixed(3)}`,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /** Los que efectivamente se van a escribir al confirmar. */

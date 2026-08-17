@@ -1,11 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import { chequearTope, matchearDupr, parsearDuprPegado, parsearRating } from './dupr';
+import { alertasDeTopes, chequearTope, matchearDupr, parsearDuprPegado, parsearRating } from './dupr';
 
 const padron = [
   { id: 'j1', nombre: 'GASTON MOIRANO', alias: ['GASTÓN MOIRANO'], duprId: null },
   { id: 'j2', nombre: 'Paula Segura', alias: [], duprId: 'PS0001' },
   { id: 'j3', nombre: 'Mia Batista', alias: [], duprId: null },
 ];
+
+describe('alertasDeTopes', () => {
+  const topes = {
+    'Doble Mixto C': { individual: 3.2, suma: 6.4 },
+    'Doble Femenino C': { individual: 3.0, suma: null },
+  };
+
+  it('avisa por individual y por suma, y usa los topes del EVENTO', () => {
+    const alertas = alertasDeTopes([
+      {
+        categoria: 'Doble Mixto C',
+        jugadores: [{ nombre: 'Alta', rating: 3.3 }, { nombre: 'Ok', rating: 3.1 }],
+        duplas: [{ nombres: ['Alta', 'Ok'], ratings: [3.3, 3.15] }],
+      },
+      {
+        categoria: 'Doble Femenino C',
+        jugadores: [{ nombre: 'Vero', rating: 3.054 }],
+        duplas: [],
+      },
+    ], topes);
+    expect(alertas).toHaveLength(3);
+    expect(alertas[0]).toMatchObject({ categoria: 'Doble Mixto C', tipo: 'individual' });
+    expect(alertas[1]).toMatchObject({ tipo: 'suma' });
+    expect(alertas[1].detalle).toContain('6.450');
+    expect(alertas[2].detalle).toContain('Vero tiene 3.054');
+  });
+
+  it('sin rating o sin tope no inventa alertas', () => {
+    expect(alertasDeTopes([
+      { categoria: 'Doble Mixto C', jugadores: [{ nombre: 'X', rating: null }], duplas: [{ nombres: ['X', 'Y'], ratings: [null, 3.9] }] },
+      { categoria: 'Doble Mixto A', jugadores: [{ nombre: 'Crack', rating: 5.5 }], duplas: [] },
+    ], topes)).toEqual([]);
+  });
+});
 
 describe('parsearRating', () => {
   it('acepta 3.6 / 3.600 / 3,6 como el mismo valor', () => {

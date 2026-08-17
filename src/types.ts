@@ -185,6 +185,8 @@ export interface Event {
   categorias?: string;
   /** Tarifa de inscripción ({base, incluye, extra}); null = evento sin cobro. Se setea por SQL. */
   tarifa?: TarifaEvento | null;
+  /** Topes DUPR por categoría, editables desde el admin. */
+  topes?: Record<string, { individual: number; suma: number | null }> | null;
 }
 
 /** $base incluye N categorías; cada adicional suma $extra. */

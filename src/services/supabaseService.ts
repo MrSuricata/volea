@@ -536,6 +536,17 @@ export const SupabaseService = {
       endDate: row.end_date || '',
       inscripcionesAbiertas: row.inscripciones_abiertas === true,
       categorias: row.categorias || '',
+      // Topes DUPR por categoría (editables desde la pestaña Inscripciones).
+      topes: row.topes && typeof row.topes === 'object' && !Array.isArray(row.topes)
+        ? Object.fromEntries(
+            Object.entries(row.topes as Record<string, { individual?: unknown; suma?: unknown }>)
+              .filter(([, v]) => v && typeof (v as { individual?: unknown }).individual === 'number')
+              .map(([k, v]) => [k, {
+                individual: (v as { individual: number }).individual,
+                suma: typeof (v as { suma?: unknown }).suma === 'number' ? (v as { suma: number }).suma : null,
+              }]),
+          )
+        : null,
       // La tarifa se setea por SQL; el upsert del admin no la incluye y no la pisa.
       tarifa: row.tarifa && typeof row.tarifa === 'object' && typeof row.tarifa.base === 'number'
         && typeof row.tarifa.incluye === 'number' && typeof row.tarifa.extra === 'number'
@@ -594,6 +605,14 @@ export const SupabaseService = {
       actualizada: data?.actualizada === true,
       error: typeof data?.error === 'string' ? data.error : undefined,
     };
+  },
+
+  /** Guarda los topes DUPR por categoría del evento (solo esa columna). */
+  async setTopesEvento(eventId: string, topes: Record<string, { individual: number; suma: number | null }>): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('events').update({ topes }).eq('id', eventId));
+    if (error) { console.error('Error guardando topes:', error); return false; }
+    return true;
   },
 
   /** ¿Este nombre ya está anotado en el evento? Boolean pelado, apto público. */

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BadgeCheck, ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, Users } from 'lucide-react';
-import { asignacionesAGuardar, chequearTope, matchearDupr, parsearDuprPegado, TOPES_APU } from '../utils/dupr';
-import type { EstadoMatch, JugadorPadron, MatchDupr } from '../utils/dupr';
+import { BadgeCheck, ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Users } from 'lucide-react';
+import { alertasDeTopes, asignacionesAGuardar, chequearTope, matchearDupr, parsearDuprPegado, parsearRating, TOPES_APU } from '../utils/dupr';
+import type { EstadoMatch, JugadorPadron, MatchDupr, TopesEvento } from '../utils/dupr';
 import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
 import type { Event, Inscripcion, TarifaEvento } from '../types';
@@ -95,6 +95,9 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
     const j = padron.find(x => normalizar(x.nombre) === n || x.alias.some(a => normalizar(a) === n));
     return j?.rating ?? null;
   }, [padron]);
+  // Topes del EVENTO (editables); si todavía no definió ninguno, los de APU.
+  const topes: TopesEvento = evt?.topes ?? TOPES_APU;
+  const [topesAbierto, setTopesAbierto] = useState(false);
 
   // La marca de visita ANTERIOR (congelada por carga de página, ver utils)
   // pinta el chip «nueva»; al montar se pisa la guardada con ahora y el badge
@@ -292,6 +295,28 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const buscan = buscanPareja(secciones, filas ?? []);
   const faltan = faltaInscribirse(filas ?? []);
   const stats = estadisticasTorneo(filas ?? [], armado);
+
+  // Alertas de DUPR: quién está en una categoría donde no puede estar.
+  const alertas = useMemo(() => alertasDeTopes(
+    secciones.map(sec => ({
+      categoria: sec.categoria,
+      jugadores: [...sec.duplas.flat(), ...sec.sueltos]
+        .map(id => porId.get(id))
+        .filter((i): i is Inscripcion => !!i)
+        .map(i => ({ nombre: i.nombre, rating: ratingDe(i.nombre) })),
+      duplas: sec.duplas.map(([aId, bId]) => {
+        const a = porId.get(aId);
+        const b = porId.get(bId);
+        return {
+          nombres: [a?.nombre ?? '', b?.nombre ?? ''] as [string, string],
+          ratings: [a ? ratingDe(a.nombre) : null, b ? ratingDe(b.nombre) : null] as [number | null, number | null],
+        };
+      }),
+    })),
+    topes,
+    // porId se rearma en cada render; las deps reales son las filas y el padrón.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [secciones, topes, ratingDe, filas]);
   const PUNTO_NIVEL = { verde: 'bg-green-500', ambar: 'bg-amber-400', gris: 'bg-gray-300' } as const;
 
   return (
@@ -306,9 +331,14 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
             <Plus size={14} /> Nueva inscripción
           </button>
           <button onClick={() => setDuprAbierto(true)}
-            title="Cargar DUPR IDs en lote, pegando una lista"
+            title="Cargar DUPR IDs y ratings en lote, pegando una lista"
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 hover:border-navy-700">
             <BadgeCheck size={14} /> DUPR
+          </button>
+          <button onClick={() => setTopesAbierto(true)} disabled={!evt}
+            title="Límites de DUPR por categoría de este campeonato"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 hover:border-navy-700 disabled:opacity-50">
+            <SlidersHorizontal size={14} /> Límites
           </button>
           <button onClick={() => void exportar()} disabled={exportando || !evt || !filas || filas.length === 0}
             title="Descarga el Excel con el formato de la planilla (hojas DOBLES y SINGLES)"
@@ -387,6 +417,32 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               Sin registrar {money(sinRegistrarTotal)} ({sinRegistrar.length})
             </span>
           )}
+        </div>
+      )}
+
+      {/* Alertas de DUPR: jugadores/duplas fuera del tope de su categoría */}
+      {evt && filas !== null && alertas.length > 0 && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-red-700">
+              ⚠ Fuera de categoría por DUPR ({alertas.length})
+            </p>
+            <button onClick={() => setTopesAbierto(true)}
+              className="text-[11px] font-bold text-red-700 underline underline-offset-2 hover:text-red-900">
+              revisar límites
+            </button>
+          </div>
+          <div className="space-y-1">
+            {alertas.map((a, i) => (
+              <p key={`${a.categoria}-${i}`} className="text-sm text-gray-700">
+                <span className="font-display font-bold text-navy-700">{a.categoria}:</span>{' '}
+                {a.detalle}
+                <span className="ml-1 text-[11px] uppercase text-red-600">
+                  {a.tipo === 'suma' ? '(suma de dupla)' : '(individual)'}
+                </span>
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
@@ -525,10 +581,10 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               } ${sec.total === 0 ? 'opacity-60' : ''}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display font-bold text-navy-700">{sec.categoria}</h3>
-                {TOPES_APU[sec.categoria] && (
+                {topes[sec.categoria] && (
                   <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">
-                    tope {TOPES_APU[sec.categoria].individual.toFixed(3)}
-                    {TOPES_APU[sec.categoria].suma !== null && ` · dupla ${TOPES_APU[sec.categoria].suma!.toFixed(3)}`}
+                    tope {topes[sec.categoria].individual.toFixed(3)}
+                    {topes[sec.categoria].suma !== null && ` · dupla ${topes[sec.categoria].suma!.toFixed(3)}`}
                   </span>
                 )}
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
@@ -547,7 +603,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
                     const chequeo = chequearTope(sec.categoria, [
                       { nombre: a.nombre, rating: ratingDe(a.nombre) },
                       { nombre: b.nombre, rating: ratingDe(b.nombre) },
-                    ]);
+                    ], topes);
                     const excede = chequeo.estado === 'excede-individual' || chequeo.estado === 'excede-suma';
                     return (
                       <p key={aId + bId} className="text-sm text-gray-700">
@@ -592,6 +648,15 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
 
       {duprAbierto && <DuprMasivoModal onClose={() => setDuprAbierto(false)} />}
 
+      {topesAbierto && evt && (
+        <TopesModal
+          evento={evt}
+          topes={topes}
+          onClose={() => setTopesAbierto(false)}
+          onGuardado={() => { setTopesAbierto(false); void cargar(); }}
+        />
+      )}
+
       {pagando && evt && tarifa && (
         <PagoModal
           key={pagando.id}
@@ -620,6 +685,105 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         />
       )}
     </div>
+  );
+}
+
+// ─── Límites de DUPR por categoría ───────────────────────────────────────────
+
+/**
+ * Topes DUPR del campeonato, editables: máximo individual y máximo de la suma
+ * de la dupla, por categoría. Vacío = sin tope. Se guardan en el evento, así
+ * cada campeonato puede tener su reglamento sin tocar código.
+ */
+function TopesModal({ evento, topes, onClose, onGuardado }: {
+  evento: Event;
+  topes: TopesEvento;
+  onClose: () => void;
+  onGuardado: () => void;
+}) {
+  const categorias = (evento.categorias || '').split(',').map(c => c.trim()).filter(Boolean);
+  const [borrador, setBorrador] = useState<Record<string, { individual: string; suma: string }>>(() =>
+    Object.fromEntries(categorias.map(c => [c, {
+      individual: topes[c]?.individual != null ? String(topes[c].individual) : '',
+      suma: topes[c]?.suma != null ? String(topes[c].suma) : '',
+    }])),
+  );
+  const [guardando, setGuardando] = useState(false);
+
+  const invalido = Object.values(borrador).some(v =>
+    (v.individual.trim() !== '' && parsearRating(v.individual) === null)
+    || (v.suma.trim() !== '' && (Number.isNaN(Number(v.suma.replace(',', '.'))) || Number(v.suma.replace(',', '.')) <= 0)));
+
+  const guardar = async () => {
+    if (guardando || invalido) return;
+    setGuardando(true);
+    try {
+      const nuevos: Record<string, { individual: number; suma: number | null }> = {};
+      for (const [cat, v] of Object.entries(borrador)) {
+        const ind = v.individual.trim() === '' ? null : parsearRating(v.individual);
+        if (ind === null) continue; // sin máximo individual, la categoría no tiene tope
+        const sumaTxt = v.suma.trim().replace(',', '.');
+        nuevos[cat] = { individual: ind, suma: sumaTxt === '' ? null : Number(sumaTxt) };
+      }
+      const ok = await SupabaseService.setTopesEvento(evento.id, nuevos);
+      if (!ok) { toast.error('No se pudieron guardar los límites'); return; }
+      toast.success('Límites guardados ✓');
+      onGuardado();
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const inputCls = 'w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-center font-mono text-sm focus:border-lime-400 outline-none';
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={() => !guardando && onClose()} />
+      <div className="relative flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 p-4">
+          <h3 className="font-display text-lg font-bold text-navy-700">Límites DUPR — {evento.name}</h3>
+          <button onClick={onClose} disabled={guardando} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          <p className="mb-3 text-sm text-gray-500">
+            Máximo por jugador y máximo de la suma de la dupla. Dejá vacío lo que no tenga tope
+            (una categoría sin máximo individual queda libre).
+          </p>
+          <div className="mb-1 flex items-center gap-2 px-1 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+            <span className="flex-1">Categoría</span>
+            <span className="w-20 text-center">Individual</span>
+            <span className="w-20 text-center">Dupla</span>
+          </div>
+          <div className="space-y-1">
+            {categorias.map(c => {
+              const esDoble = c.toLowerCase().includes('doble');
+              return (
+                <div key={c} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-1.5">
+                  <span className="flex-1 truncate text-sm font-semibold text-navy-700">{c}</span>
+                  <input type="text" inputMode="decimal" value={borrador[c]?.individual ?? ''}
+                    onChange={e => setBorrador(b => ({ ...b, [c]: { ...b[c], individual: e.target.value } }))}
+                    placeholder="—" className={inputCls} aria-label={`Máximo individual ${c}`} />
+                  <input type="text" inputMode="decimal" value={borrador[c]?.suma ?? ''}
+                    onChange={e => setBorrador(b => ({ ...b, [c]: { ...b[c], suma: e.target.value } }))}
+                    placeholder={esDoble ? '—' : ''} disabled={!esDoble}
+                    className={`${inputCls} ${esDoble ? '' : 'bg-gray-50'}`} aria-label={`Máximo de dupla ${c}`} />
+                </div>
+              );
+            })}
+          </div>
+          {invalido && <p className="mt-2 text-xs text-red-500">Revisá los números: el individual va de 1 a 8 (ej: 3.2) y la suma tiene que ser positiva.</p>}
+        </div>
+
+        <div className="border-t border-gray-100 p-4">
+          <button onClick={() => void guardar()} disabled={guardando || invalido}
+            className="w-full rounded-lg bg-lime-400 py-2.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400">
+            {guardando ? 'Guardando…' : 'Guardar límites'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
