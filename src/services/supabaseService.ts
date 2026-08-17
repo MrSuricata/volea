@@ -2,6 +2,7 @@ import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
+import type { JugadorPadron } from '../utils/dupr';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -758,6 +759,34 @@ export const SupabaseService = {
     );
     if (res.error) return null;
     return ('count' in res ? res.count : 0) ?? 0;
+  },
+
+  /** Padrón completo con alias y DUPR ID (para la carga masiva de DUPR). */
+  async getJugadoresPadron(): Promise<JugadorPadron[]> {
+    if (!supabase) return [];
+    const { data, error } = await conTechoLectura(supabase.from('rk_jugadores').select('id, nombre, alias, dupr_id'));
+    if (error || !data) return [];
+    return (data as { id: string; nombre?: string; alias?: unknown; dupr_id?: string | null }[]).map(j => ({
+      id: j.id,
+      nombre: j.nombre || '',
+      alias: Array.isArray(j.alias) ? j.alias.filter((a): a is string => typeof a === 'string') : [],
+      duprId: j.dupr_id || null,
+    }));
+  },
+
+  /** Guarda DUPR IDs en lote (RPC que toca solo esa columna). */
+  async setDuprIds(asignaciones: { id: string; duprId: string }[]): Promise<{ ok: boolean; tocados?: number; error?: string }> {
+    if (!supabase || asignaciones.length === 0) return { ok: false, error: 'Nada para guardar' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_set_dupr_ids', { p_asignaciones: asignaciones }));
+    if (error) {
+      console.error('Error guardando DUPR IDs:', error);
+      return { ok: false, error: 'No se pudo guardar. Verificá tu sesión de admin.' };
+    }
+    return {
+      ok: data?.ok === true,
+      tocados: typeof data?.tocados === 'number' ? data.tocados : undefined,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+    };
   },
 
   /**

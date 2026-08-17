@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, Users } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BadgeCheck, ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, Users } from 'lucide-react';
+import { asignacionesAGuardar, matchearDupr, parsearDuprPegado } from '../utils/dupr';
+import type { EstadoMatch, JugadorPadron, MatchDupr } from '../utils/dupr';
 import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
 import type { Event, Inscripcion, TarifaEvento } from '../types';
@@ -55,6 +58,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // Registro de pago (solo eventos con tarifa) y buscador de jugadores.
   const [pagando, setPagando] = useState<Inscripcion | null>(null);
   const [busqueda, setBusqueda] = useState('');
+  const [duprAbierto, setDuprAbierto] = useState(false);
   // Tocar una tarjeta del semáforo abre esa categoría en la vista Por categoría
   // (scroll + resaltado breve).
   const [catDestacada, setCatDestacada] = useState<string | null>(null);
@@ -287,6 +291,11 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           <button onClick={() => setEditando('nueva')} disabled={!evt}
             className="inline-flex items-center gap-1.5 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300 disabled:opacity-50">
             <Plus size={14} /> Nueva inscripción
+          </button>
+          <button onClick={() => setDuprAbierto(true)}
+            title="Cargar DUPR IDs en lote, pegando una lista"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 hover:border-navy-700">
+            <BadgeCheck size={14} /> DUPR
           </button>
           <button onClick={() => void exportar()} disabled={exportando || !evt || !filas || filas.length === 0}
             title="Descarga el Excel con el formato de la planilla (hojas DOBLES y SINGLES)"
@@ -546,6 +555,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
+      {duprAbierto && <DuprMasivoModal onClose={() => setDuprAbierto(false)} />}
+
       {pagando && evt && tarifa && (
         <PagoModal
           key={pagando.id}
@@ -574,6 +585,135 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         />
       )}
     </div>
+  );
+}
+
+// ─── Carga masiva de DUPR ID ─────────────────────────────────────────────────
+
+const ESTADO_DUPR: Record<EstadoMatch, { chip: string; texto: string }> = {
+  nuevo: { chip: 'bg-green-50 text-green-700', texto: 'se carga' },
+  actualiza: { chip: 'bg-amber-50 text-amber-700', texto: 'reemplaza el que tenía' },
+  igual: { chip: 'bg-gray-100 text-gray-500', texto: 'ya lo tenía igual' },
+  dudoso: { chip: 'bg-blue-50 text-blue-700', texto: '¿es esta persona?' },
+  'sin-match': { chip: 'bg-red-50 text-red-600', texto: 'no está en el padrón' },
+  duplicado: { chip: 'bg-gray-100 text-gray-500', texto: 'repetido en la lista' },
+  invalido: { chip: 'bg-red-50 text-red-600', texto: 'no se entiende la línea' },
+};
+
+/**
+ * Pegar una lista "Nombre, DUPRID" y cargarla al padrón de una. Muestra qué va
+ * a hacer con cada línea ANTES de guardar; los nombres parecidos se confirman
+ * a mano y los que no están en el padrón se reportan (no se inventa nadie).
+ */
+function DuprMasivoModal({ onClose }: { onClose: () => void }) {
+  const [padron, setPadron] = useState<JugadorPadron[] | null>(null);
+  const [texto, setTexto] = useState('');
+  const [matches, setMatches] = useState<MatchDupr[] | null>(null);
+  // Dudosos que Brian confirmó: línea → jugador elegido.
+  const [resueltos, setResueltos] = useState<Record<number, { id: string; nombre: string }>>({});
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    void SupabaseService.getJugadoresPadron().then(p => { if (vivo) setPadron(p); });
+    return () => { vivo = false; };
+  }, []);
+
+  const analizar = () => {
+    if (!padron) return;
+    setResueltos({});
+    setMatches(matchearDupr(parsearDuprPegado(texto), padron));
+  };
+
+  // Los dudosos confirmados entran como asignaciones normales.
+  const aGuardar = matches
+    ? [
+        ...asignacionesAGuardar(matches),
+        ...matches
+          .filter(m => m.estado === 'dudoso' && resueltos[m.linea])
+          .map(m => ({ id: resueltos[m.linea].id, duprId: m.duprId })),
+      ]
+    : [];
+
+  const guardar = async () => {
+    if (aGuardar.length === 0 || guardando) return;
+    setGuardando(true);
+    try {
+      const r = await SupabaseService.setDuprIds(aGuardar);
+      if (!r.ok) { toast.error(r.error || 'No se pudo guardar'); return; }
+      toast.success(`${r.tocados ?? aGuardar.length} DUPR ID guardados en el padrón ✓`);
+      onClose();
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const conDupr = padron?.filter(j => j.duprId).length ?? 0;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={() => !guardando && onClose()} />
+      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 p-4">
+          <h3 className="font-display text-lg font-bold text-navy-700">Cargar DUPR IDs</h3>
+          <button onClick={onClose} disabled={guardando} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700">✕</button>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          <p className="text-sm text-gray-500">
+            Pegá una lista de <b className="text-navy-700">Nombre, DUPR ID</b> (uno por línea; sirve copiado de un Excel o de WhatsApp).
+            {padron && <> El padrón tiene <b className="text-navy-700">{padron.length}</b> jugadores, {conDupr} con DUPR cargado.</>}
+          </p>
+          <textarea
+            rows={6}
+            value={texto}
+            onChange={e => setTexto(e.target.value)}
+            placeholder={'Gastón Moirano, 7XZ4V2\nPaula Segura, K92MB1\nMia Batista\tQ4LP08'}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm focus:border-lime-400 outline-none"
+          />
+          <button onClick={analizar} disabled={!padron || texto.trim() === ''}
+            className="rounded-lg bg-navy-700 px-4 py-2 font-display text-sm font-bold text-white hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400">
+            {padron ? 'Analizar lista' : 'Cargando padrón…'}
+          </button>
+
+          {matches && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-400">
+                {matches.length} líneas · {aGuardar.length} se van a guardar
+              </p>
+              {matches.map(m => (
+                <div key={m.linea} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm">
+                  <span className="font-semibold text-navy-700">{m.nombrePegado}</span>
+                  {m.duprId && <span className="rounded bg-navy-700/10 px-1.5 py-0.5 font-mono text-[11px] font-bold text-navy-700">{m.duprId}</span>}
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${ESTADO_DUPR[m.estado].chip}`}>
+                    {resueltos[m.linea] ? 'se carga' : ESTADO_DUPR[m.estado].texto}
+                  </span>
+                  {m.estado === 'actualiza' && m.jugador?.duprId && (
+                    <span className="text-xs text-gray-400">tenía {m.jugador.duprId}</span>
+                  )}
+                  {m.estado === 'dudoso' && !resueltos[m.linea] && m.candidatos?.map(c => (
+                    <button key={c.id} onClick={() => setResueltos(r => ({ ...r, [m.linea]: c }))}
+                      className="rounded-lg border border-blue-300 px-2 py-0.5 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                      es {c.nombre}
+                    </button>
+                  ))}
+                  {resueltos[m.linea] && <span className="text-xs text-gray-500">→ {resueltos[m.linea].nombre}</span>}
+                  {m.error && <span className="text-xs text-red-500">{m.error}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-100 p-4">
+          <button onClick={() => void guardar()} disabled={aGuardar.length === 0 || guardando}
+            className="w-full rounded-lg bg-lime-400 py-2.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400">
+            {guardando ? 'Guardando…' : aGuardar.length > 0 ? `Guardar ${aGuardar.length} DUPR ID` : 'Nada para guardar'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
