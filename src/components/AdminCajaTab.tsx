@@ -5,8 +5,8 @@ import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput } from 
 import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
-import { formatVariant, stockTotal, variantesConStock, VENTAS_RAPIDAS, ventaRapidaAcumulada } from '../utils/caja';
-import type { VentaRapida } from '../utils/caja';
+import { formatVariant, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
+import type { ItemCarrito, VentaRapida } from '../utils/caja';
 import { sugerirDeudores } from '../utils/nombres';
 import { SupabaseService } from '../services/supabaseService';
 
@@ -869,16 +869,24 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
   const [precioTocado, setPrecioTocado] = useState(false);
   const [nombreSuelto, setNombreSuelto] = useState('');
   const [montoSuelto, setMontoSuelto] = useState('');
-  // Botonera de ventas rápidas: tocar un botón precarga nombre y monto; tocar el
-  // MISMO botón otra vez suma cantidad ("2× Empanada", monto ×2). Editar los
-  // campos a mano corta la acumulación (rapidaSel se limpia en los onChange).
-  const [rapidaSel, setRapidaSel] = useState<{ nombre: string; veces: number } | null>(null);
+  // Botonera de ventas rápidas como CARRITO: cada toque suma su ítem sin pisar
+  // los anteriores (mismo botón otra vez = más cantidad). Editar los campos a
+  // mano corta la acumulación (el carrito se vacía en los onChange).
+  const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const tocarRapida = (v: VentaRapida) => {
-    const veces = rapidaSel?.nombre === v.nombre ? rapidaSel.veces + 1 : 1;
-    setRapidaSel({ nombre: v.nombre, veces });
-    const r = ventaRapidaAcumulada(v, veces);
+    const idx = carrito.findIndex(i => i.nombre === v.nombre);
+    const nuevo = idx >= 0
+      ? carrito.map((i, j) => (j === idx ? { ...i, veces: i.veces + 1 } : i))
+      : [...carrito, { nombre: v.nombre, precio: v.precio, veces: 1 }];
+    setCarrito(nuevo);
+    const r = resumenCarrito(nuevo);
     setNombreSuelto(r.nombre);
     setMontoSuelto(String(r.monto));
+  };
+  const vaciarCarrito = () => {
+    setCarrito([]);
+    setNombreSuelto('');
+    setMontoSuelto('');
   };
   const [metodo, setMetodo] = useState<VentaCajaInput['payment'] | null>(null);
   const [deudor, setDeudor] = useState('');
@@ -1138,25 +1146,33 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
             /* Ítem suelto: no toca stock */
             <div className="space-y-3">
               {/* Lo que más se vende suelto (lista real del ledger), a un toque.
-                  Tocar de nuevo el mismo botón suma cantidad. */}
+                  Funciona como carrito: cada botón suma su ítem sin pisar los otros. */}
               <div>
-                <span className={labelClass}>Lo de siempre</span>
+                <div className="flex items-center justify-between">
+                  <span className={labelClass}>Lo de siempre</span>
+                  {carrito.length > 0 && (
+                    <button type="button" onClick={vaciarCarrito}
+                      className="text-[11px] font-bold text-gray-400 hover:text-red-500">
+                      vaciar carrito
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   {VENTAS_RAPIDAS.map(v => {
-                    const activo = rapidaSel?.nombre === v.nombre;
+                    const enCarrito = carrito.find(i => i.nombre === v.nombre);
                     return (
                       <button
                         key={v.nombre}
                         type="button"
                         onClick={() => tocarRapida(v)}
                         className={`rounded-xl border px-2 py-2.5 text-center transition-colors ${
-                          activo ? 'border-lime-400 bg-lime-50' : 'border-gray-200 bg-white hover:border-lime-400'
+                          enCarrito ? 'border-lime-400 bg-lime-50' : 'border-gray-200 bg-white hover:border-lime-400'
                         }`}
-                        aria-label={`${v.nombre} $${v.precio}${activo ? `, ${rapidaSel!.veces} en el carrito` : ''}`}
+                        aria-label={`${v.nombre} $${v.precio}${enCarrito ? `, ${enCarrito.veces} en el carrito` : ''}`}
                       >
                         <span className="block text-xl leading-none">{v.emoji}</span>
                         <span className="block text-xs font-bold text-navy-700 mt-1 truncate">
-                          {activo && rapidaSel!.veces > 1 ? `${rapidaSel!.veces}× ` : ''}{v.nombre}
+                          {enCarrito && enCarrito.veces > 1 ? `${enCarrito.veces}× ` : ''}{v.nombre}
                         </span>
                         <span className="block text-[11px] text-gray-400">${v.precio}</span>
                       </button>
@@ -1170,7 +1186,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
                   id="venta-suelto-nombre"
                   type="text"
                   value={nombreSuelto}
-                  onChange={e => { setNombreSuelto(e.target.value); setRapidaSel(null); }}
+                  onChange={e => { setNombreSuelto(e.target.value); setCarrito([]); }}
                   placeholder="Ej: alquiler de paleta"
                   className={inputClass}
                 />
@@ -1183,7 +1199,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
                   inputMode="numeric"
                   min={1}
                   value={montoSuelto}
-                  onChange={e => { setMontoSuelto(e.target.value); setRapidaSel(null); }}
+                  onChange={e => { setMontoSuelto(e.target.value); setCarrito([]); }}
                   className={inputClass}
                 />
               </div>

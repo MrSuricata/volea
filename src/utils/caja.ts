@@ -56,9 +56,13 @@ export const VENTAS_RAPIDAS: VentaRapida[] = [
   { emoji: '🍕', nombre: 'Pizza', precio: 100 },
 ];
 
-// Toques repetidos del mismo botón suman cantidad: arma el nombre y el monto
-// del ítem suelto ("3× Empanada", 300). Puro para poder testearlo.
-export function ventaRapidaAcumulada(v: VentaRapida, veces: number): { nombre: string; monto: number } {
-  const n = Math.max(1, Math.floor(veces));
-  return { nombre: n === 1 ? v.nombre : `${n}× ${v.nombre}`, monto: v.precio * n };
+export interface ItemCarrito { nombre: string; precio: number; veces: number }
+
+// Carrito de sueltos: varios ítems distintos suman en UNA venta (pedido de
+// Brian 15/8 — antes tocar otro botón pisaba el anterior). Arma el detalle
+// ("Empanada + 2× Coca + Cookie") y el total. Puro para poder testearlo.
+export function resumenCarrito(items: ItemCarrito[]): { nombre: string; monto: number } {
+  const partes = items.map(i => (i.veces === 1 ? i.nombre : `${i.veces}× ${i.nombre}`));
+  const monto = items.reduce((s, i) => s + i.precio * i.veces, 0);
+  return { nombre: partes.join(' + '), monto };
 }

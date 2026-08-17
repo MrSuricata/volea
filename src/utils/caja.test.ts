@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatVariant, stockTotal, variantesConStock, ventaRapidaAcumulada } from './caja';
+import { formatVariant, resumenCarrito, stockTotal, variantesConStock } from './caja';
 
 describe('formatVariant', () => {
   it('separa talle y color con " · "', () => {
@@ -48,16 +48,23 @@ describe('stockTotal', () => {
   });
 });
 
-describe('ventaRapidaAcumulada', () => {
-  const empanada = { emoji: '🥟', nombre: 'Empanada', precio: 100 };
-  it('un toque: nombre pelado y precio unitario', () => {
-    expect(ventaRapidaAcumulada(empanada, 1)).toEqual({ nombre: 'Empanada', monto: 100 });
+describe('resumenCarrito', () => {
+  it('un ítem un toque: nombre pelado y precio unitario', () => {
+    expect(resumenCarrito([{ nombre: 'Empanada', precio: 100, veces: 1 }]))
+      .toEqual({ nombre: 'Empanada', monto: 100 });
   });
-  it('toques repetidos acumulan cantidad y monto', () => {
-    expect(ventaRapidaAcumulada(empanada, 3)).toEqual({ nombre: '3× Empanada', monto: 300 });
+  it('toques repetidos del mismo ítem acumulan cantidad y monto', () => {
+    expect(resumenCarrito([{ nombre: 'Empanada', precio: 100, veces: 3 }]))
+      .toEqual({ nombre: '3× Empanada', monto: 300 });
   });
-  it('valores raros se clampan a 1', () => {
-    expect(ventaRapidaAcumulada(empanada, 0)).toEqual({ nombre: 'Empanada', monto: 100 });
-    expect(ventaRapidaAcumulada(empanada, -2)).toEqual({ nombre: 'Empanada', monto: 100 });
+  it('ítems distintos se suman al carrito en orden, sin pisarse', () => {
+    expect(resumenCarrito([
+      { nombre: 'Empanada', precio: 100, veces: 1 },
+      { nombre: 'Coca', precio: 90, veces: 2 },
+      { nombre: 'Cookie', precio: 100, veces: 1 },
+    ])).toEqual({ nombre: 'Empanada + 2× Coca + Cookie', monto: 380 });
+  });
+  it('carrito vacío: nombre vacío y monto cero', () => {
+    expect(resumenCarrito([])).toEqual({ nombre: '', monto: 0 });
   });
 });
