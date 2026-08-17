@@ -196,7 +196,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // Gestión del armado: semáforo, quiénes buscan pareja (con cruces) y quiénes
   // fueron declarados como pareja pero no se anotaron.
   const armado = resumenArmado(secciones, filas ?? []);
-  const armadoOrdenado = [...armado.filter(a => a.unidades > 0), ...armado.filter(a => a.unidades === 0)];
+  // Con gente van primero (aunque no armen dupla todavía); las vacías al final.
+  const armadoOrdenado = [...armado.filter(a => a.totalPersonas > 0), ...armado.filter(a => a.totalPersonas === 0)];
   const buscan = buscanPareja(secciones, filas ?? []);
   const faltan = faltaInscribirse(filas ?? []);
   const PUNTO_NIVEL = { verde: 'bg-green-500', ambar: 'bg-amber-400', gris: 'bg-gray-300' } as const;
@@ -266,13 +267,13 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {armadoOrdenado.map(a => (
               <div key={a.categoria}
-                className={`rounded-xl border border-gray-100 bg-white px-3 py-2 ${a.unidades === 0 ? 'opacity-50' : ''}`}>
+                className={`rounded-xl border border-gray-100 bg-white px-3 py-2 ${a.totalPersonas === 0 ? 'opacity-50' : ''}`}>
                 <div className="flex items-center gap-1.5">
                   <span className={`h-2 w-2 shrink-0 rounded-full ${PUNTO_NIVEL[a.nivel]}`} />
                   <p className="truncate font-display text-xs font-bold text-navy-700">{a.categoria}</p>
                 </div>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                  {a.unidades === 0
+                  {a.totalPersonas === 0
                     ? 'sin anotados'
                     : a.esDoble
                       ? `${a.unidades} ${a.unidades === 1 ? 'dupla' : 'duplas'}${a.buscanPareja > 0 ? ` + ${a.buscanPareja} busca${a.buscanPareja > 1 ? 'n' : ''}` : ''}`
