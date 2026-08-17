@@ -53,6 +53,120 @@ export interface SeccionCategoria {
   total: number;
 }
 
+// ── Gestión del armado del torneo (2026-08-15) ──
+
+/** Umbral de Brian: con 4 duplas (o 4 jugadores en singles) la categoría se juega. */
+export const MIN_UNIDADES_VIABLE = 4;
+
+export type Genero = 'F' | 'M' | null;
+
+/**
+ * Género inferido por las categorías que juega (para no sugerir parejas
+ * imposibles en mixto): algo "Femenino" → F, "Masculino" → M, ambas o ninguna
+ * → desconocido (se le da el beneficio de la duda en las sugerencias).
+ */
+export function generoDe(i: Inscripcion): Genero {
+  const cats = categoriasDe(i).map(c => c.toLowerCase());
+  const f = cats.some(c => c.includes('femenino'));
+  const m = cats.some(c => c.includes('masculino'));
+  if (f && !m) return 'F';
+  if (m && !f) return 'M';
+  return null;
+}
+
+export interface ArmadoCategoria {
+  categoria: string;
+  esDoble: boolean;
+  duplasArmadas: number;
+  /** Sueltos CON pareja declarada: el compañero existe aunque no se haya anotado. */
+  duplasDeclaradas: number;
+  /** Sueltos SIN pareja declarada. */
+  buscanPareja: number;
+  totalPersonas: number;
+  /** Dobles: armadas + declaradas · singles: personas. */
+  unidades: number;
+  nivel: 'verde' | 'ambar' | 'gris';
+}
+
+/** Semáforo por categoría: qué se está armando y qué no llega. */
+export function resumenArmado(secciones: SeccionCategoria[], inscripciones: Inscripcion[]): ArmadoCategoria[] {
+  const porId = new Map(inscripciones.map(i => [i.id, i]));
+  return secciones.map(sec => {
+    const esDoble = sec.categoria.toLowerCase().includes('doble');
+    let declaradas = 0;
+    let sinPareja = 0;
+    for (const id of sec.sueltos) {
+      const i = porId.get(id);
+      if (i && parejaDe(i, sec.categoria)) declaradas++;
+      else sinPareja++;
+    }
+    const unidades = esDoble ? sec.duplas.length + declaradas : sec.total;
+    const nivel = unidades >= MIN_UNIDADES_VIABLE ? 'verde' : unidades >= 2 ? 'ambar' : 'gris';
+    return {
+      categoria: sec.categoria, esDoble,
+      duplasArmadas: sec.duplas.length, duplasDeclaradas: declaradas, buscanPareja: sinPareja,
+      totalPersonas: sec.total, unidades, nivel,
+    };
+  });
+}
+
+export interface BuscanCategoria {
+  categoria: string;
+  buscan: Inscripcion[];
+  /** Pares de ids que podrían anotarse juntos (en mixto, géneros compatibles). */
+  cruces: [string, string][];
+}
+
+/** Quiénes buscan pareja por categoría, con los cruces posibles entre ellos. */
+export function buscanPareja(secciones: SeccionCategoria[], inscripciones: Inscripcion[]): BuscanCategoria[] {
+  const porId = new Map(inscripciones.map(i => [i.id, i]));
+  const out: BuscanCategoria[] = [];
+  for (const sec of secciones) {
+    if (!sec.categoria.toLowerCase().includes('doble')) continue;
+    const buscan = sec.sueltos
+      .map(id => porId.get(id))
+      .filter((i): i is Inscripcion => !!i && !parejaDe(i, sec.categoria));
+    if (buscan.length === 0) continue;
+    const esMixto = sec.categoria.toLowerCase().includes('mixto');
+    const cruces: [string, string][] = [];
+    for (let a = 0; a < buscan.length; a++) {
+      for (let b = a + 1; b < buscan.length; b++) {
+        if (esMixto) {
+          const ga = generoDe(buscan[a]);
+          const gb = generoDe(buscan[b]);
+          if (ga && gb && ga === gb) continue; // dos del mismo género no juegan mixto
+        }
+        cruces.push([buscan[a].id, buscan[b].id]);
+      }
+    }
+    out.push({ categoria: sec.categoria, buscan, cruces });
+  }
+  return out;
+}
+
+export interface FaltaInscribirseItem {
+  nombre: string;
+  declaradaPor: { nombre: string; categoria: string }[];
+}
+
+/** Parejas declaradas cuyo nombre no matchea ninguna inscripción activa del evento. */
+export function faltaInscribirse(inscripciones: Inscripcion[]): FaltaInscribirseItem[] {
+  const activos = inscripciones.filter(i => i.estado !== 'baja');
+  const inscriptos = new Set(activos.map(i => normalizar(i.nombre)));
+  const porNombre = new Map<string, FaltaInscribirseItem>();
+  for (const i of activos) {
+    for (const c of categoriasDe(i)) {
+      const p = parejaDe(i, c);
+      if (!p || inscriptos.has(normalizar(p))) continue;
+      const clave = normalizar(p);
+      const item = porNombre.get(clave) ?? { nombre: p, declaradaPor: [] };
+      item.declaradaPor.push({ nombre: i.nombre, categoria: c });
+      porNombre.set(clave, item);
+    }
+  }
+  return [...porNombre.values()];
+}
+
 /**
  * Secciones por categoría para la vista "spliteada": una por categoría del
  * evento (en su orden) más cualquier categoría presente en los datos que el
