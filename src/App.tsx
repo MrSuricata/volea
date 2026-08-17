@@ -1,4 +1,5 @@
 ﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
@@ -1304,6 +1305,104 @@ function PromoBanner({ compacto = false }: { compacto?: boolean }) {
 
 // ─── 7. HomePage ─────────────────────────────────────────────────────────────
 
+/**
+ * Flyer del próximo torneo al entrar a la home. Sale UNA VEZ POR DÍA por
+ * navegador (marca en localStorage con el id del evento + el día de Uruguay):
+ * la idea es que el que entra por primera vez lo vea, no castigar al que
+ * vuelve. Desaparece solo cuando el torneo pasa, porque `torneoDestacado` deja
+ * de existir. Se puede cerrar con la X, tocando afuera o con Escape.
+ */
+function FlyerTorneo({ evento, wa }: { evento: Event; wa: string | null }) {
+  const [abierto, setAbierto] = useState(false);
+  const marca = `${evento.id}:${new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY })}`;
+
+  useEffect(() => {
+    if (localStorage.getItem('volea_flyer_visto') === marca) return;
+    // Pequeña espera: que el hero pinte primero y el flyer no compita con la carga.
+    const t = setTimeout(() => setAbierto(true), 900);
+    return () => clearTimeout(t);
+  }, [marca]);
+
+  const cerrar = useCallback(() => {
+    setAbierto(false);
+    localStorage.setItem('volea_flyer_visto', marca);
+  }, [marca]);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cerrar(); };
+    document.addEventListener('keydown', onKey);
+    const overflowPrevio = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = overflowPrevio;
+    };
+  }, [abierto, cerrar]);
+
+  if (!abierto) return null;
+
+  // PORTAL a <body> a propósito: el contenedor de la home tiene la animación
+  // .fade-in (y el PageTransition de framer) que dejan un `transform` puesto, y
+  // un ancestro con transform convierte a `position: fixed` en relativo A ESE
+  // ancestro — medido: el modal aparecía a 4835px de scroll, invisible al entrar.
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={cerrar} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${evento.name} — ${rangoLargo(evento.date, evento.endDate)}`}
+        className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-lime-400/40 bg-navy-800 shadow-2xl"
+      >
+        <button
+          onClick={cerrar}
+          aria-label="Cerrar"
+          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+        >
+          <X size={18} />
+        </button>
+        <img
+          src={evento.imageUrl}
+          alt={`Flyer de ${evento.name}`}
+          className="max-h-[62vh] w-full bg-navy-900 object-contain"
+        />
+        <div className="border-t border-navy-600 p-4 text-center">
+          <p className="font-display text-lg font-bold text-white">{evento.name}</p>
+          <p className="mt-0.5 text-sm text-gray-300">
+            {rangoLargo(evento.date, evento.endDate)} · {evento.location}
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            {evento.inscripcionesAbiertas && (
+              <Link
+                to={`/inscripcion/${evento.id}`}
+                onClick={cerrar}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-6 py-2.5 font-display font-bold text-navy-700 transition-colors hover:bg-lime-300"
+              >
+                <Check size={17} /> Inscribirme
+              </Link>
+            )}
+            {wa && (
+              <a
+                href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola! Consulta por el ${evento.name}`)}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={cerrar}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-lime-400/50 px-6 py-2.5 font-display font-bold text-lime-400 transition-colors hover:bg-lime-400/10"
+              >
+                <MessageCircle size={17} /> Consultar
+              </a>
+            )}
+          </div>
+          <button onClick={cerrar} className="mt-3 text-xs text-gray-400 underline-offset-2 hover:text-white hover:underline">
+            Seguir a la tienda
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function HomePage() {
   const { products, categories, posts, standings, announcements, events, datosListos } = useStore();
   const heroBgY = useParallax(120);
@@ -1394,6 +1493,9 @@ function HomePage() {
 
   return (
     <div className="fade-in">
+      {/* Flyer del próximo torneo al entrar (1 vez por día por navegador). */}
+      {torneoDestacado?.imageUrl && <FlyerTorneo evento={torneoDestacado} wa={waTorneo} />}
+
       {/* ── 1. Hero ─────────────────────────────────────────────────────── */}
       <section className="relative min-h-screen flex items-center overflow-hidden">
         <motion.div
