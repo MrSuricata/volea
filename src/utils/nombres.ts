@@ -30,6 +30,24 @@ export function distancia(a: string, b: string): number {
   return fila[n];
 }
 
+/**
+ * De `candidatos`, los nombres que NO están en `padron` (comparando
+ * normalizado, sin tildes/mayúsculas), sin repetidos entre sí ni vacíos.
+ * `padron` viene aplanado (nombres + alias). Para crear fichas nuevas.
+ */
+export function faltantesEnPadron(candidatos: string[], padron: string[]): string[] {
+  const existentes = new Set(padron.map(normalizar));
+  const out: string[] = [];
+  for (const c of candidatos) {
+    const limpio = c.trim();
+    const n = normalizar(limpio);
+    if (!n || existentes.has(n)) continue;
+    existentes.add(n);
+    out.push(limpio);
+  }
+  return out;
+}
+
 export interface SugerenciaDeudor {
   nombre: string;
   /** Saldo abierto si ya debe; null si es solo un nombre conocido (histórico/padrón). */

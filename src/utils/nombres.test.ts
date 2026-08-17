@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { distancia, normalizar, sugerirDeudores } from './nombres';
+import { distancia, faltantesEnPadron, normalizar, sugerirDeudores } from './nombres';
+
+describe('faltantesEnPadron', () => {
+  it('detecta los que no están (sin tildes/mayúsculas), dedup interno y saltea vacíos', () => {
+    const padron = ['GASTON MOIRANO', 'Ana López'];
+    expect(faltantesEnPadron(['gastón moirano', 'ana lopez', 'Nuevo Uno', 'NUEVO UNO', '  '], padron))
+      .toEqual(['Nuevo Uno']);
+  });
+  it('matchea también contra alias (vienen aplanados en la lista del padrón)', () => {
+    expect(faltantesEnPadron(['GASTÓN MOIRANO'], ['GASTON MOIRANO', 'GASTÓN MOIRANO'])).toEqual([]);
+  });
+});
 
 describe('normalizar / distancia (movidos del motor de torneos)', () => {
   it('saca tildes, mayúsculas y espacios repetidos', () => {

@@ -411,7 +411,12 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           nombresPadron={nombresPadron ?? []}
           onEditarExistente={i => setEditando(i)}
           onClose={() => setEditando(null)}
-          onDone={() => { setEditando(null); void cargar(); }}
+          onDone={() => {
+            setEditando(null);
+            // Puede haber fichas nuevas en el padrón: refrescar el datalist la próxima vez.
+            setNombresPadron(null);
+            void cargar();
+          }}
         />
       )}
     </div>
@@ -517,6 +522,10 @@ function InscripcionModal({ evento, inicial, existentes, nombresPadron, onEditar
         : await SupabaseService.addInscripcionAdmin(input);
       if (!ok) { toast.error('No se pudo guardar. Verificá tu sesión de admin.'); return; }
       toast.success(inicial ? 'Inscripción actualizada' : 'Inscripción cargada');
+      // Todo el que Brian decreta tiene ficha en el padrón: el inscripto y las
+      // parejas declaradas (aunque nunca hayan jugado un campeonato).
+      const creados = await SupabaseService.asegurarJugadoresPadron([input.nombre, ...Object.values(input.parejas)]);
+      if (creados.length > 0) toast.success(`Ficha nueva en el padrón: ${creados.join(', ')}`);
       onDone();
     } finally {
       setGuardando(false);

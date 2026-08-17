@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
+import { faltantesEnPadron } from '../utils/nombres';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -618,6 +619,34 @@ export const SupabaseService = {
       estado: row.estado || 'pendiente',
       createdAt: row.created_at || '',
     }));
+  },
+
+  /**
+   * Garantiza ficha en el padrón (rk_jugadores) para cada nombre: los que no
+   * matchean por normalizado (contra nombres Y alias) se crean con id nuevo.
+   * Devuelve los creados. Pedido de Brian 15/8: todo el que él "decreta"
+   * (inscripto o pareja declarada) tiene ficha, haya jugado o no. Si la
+   * lectura del padrón falla NO se crea nada (evita duplicar a ciegas).
+   * Server-side es seguro: el sync de torneos solo borra ids que ese cliente
+   * ya tenía en su jugadoresBase.
+   */
+  async asegurarJugadoresPadron(nombres: string[]): Promise<string[]> {
+    if (!supabase || nombres.length === 0) return [];
+    const { data, error } = await conTechoLectura(supabase.from('rk_jugadores').select('nombre, alias'));
+    if (error || !data) return [];
+    const conocidos: string[] = [];
+    for (const j of data as { nombre?: string; alias?: unknown }[]) {
+      if (typeof j.nombre === 'string' && j.nombre) conocidos.push(j.nombre);
+      if (Array.isArray(j.alias)) for (const a of j.alias) if (typeof a === 'string' && a) conocidos.push(a);
+    }
+    const faltan = faltantesEnPadron(nombres, conocidos);
+    if (faltan.length === 0) return [];
+    const ABC = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    const idJugador = () => Array.from({ length: 8 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');
+    const filas = faltan.map(nombre => ({ id: idJugador(), nombre, alias: [], updated_at: new Date().toISOString() }));
+    const { error: e2 } = await conTechoEscritura(supabase.from('rk_jugadores').insert(filas));
+    if (e2) { console.error('Error creando fichas de padrón:', e2); return []; }
+    return faltan;
   },
 
   /**
