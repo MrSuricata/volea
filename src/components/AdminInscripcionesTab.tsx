@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BadgeCheck, ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, Users } from 'lucide-react';
-import { asignacionesAGuardar, matchearDupr, parsearDuprPegado } from '../utils/dupr';
+import { asignacionesAGuardar, chequearTope, matchearDupr, parsearDuprPegado, TOPES_APU } from '../utils/dupr';
 import type { EstadoMatch, JugadorPadron, MatchDupr } from '../utils/dupr';
 import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
@@ -82,6 +82,19 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
     void SupabaseService.getJugadoresNombres().then(ns => { if (vivo) setNombresPadron(ns); });
     return () => { vivo = false; };
   }, [editando, nombresPadron]);
+
+  // Padrón con ratings: alimenta el chequeo de topes por categoría (APU).
+  const [padron, setPadron] = useState<JugadorPadron[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    void SupabaseService.getJugadoresPadron().then(p => { if (vivo) setPadron(p); });
+    return () => { vivo = false; };
+  }, [duprAbierto]);
+  const ratingDe = useCallback((nombre: string): number | null => {
+    const n = normalizar(nombre);
+    const j = padron.find(x => normalizar(x.nombre) === n || x.alias.some(a => normalizar(a) === n));
+    return j?.rating ?? null;
+  }, [padron]);
 
   // La marca de visita ANTERIOR (congelada por carga de página, ver utils)
   // pinta el chip «nueva»; al montar se pisa la guardada con ahora y el badge
@@ -510,8 +523,14 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               className={`scroll-mt-20 rounded-2xl border bg-white p-4 transition-shadow ${
                 catDestacada === sec.categoria ? 'border-lime-400 ring-2 ring-lime-400/60' : 'border-gray-100'
               } ${sec.total === 0 ? 'opacity-60' : ''}`}>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display font-bold text-navy-700">{sec.categoria}</h3>
+                {TOPES_APU[sec.categoria] && (
+                  <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">
+                    tope {TOPES_APU[sec.categoria].individual.toFixed(3)}
+                    {TOPES_APU[sec.categoria].suma !== null && ` · dupla ${TOPES_APU[sec.categoria].suma!.toFixed(3)}`}
+                  </span>
+                )}
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
                   {sec.categoria.toLowerCase().includes('doble')
                     ? `${sec.duplas.length} ${sec.duplas.length === 1 ? 'dupla' : 'duplas'}${sec.sueltos.length ? ` + ${sec.sueltos.length} sin armar` : ''}`
@@ -524,11 +543,27 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
                     const a = porId.get(aId);
                     const b = porId.get(bId);
                     if (!a || !b) return null;
+                    // Tope APU de la categoría (si la categoría lo tiene y hay ratings).
+                    const chequeo = chequearTope(sec.categoria, [
+                      { nombre: a.nombre, rating: ratingDe(a.nombre) },
+                      { nombre: b.nombre, rating: ratingDe(b.nombre) },
+                    ]);
+                    const excede = chequeo.estado === 'excede-individual' || chequeo.estado === 'excede-suma';
                     return (
                       <p key={aId + bId} className="text-sm text-gray-700">
                         <span className="font-semibold text-navy-700">{a.nombre}</span>
                         {' + '}
                         <span className="font-semibold text-navy-700">{b.nombre}</span>
+                        {chequeo.estado === 'ok' && (
+                          <span className="ml-1.5 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">
+                            ✓ {chequeo.suma?.toFixed(3)}
+                          </span>
+                        )}
+                        {excede && (
+                          <span className="ml-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-600">
+                            ⚠ {chequeo.detalle}
+                          </span>
+                        )}
                       </p>
                     );
                   })}
@@ -631,7 +666,7 @@ function DuprMasivoModal({ onClose }: { onClose: () => void }) {
         ...asignacionesAGuardar(matches),
         ...matches
           .filter(m => m.estado === 'dudoso' && resueltos[m.linea])
-          .map(m => ({ id: resueltos[m.linea].id, duprId: m.duprId })),
+          .map(m => ({ id: resueltos[m.linea].id, duprId: m.duprId, rating: m.rating })),
       ]
     : [];
 
@@ -685,6 +720,9 @@ function DuprMasivoModal({ onClose }: { onClose: () => void }) {
                 <div key={m.linea} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 px-3 py-2 text-sm">
                   <span className="font-semibold text-navy-700">{m.nombrePegado}</span>
                   {m.duprId && <span className="rounded bg-navy-700/10 px-1.5 py-0.5 font-mono text-[11px] font-bold text-navy-700">{m.duprId}</span>}
+                  {m.rating !== null && (
+                    <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-lime-800">{m.rating.toFixed(3)}</span>
+                  )}
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${ESTADO_DUPR[m.estado].chip}`}>
                     {resueltos[m.linea] ? 'se carga' : ESTADO_DUPR[m.estado].texto}
                   </span>

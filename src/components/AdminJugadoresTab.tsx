@@ -4,6 +4,7 @@ import { BadgeCheck, Link2, RefreshCw, Search, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Inscripcion, LedgerEntry } from '../types';
 import { SupabaseService } from '../services/supabaseService';
+import { parsearRating } from '../utils/dupr';
 import type { JugadorPadron } from '../utils/dupr';
 import { historialDeJugador, nombresSinVincular } from '../utils/jugadores';
 import type { NombreSinVincular } from '../utils/jugadores';
@@ -136,6 +137,9 @@ export default function AdminJugadoresTab({ loadLedgerFull }: {
                 <p className="truncate font-display text-sm font-bold text-navy-700">{j.nombre}</p>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {j.rating != null && (
+                  <span className="rounded-full bg-lime-100 px-2 py-0.5 text-[11px] font-bold text-lime-800">{j.rating.toFixed(3)}</span>
+                )}
                 {j.duprId && (
                   <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">DUPR {j.duprId}</span>
                 )}
@@ -186,16 +190,21 @@ function FichaJugador({ jugador, ledger, inscripciones, onClose, onGuardado }: {
   const h = historialDeJugador(jugador, ledger);
   const ahoraMs = Date.now();
   const [dupr, setDupr] = useState(jugador.duprId || '');
+  const [rating, setRating] = useState(jugador.rating != null ? String(jugador.rating) : '');
   const [guardando, setGuardando] = useState(false);
 
   const nombres = new Set([jugador.nombre, ...jugador.alias].map(normalizar));
   const susInscripciones = inscripciones.filter(i => i.estado !== 'baja' && nombres.has(normalizar(i.nombre)));
 
+  const ratingNum = rating.trim() === '' ? null : parsearRating(rating);
+  const ratingInvalido = rating.trim() !== '' && ratingNum === null;
+  const hayCambios = dupr.trim() !== (jugador.duprId || '') || ratingNum !== (jugador.rating ?? null);
+
   const guardarDupr = async () => {
-    if (guardando || dupr.trim() === (jugador.duprId || '')) return;
+    if (guardando || !hayCambios || ratingInvalido) return;
     setGuardando(true);
     try {
-      const r = await SupabaseService.setDuprIds([{ id: jugador.id, duprId: dupr.trim() }]);
+      const r = await SupabaseService.setDuprIds([{ id: jugador.id, duprId: dupr.trim(), rating: ratingNum }]);
       if (!r.ok) { toast.error(r.error || 'No se pudo guardar el DUPR'); return; }
       toast.success('DUPR guardado ✓');
       onGuardado();
@@ -232,18 +241,31 @@ function FichaJugador({ jugador, ledger, inscripciones, onClose, onGuardado }: {
           </div>
 
           <div>
-            <label htmlFor="ficha-dupr" className="mb-1 block text-xs font-display font-semibold uppercase text-gray-500">
-              DUPR ID
-            </label>
-            <div className="flex gap-2">
-              <input id="ficha-dupr" type="text" value={dupr} onChange={e => setDupr(e.target.value)}
-                placeholder="Ej: 7XZ4V2"
-                className="w-40 rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm focus:border-lime-400 outline-none" />
-              <button onClick={() => void guardarDupr()} disabled={guardando || dupr.trim() === (jugador.duprId || '')}
+            <span className="mb-1 block text-xs font-display font-semibold uppercase text-gray-500">DUPR</span>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label htmlFor="ficha-dupr" className="mb-0.5 block text-[11px] text-gray-400">ID</label>
+                <input id="ficha-dupr" type="text" value={dupr} onChange={e => setDupr(e.target.value)}
+                  placeholder="7XZ4V2"
+                  className="w-32 rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm focus:border-lime-400 outline-none" />
+              </div>
+              <div>
+                <label htmlFor="ficha-rating" className="mb-0.5 block text-[11px] text-gray-400">Rating (hoy)</label>
+                <input id="ficha-rating" type="text" inputMode="decimal" value={rating} onChange={e => setRating(e.target.value)}
+                  placeholder="3.600"
+                  className={`w-24 rounded-lg border px-3 py-2 font-mono text-sm outline-none ${
+                    ratingInvalido ? 'border-red-300' : 'border-gray-200 focus:border-lime-400'
+                  }`} />
+              </div>
+              <button onClick={() => void guardarDupr()} disabled={guardando || !hayCambios || ratingInvalido}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-navy-700 px-3 py-2 text-sm font-bold text-white hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400">
                 <BadgeCheck size={14} /> Guardar
               </button>
+              {jugador.ratingAt && !hayCambios && (
+                <span className="pb-2 text-[11px] text-gray-400">tomado el {jugador.ratingAt.split('-').reverse().join('/')}</span>
+              )}
             </div>
+            {ratingInvalido && <p className="mt-1 text-xs text-red-500">El rating va de 1 a 8 (ej: 3.6 o 3.600).</p>}
           </div>
 
           {susInscripciones.length > 0 && (

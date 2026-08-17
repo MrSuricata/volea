@@ -766,13 +766,17 @@ export const SupabaseService = {
   /** Padrón completo con alias y DUPR ID (para la carga masiva de DUPR). */
   async getJugadoresPadron(): Promise<JugadorPadron[]> {
     if (!supabase) return [];
-    const { data, error } = await conTechoLectura(supabase.from('rk_jugadores').select('id, nombre, alias, dupr_id'));
+    const { data, error } = await conTechoLectura(
+      supabase.from('rk_jugadores').select('id, nombre, alias, dupr_id, dupr_rating, dupr_rating_at'),
+    );
     if (error || !data) return [];
-    return (data as { id: string; nombre?: string; alias?: unknown; dupr_id?: string | null }[]).map(j => ({
+    return (data as { id: string; nombre?: string; alias?: unknown; dupr_id?: string | null; dupr_rating?: number | string | null; dupr_rating_at?: string | null }[]).map(j => ({
       id: j.id,
       nombre: j.nombre || '',
       alias: Array.isArray(j.alias) ? j.alias.filter((a): a is string => typeof a === 'string') : [],
       duprId: j.dupr_id || null,
+      rating: j.dupr_rating !== null && j.dupr_rating !== undefined ? Number(j.dupr_rating) : null,
+      ratingAt: j.dupr_rating_at || null,
     }));
   },
 
@@ -797,8 +801,11 @@ export const SupabaseService = {
     };
   },
 
-  /** Guarda DUPR IDs en lote (RPC que toca solo esa columna). */
-  async setDuprIds(asignaciones: { id: string; duprId: string }[]): Promise<{ ok: boolean; tocados?: number; error?: string }> {
+  /**
+   * Guarda DUPR (id y/o rating) en lote. Solo se pisa lo que viene: mandar solo
+   * el rating no borra el ID y viceversa. El rating se guarda fechado.
+   */
+  async setDuprIds(asignaciones: { id: string; duprId?: string; rating?: number | null }[]): Promise<{ ok: boolean; tocados?: number; error?: string }> {
     if (!supabase || asignaciones.length === 0) return { ok: false, error: 'Nada para guardar' };
     const { data, error } = await conTechoEscritura(supabase.rpc('admin_set_dupr_ids', { p_asignaciones: asignaciones }));
     if (error) {
