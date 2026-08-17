@@ -275,6 +275,7 @@ export const SupabaseService = {
       createdAt: row.created_at || '',
       paymentMethod: row.payment_method ?? null,
       debtorName: row.debtor_name ?? null,
+      jugadorId: row.jugador_id ?? null,
       settledAt: row.settled_at ?? null,
       settledMethod: row.settled_method ?? null,
       socioSettledAt: row.socio_settled_at ?? null,
@@ -322,6 +323,7 @@ export const SupabaseService = {
       p_variant_key: input.variantKey ?? null,
       p_qty: input.qty ?? 1,
       p_debtor: input.debtor ?? null,
+      p_jugador_id: input.jugadorId ?? null,
     }));
     if (error) {
       console.error('Error registrando venta:', error);
@@ -772,6 +774,27 @@ export const SupabaseService = {
       alias: Array.isArray(j.alias) ? j.alias.filter((a): a is string => typeof a === 'string') : [],
       duprId: j.dupr_id || null,
     }));
+  },
+
+  /**
+   * Vincula todas las filas de un deudor a un jugador del padrón y canoniza el
+   * nombre: las deudas partidas de la misma persona se juntan solas.
+   */
+  async vincularDeudor(nombre: string, jugadorId: string): Promise<{ ok: boolean; tocadas?: number; nombre?: string; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(
+      supabase.rpc('admin_vincular_deudor', { p_nombre: nombre, p_jugador_id: jugadorId }),
+    );
+    if (error) {
+      console.error('Error vinculando deudor:', error);
+      return { ok: false, error: 'No se pudo vincular. Verificá tu sesión de admin.' };
+    }
+    return {
+      ok: data?.ok === true,
+      tocadas: typeof data?.tocadas === 'number' ? data.tocadas : undefined,
+      nombre: typeof data?.nombre === 'string' ? data.nombre : undefined,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+    };
   },
 
   /** Guarda DUPR IDs en lote (RPC que toca solo esa columna). */

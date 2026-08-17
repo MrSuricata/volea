@@ -8,7 +8,7 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList, UserRound
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
@@ -79,6 +79,7 @@ const AdminCajaTab = lazyConRecarga(() =>
   import('./components/AdminCajaTab').then((m) => ({ default: m.AdminCajaTab })),
 );
 const AdminInscripcionesTab = lazyConRecarga(() => import('./components/AdminInscripcionesTab'));
+const AdminJugadoresTab = lazyConRecarga(() => import('./components/AdminJugadoresTab'));
 const AdminSociosTab = lazyConRecarga(() =>
   import('./components/AdminSociosTab').then((m) => ({ default: m.AdminSociosTab })),
 );
@@ -4261,6 +4262,7 @@ function AdminPage() {
     { id: 'products', label: 'Productos', icon: <Package size={18} /> },
     { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
     { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={18} /> },
+    { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={18} /> },
     { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
     { id: 'socios', label: 'Socios', icon: <Users size={18} /> },
     { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
@@ -5015,6 +5017,15 @@ function AdminPage() {
                 eventoInicialId={inscEventoAtajo}
                 alVerla={() => setInscNuevas(0)}
               />
+            </Suspense>
+          </div>
+        )}
+
+        {/* Jugadores Tab (padrón con ficha: compras, deudas, DUPR, inscripciones) */}
+        {activeTab === 'jugadores' && (
+          <div className="fade-in">
+            <Suspense fallback={cargandoTab}>
+              <AdminJugadoresTab loadLedgerFull={loadLedgerFull} />
             </Suspense>
           </div>
         )}

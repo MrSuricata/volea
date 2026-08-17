@@ -63,6 +63,8 @@ export interface LedgerEntry {
   paymentMethod: 'mp' | 'efectivo' | 'transferencia' | 'debe' | null;
   /** Quién debe, cuando paymentMethod es 'debe'. */
   debtorName: string | null;
+  /** Comprador vinculado al padrón (rk_jugadores.id); null = sin vincular. */
+  jugadorId: string | null;
   /** Cuándo y cómo se cobró la deuda (null = sigue pendiente). */
   settledAt: string | null;
   settledMethod: 'mp' | 'efectivo' | 'transferencia' | null;
@@ -89,6 +91,8 @@ export interface VentaCajaInput {
   variantKey?: string | null;
   qty?: number;
   debtor?: string | null;
+  /** Comprador del padrón (opcional en cualquier método de pago). */
+  jugadorId?: string | null;
 }
 
 /** Fila que la liquidación de caja asienta en socio_moves (claves = columnas del RPC). */

@@ -7,8 +7,9 @@ import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
 import { formatVariant, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
 import type { ItemCarrito, VentaRapida } from '../utils/caja';
-import { sugerirDeudores } from '../utils/nombres';
+import { normalizar, sugerirDeudores } from '../utils/nombres';
 import { SupabaseService } from '../services/supabaseService';
+import type { JugadorPadron } from '../utils/dupr';
 
 const TZ = 'America/Montevideo';
 
@@ -94,16 +95,16 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [ventaAbierta, setVentaAbierta] = useState(false);
   const [gastoAbierto, setGastoAbierto] = useState(false);
 
-  // Nombres del padrón de jugadores para sugerir deudores sin duplicar
-  // ("Hernán" ≠ "Hernan"). Se cargan la primera vez que se abre el modal de
-  // venta y quedan cacheados para la vida de la pestaña.
-  const [nombresPadron, setNombresPadron] = useState<string[] | null>(null);
+  // Padrón de jugadores: sugiere el comprador sin duplicar nombres ("Hernán" ≠
+  // "Hernan") y permite VINCULAR la venta al jugador (id), que es lo que
+  // alimenta su ficha. Se carga al abrir el modal y queda cacheado.
+  const [padron, setPadron] = useState<JugadorPadron[] | null>(null);
   useEffect(() => {
-    if (!ventaAbierta || nombresPadron !== null) return;
+    if (!ventaAbierta || padron !== null) return;
     let vivo = true;
-    void SupabaseService.getJugadoresNombres().then(ns => { if (vivo) setNombresPadron(ns); });
+    void SupabaseService.getJugadoresPadron().then(p => { if (vivo) setPadron(p); });
     return () => { vivo = false; };
-  }, [ventaAbierta, nombresPadron]);
+  }, [ventaAbierta, padron]);
 
   // Secuencia de fetches: si una respuesta vieja llega después de una nueva
   // (ej: refresh disparado justo antes de confirmar una anulación), se ignora.
@@ -550,9 +551,10 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           deudoresAbiertos={porCobrar.deudores
             .filter(d => d.nombre !== 'Sin nombre')
             .map(d => ({ nombre: d.nombre, saldo: d.total }))}
+          padron={padron ?? []}
           nombresSugeridos={[
             ...entries.filter(e => e.debtorName).map(e => e.debtorName as string),
-            ...(nombresPadron ?? []),
+            ...(padron ?? []).map(j => j.nombre),
           ]}
           onClose={() => setVentaAbierta(false)}
           onDone={() => { setVentaAbierta(false); refresh(); }}
@@ -848,13 +850,15 @@ function FotoProducto({ producto }: { producto: Product }) {
  * el bot) o ítem suelto. Si la RPC falla (ej: "sin stock: quedan N"), el modal
  * queda abierto para corregir.
  */
-function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, onClose, onDone }: {
+function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, padron, onClose, onDone }: {
   products: Product[];
   registrar: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
   /** Deudores con deuda abierta (nombre + saldo), para elegir con un toque. */
   deudoresAbiertos: { nombre: string; saldo: number }[];
   /** Nombres conocidos (deudores históricos + padrón) para sugerir al escribir. */
   nombresSugeridos: string[];
+  /** Padrón con ids: elegir uno VINCULA la venta a su ficha. */
+  padron: JugadorPadron[];
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -940,6 +944,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
     if (producto && !precioTocado) setPrecio(String(producto.price * clamped));
   };
 
+  // Jugador del padrón cuyo nombre coincide con lo escrito: si hay match, la
+  // venta queda VINCULADA a su ficha (compre fiado o pague en el momento).
+  const compradorVinculado = useMemo(() => {
+    const q = normalizar(deudor);
+    if (q === '') return null;
+    return padron.find(j => normalizar(j.nombre) === q || j.alias.some(a => normalizar(a) === q)) ?? null;
+  }, [deudor, padron]);
+
   const precioNum = Number(precio);
   const montoNum = Number(montoSuelto);
   const faltaDeudor = metodo === 'debe' && deudor.trim() === '';
@@ -959,12 +971,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
           variantKey: variante,
           qty,
           debtor: metodo === 'debe' ? deudor.trim() : null,
+          jugadorId: compradorVinculado?.id ?? null,
         }
       : {
           label: nombreSuelto.trim(),
           amount: montoNum,
           payment: metodo,
           debtor: metodo === 'debe' ? deudor.trim() : null,
+          jugadorId: compradorVinculado?.id ?? null,
         };
     setRegistrando(true);
     try {
@@ -1224,9 +1238,13 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
                 </button>
               ))}
             </div>
-            {metodo === 'debe' && (
+            {/* El comprador se puede marcar SIEMPRE (con Debe es obligatorio):
+                si matchea con el padrón, la venta queda en su ficha. */}
+            {(metodo !== null || deudor !== '') && (
               <div className="mt-2">
-                <label htmlFor="venta-deudor" className={labelClass}>¿Quién debe?</label>
+                <label htmlFor="venta-deudor" className={labelClass}>
+                  {metodo === 'debe' ? '¿Quién debe?' : '¿Quién compró? (opcional)'}
+                </label>
                 {deudor.trim() === '' && deudoresAbiertos.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {deudoresAbiertos.slice(0, 8).map(d => (
@@ -1266,9 +1284,17 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, o
                     ))}
                   </div>
                 )}
-                <p className="mt-1 text-[11px] text-gray-400">
-                  Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona); se cobra con «Cobrar» o desde el bot.
-                </p>
+                {compradorVinculado ? (
+                  <p className="mt-1 text-[11px] font-semibold text-lime-700">
+                    ✓ Queda en la ficha de {compradorVinculado.nombre}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    {metodo === 'debe'
+                      ? 'Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona).'
+                      : 'Si elegís un jugador del padrón, la compra queda en su historial.'}
+                  </p>
+                )}
               </div>
             )}
           </div>
