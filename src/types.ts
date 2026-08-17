@@ -179,6 +179,15 @@ export interface Event {
   inscripcionesAbiertas?: boolean;
   /** Categorías del evento, separadas por coma ("Singles A,Doble Mixto B"). */
   categorias?: string;
+  /** Tarifa de inscripción ({base, incluye, extra}); null = evento sin cobro. Se setea por SQL. */
+  tarifa?: TarifaEvento | null;
+}
+
+/** $base incluye N categorías; cada adicional suma $extra. */
+export interface TarifaEvento {
+  base: number;
+  incluye: number;
+  extra: number;
 }
 
 /**
@@ -200,6 +209,12 @@ export interface Inscripcion {
   duprId: string;
   notas: string;
   estado: 'pendiente' | 'confirmada' | 'baja';
+  /** Resumen del pago registrado (null = sin registrar). La deuda VIVA está en la Caja. */
+  pagoCosto: number | null;
+  pagoMonto: number | null;
+  pagoMetodo: 'mp' | 'efectivo' | 'transferencia' | 'freepass' | null;
+  pagoDeuda: number | null;
+  pagoAt: string | null;
   createdAt: string;
 }
 

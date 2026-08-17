@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  armarSeccionesCategoria, buscanPareja, faltaInscribirse, generoDe, resumenArmado,
+  armarSeccionesCategoria, buscanPareja, costoInscripcion, faltaInscribirse, generoDe, resumenArmado,
   MIN_UNIDADES_VIABLE,
 } from './inscripciones';
 import type { Inscripcion } from '../types';
@@ -8,7 +8,20 @@ import type { Inscripcion } from '../types';
 const base = {
   celular: '', email: '', duprId: '', notas: '', estado: 'pendiente' as const,
   createdAt: '2026-08-15T12:00:00Z', eventId: 'evt', pareja: '',
+  pagoCosto: null, pagoMonto: null, pagoMetodo: null, pagoDeuda: null, pagoAt: null,
 };
+
+describe('costoInscripcion', () => {
+  const tarifa = { base: 1200, incluye: 3, extra: 200 };
+  it('hasta lo incluido paga la base', () => {
+    expect(costoInscripcion(1, tarifa)).toBe(1200);
+    expect(costoInscripcion(3, tarifa)).toBe(1200);
+  });
+  it('cada categoría adicional suma el extra', () => {
+    expect(costoInscripcion(4, tarifa)).toBe(1400);
+    expect(costoInscripcion(6, tarifa)).toBe(1800);
+  });
+});
 const insc = (id: string, nombre: string, categorias: string, parejas: Record<string, string> = {}): Inscripcion =>
   ({ ...base, id, nombre, categorias, parejas });
 

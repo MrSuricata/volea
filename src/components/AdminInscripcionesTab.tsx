@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ClipboardList, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Users } from 'lucide-react';
+import { ClipboardList, DollarSign, FileDown, Lightbulb, Pencil, Plus, RefreshCw, Search, Users } from 'lucide-react';
 import { exportPlanillaExcel } from '../utils/inscripcionesExcel';
 import { toast } from 'sonner';
-import type { Event, Inscripcion } from '../types';
+import type { Event, Inscripcion, TarifaEvento } from '../types';
 import { SupabaseService } from '../services/supabaseService';
 import {
-  armarSeccionesCategoria, buscanPareja, categoriasDe, faltaInscribirse, parejaDe, resumenArmado,
+  armarSeccionesCategoria, buscanPareja, categoriasDe, costoInscripcion, faltaInscribirse, parejaDe, resumenArmado,
   MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
 } from '../utils/inscripciones';
 import { distancia, normalizar } from '../utils/nombres';
+
+const money = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
+const METODO_LBL: Record<string, string> = {
+  mp: 'Mercado Pago', efectivo: 'Efectivo', transferencia: 'Transferencia', freepass: 'Free pass',
+};
 import { fechaHumana } from '../utils/fechas';
 import { waUruguay } from '../utils/telefono';
 
@@ -47,6 +52,9 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const [vista, setVista] = useState<'recientes' | 'categorias'>('recientes');
   // Alta/edición manual: 'nueva' abre el modal vacío, una Inscripcion lo abre precargado.
   const [editando, setEditando] = useState<Inscripcion | 'nueva' | null>(null);
+  // Registro de pago (solo eventos con tarifa) y buscador de jugadores.
+  const [pagando, setPagando] = useState<Inscripcion | null>(null);
+  const [busqueda, setBusqueda] = useState('');
   // Nombres del padrón para los datalist del modal (se cargan al abrirlo por primera vez).
   const [nombresPadron, setNombresPadron] = useState<string[] | null>(null);
   useEffect(() => {
@@ -116,6 +124,25 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const activos = (filas ?? []).filter(f => f.estado !== 'baja');
   const bajas = (filas ?? []).filter(f => f.estado === 'baja');
   const recientes = [...activos].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  // Buscador: matchea nombre y parejas declaradas, sin tildes. Solo filtra la
+  // vista Recientes (al escribir se salta ahí; las secciones no se rompen).
+  const q = normalizar(busqueda);
+  const matchBusqueda = (i: Inscripcion) =>
+    q === '' || normalizar(i.nombre).includes(q)
+    || Object.values(i.parejas).some(p => normalizar(p).includes(q))
+    || normalizar(i.pareja).includes(q);
+  const recientesFiltradas = recientes.filter(matchBusqueda);
+  const bajasFiltradas = bajas.filter(matchBusqueda);
+
+  // Cobros (solo eventos con tarifa): resumen arriba + chip por fila.
+  const tarifa: TarifaEvento | null = evt?.tarifa ?? null;
+  const cobrado = activos.reduce((s, i) => s + (i.pagoAt ? (i.pagoMonto ?? 0) : 0), 0);
+  const enDeuda = activos.reduce((s, i) => s + (i.pagoAt ? (i.pagoDeuda ?? 0) : 0), 0);
+  const sinRegistrar = tarifa ? activos.filter(i => !i.pagoAt) : [];
+  const sinRegistrarTotal = tarifa
+    ? sinRegistrar.reduce((s, i) => s + costoInscripcion(categoriasDe(i).length, tarifa), 0)
+    : 0;
   const esNueva = (i: Inscripcion) => i.createdAt > marcaVisitaPrevia();
   const linkPublico = evt ? `volea.vercel.app/#/inscripcion/${evt.id}` : '';
 
@@ -130,6 +157,12 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         className="inline-flex items-center gap-1 rounded-lg bg-navy-700/10 px-3 py-1 text-xs font-bold text-navy-700 hover:bg-navy-700/20 disabled:opacity-50">
         <Pencil size={12} /> Editar
       </button>
+      {tarifa && !i.pagoAt && i.estado !== 'baja' && (
+        <button onClick={() => setPagando(i)} disabled={cambiando !== null}
+          className="inline-flex items-center gap-1 rounded-lg bg-lime-400 px-3 py-1 text-xs font-bold text-navy-700 hover:bg-lime-300 disabled:opacity-50">
+          <DollarSign size={12} /> Registrar pago
+        </button>
+      )}
       {i.estado !== 'confirmada' && (
         <button onClick={() => void cambiarEstado(i.id, 'confirmada')} disabled={cambiando !== null}
           className="rounded-lg bg-green-50 px-3 py-1 text-xs font-bold text-green-700 hover:bg-green-100 disabled:opacity-50">
@@ -159,6 +192,25 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           <span className="rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">nueva</span>
         )}
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${ESTADO_CHIP[i.estado]}`}>{i.estado}</span>
+        {tarifa && i.estado !== 'baja' && (
+          i.pagoAt ? (
+            i.pagoMetodo === 'freepass' ? (
+              <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-700">FREE PASS</span>
+            ) : (i.pagoDeuda ?? 0) > 0 ? (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                pagó {money(i.pagoMonto ?? 0)} · debe {money(i.pagoDeuda ?? 0)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">
+                pagó {money(i.pagoMonto ?? 0)} · {METODO_LBL[i.pagoMetodo ?? ''] ?? i.pagoMetodo}
+              </span>
+            )
+          ) : (
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
+              a cobrar {money(costoInscripcion(categoriasDe(i).length, tarifa))}
+            </span>
+          )
+        )}
         {i.duprId && <span className="rounded-full bg-navy-700/10 px-2 py-0.5 text-[11px] font-bold text-navy-700">DUPR {i.duprId}</span>}
       </div>
       <div className="mt-1 flex flex-wrap gap-1.5">
@@ -259,6 +311,41 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
+      {/* Buscador de jugadores (filtra Recientes; matchea nombre y parejas) */}
+      {evt && filas !== null && filas.length > 0 && (
+        <div className="relative max-w-md">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={busqueda}
+            onChange={e => { setBusqueda(e.target.value); if (e.target.value.trim() !== '') setVista('recientes'); }}
+            placeholder="Buscar jugador o pareja…"
+            className="w-full rounded-lg border border-gray-200 py-2 pl-9 pr-8 text-sm focus:border-lime-400 outline-none"
+          />
+          {busqueda !== '' && (
+            <button onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy-700">✕</button>
+          )}
+        </div>
+      )}
+
+      {/* Tarifa y totales de cobro */}
+      {evt && tarifa && filas !== null && filas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-gray-100 bg-white px-4 py-2.5 text-sm">
+          <span className="text-gray-500">
+            Inscripción <b className="text-navy-700">{money(tarifa.base)}</b> (hasta {tarifa.incluye} categorías)
+            + <b className="text-navy-700">{money(tarifa.extra)}</b> c/adicional
+          </span>
+          <span className="font-semibold text-green-700">Cobrado {money(cobrado)}</span>
+          {enDeuda > 0 && <span className="font-semibold text-amber-600">En deuda {money(enDeuda)}</span>}
+          {sinRegistrar.length > 0 && (
+            <span className="font-semibold text-gray-500">
+              Sin registrar {money(sinRegistrarTotal)} ({sinRegistrar.length})
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Semáforo de armado: qué categorías se juegan (umbral: 4 duplas/jugadores) */}
       {evt && filas !== null && filas.length > 0 && (
         <div>
@@ -343,11 +430,16 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
 
       {evt && filas !== null && filas.length > 0 && vista === 'recientes' && (
         <div className="space-y-2">
-          {recientes.map(filaPersona)}
-          {bajas.length > 0 && (
+          {q !== '' && (
+            <p className="text-xs text-gray-400">
+              {recientesFiltradas.length} de {recientes.length} inscripciones matchean «{busqueda.trim()}»
+            </p>
+          )}
+          {recientesFiltradas.map(filaPersona)}
+          {bajasFiltradas.length > 0 && (
             <>
-              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">Bajas ({bajas.length})</p>
-              {bajas.map(filaPersona)}
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">Bajas ({bajasFiltradas.length})</p>
+              {bajasFiltradas.map(filaPersona)}
             </>
           )}
         </div>
@@ -402,6 +494,16 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
+      {pagando && evt && tarifa && (
+        <PagoModal
+          key={pagando.id}
+          inscripcion={pagando}
+          tarifa={tarifa}
+          onClose={() => setPagando(null)}
+          onDone={() => { setPagando(null); void cargar(); }}
+        />
+      )}
+
       {editando !== null && evt && (
         <InscripcionModal
           key={editando === 'nueva' ? 'nueva' : editando.id}
@@ -419,6 +521,108 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Modal de pago de inscripción ────────────────────────────────────────────
+
+/**
+ * Registra el pago: costo calculado por tarifa (el server lo recalcula igual),
+ * monto editable (lo que falte queda como deuda con el nombre en la Caja) y
+ * free pass sin cargo para socios/invitados. Al confirmar, la inscripción pasa
+ * a confirmada.
+ */
+function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
+  inscripcion: Inscripcion;
+  tarifa: TarifaEvento;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const nCats = categoriasDe(inscripcion).length;
+  const costo = costoInscripcion(nCats, tarifa);
+  const extras = Math.max(0, nCats - tarifa.incluye);
+  const [metodo, setMetodo] = useState<'efectivo' | 'mp' | 'transferencia' | 'freepass' | null>(null);
+  const [monto, setMonto] = useState(String(costo));
+  const [guardando, setGuardando] = useState(false);
+
+  const montoNum = metodo === 'freepass' ? 0 : Number(monto);
+  const montoOk = Number.isFinite(montoNum) && montoNum >= 0 && montoNum <= costo;
+  const deuda = montoOk ? Math.round((costo - montoNum) * 100) / 100 : 0;
+  const listo = !!metodo && montoOk && !guardando;
+
+  const confirmar = async () => {
+    if (!listo || !metodo) return;
+    setGuardando(true);
+    try {
+      const r = await SupabaseService.pagoInscripcion(inscripcion.id, montoNum, metodo, '');
+      if (!r.ok) { toast.error(r.error || 'No se pudo registrar el pago'); return; }
+      if (metodo === 'freepass') toast.success(`${inscripcion.nombre}: free pass ✓ (confirmada)`);
+      else if ((r.deuda ?? 0) > 0) toast.success(`Pago registrado — quedan ${money(r.deuda ?? 0)} como deuda de ${inscripcion.nombre} en la Caja`);
+      else toast.success(`${inscripcion.nombre} pagó ${money(montoNum)} ✓`);
+      onDone();
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={() => !guardando && onClose()} />
+      <div className="relative w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">Pago — {inscripcion.nombre}</h3>
+          <button onClick={onClose} disabled={guardando} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700">✕</button>
+        </div>
+
+        <div className="mb-3 rounded-xl bg-gray-50 px-4 py-3 text-sm">
+          <p className="text-gray-600">
+            {nCats} {nCats === 1 ? 'categoría' : 'categorías'}: {money(tarifa.base)}
+            {extras > 0 && <> + {extras} × {money(tarifa.extra)}</>}
+          </p>
+          <p className="mt-0.5 font-display text-xl font-bold text-navy-700">{money(costo)}</p>
+        </div>
+
+        <span className="mb-1 block text-xs font-display font-semibold uppercase text-gray-500">¿Cómo paga?</span>
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {(['efectivo', 'mp', 'transferencia', 'freepass'] as const).map(m => (
+            <button key={m} onClick={() => setMetodo(m)} aria-pressed={metodo === m}
+              className={`rounded-lg border py-2 font-display text-xs font-bold transition-colors ${
+                metodo === m
+                  ? m === 'freepass' ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-navy-700 bg-navy-700 text-white'
+                  : 'border-gray-200 text-gray-500 hover:text-navy-700'
+              }`}>
+              {METODO_LBL[m]}
+            </button>
+          ))}
+        </div>
+
+        {metodo === 'freepass' ? (
+          <p className="mb-3 rounded-lg bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700">
+            Sin cargo (socios / invitados). No pasa por la Caja y queda confirmada.
+          </p>
+        ) : (
+          <div className="mb-3">
+            <label htmlFor="pago-monto" className="mb-1 block text-xs font-display font-semibold uppercase text-gray-500">
+              ¿Cuánto paga ahora?
+            </label>
+            <input id="pago-monto" type="number" min={0} max={costo} step={1} value={monto}
+              onChange={e => setMonto(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-lime-400 outline-none" />
+            {!montoOk && <p className="mt-1 text-xs text-red-500">Entre 0 y {money(costo)}.</p>}
+            {montoOk && deuda > 0 && (
+              <p className="mt-1 text-xs font-semibold text-amber-700">
+                Quedan {money(deuda)} como deuda de {inscripcion.nombre} en «Por cobrar» de la Caja.
+              </p>
+            )}
+          </div>
+        )}
+
+        <button onClick={() => void confirmar()} disabled={!listo}
+          className="w-full rounded-lg bg-lime-400 py-2.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400">
+          {guardando ? 'Registrando…' : 'Confirmar pago'}
+        </button>
+      </div>
     </div>
   );
 }

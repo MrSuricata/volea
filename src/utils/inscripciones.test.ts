@@ -5,6 +5,7 @@ import type { Inscripcion } from '../types';
 const base = {
   celular: '', email: '', duprId: '', notas: '', estado: 'pendiente' as const,
   createdAt: '2026-08-14T12:00:00Z', eventId: 'evt', pareja: '',
+  pagoCosto: null, pagoMonto: null, pagoMetodo: null, pagoDeuda: null, pagoAt: null,
 };
 const insc = (id: string, nombre: string, categorias: string, parejas: Record<string, string> = {}): Inscripcion =>
   ({ ...base, id, nombre, categorias, parejas });

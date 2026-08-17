@@ -533,6 +533,11 @@ export const SupabaseService = {
       endDate: row.end_date || '',
       inscripcionesAbiertas: row.inscripciones_abiertas === true,
       categorias: row.categorias || '',
+      // La tarifa se setea por SQL; el upsert del admin no la incluye y no la pisa.
+      tarifa: row.tarifa && typeof row.tarifa === 'object' && typeof row.tarifa.base === 'number'
+        && typeof row.tarifa.incluye === 'number' && typeof row.tarifa.extra === 'number'
+        ? { base: row.tarifa.base, incluye: row.tarifa.incluye, extra: row.tarifa.extra }
+        : null,
     }));
   },
 
@@ -617,6 +622,11 @@ export const SupabaseService = {
       duprId: row.dupr_id || '',
       notas: row.notas || '',
       estado: row.estado || 'pendiente',
+      pagoCosto: row.pago_costo !== null && row.pago_costo !== undefined ? Number(row.pago_costo) : null,
+      pagoMonto: row.pago_monto !== null && row.pago_monto !== undefined ? Number(row.pago_monto) : null,
+      pagoMetodo: row.pago_metodo ?? null,
+      pagoDeuda: row.pago_deuda !== null && row.pago_deuda !== undefined ? Number(row.pago_deuda) : null,
+      pagoAt: row.pago_at ?? null,
       createdAt: row.created_at || '',
     }));
   },
@@ -687,6 +697,35 @@ export const SupabaseService = {
     }).eq('id', id));
     if (error) { console.error('Error edición inscripción admin:', error); return false; }
     return true;
+  },
+
+  /**
+   * Registra el pago de una inscripción (RPC atómica): el costo se calcula
+   * server-side, lo pagado entra a la Caja como venta y el saldo queda como
+   * deuda con el nombre en «Por cobrar». freepass = sin cargo, sin caja.
+   */
+  async pagoInscripcion(
+    id: string,
+    monto: number,
+    metodo: 'mp' | 'efectivo' | 'transferencia' | 'freepass',
+    reportedBy: string,
+  ): Promise<{ ok: boolean; error?: string; deuda?: number }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_pago_inscripcion', {
+      p_id: id,
+      p_monto: monto,
+      p_metodo: metodo,
+      p_reported_by: reportedBy,
+    }));
+    if (error) {
+      console.error('Error registrando pago de inscripción:', error);
+      return { ok: false, error: 'No se pudo registrar el pago. Verificá tu sesión.' };
+    }
+    return {
+      ok: data?.ok === true,
+      error: typeof data?.error === 'string' ? data.error : undefined,
+      deuda: typeof data?.deuda === 'number' ? data.deuda : undefined,
+    };
   },
 
   async setEstadoInscripcion(id: string, estado: Inscripcion['estado']): Promise<boolean> {

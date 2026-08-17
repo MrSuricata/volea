@@ -2,8 +2,13 @@
 // (con fallback al campo legacy) y armado de secciones "spliteadas" por
 // categoría con duplas por mención mutua, como la planilla de Brian.
 
-import type { Inscripcion } from '../types';
+import type { Inscripcion, TarifaEvento } from '../types';
 import { normalizar } from './nombres';
+
+/** Costo de una inscripción: $base incluye N categorías, cada adicional suma $extra. */
+export function costoInscripcion(nCategorias: number, tarifa: TarifaEvento): number {
+  return tarifa.base + Math.max(0, nCategorias - tarifa.incluye) * tarifa.extra;
+}
 
 // ── Marca de "última visita" del badge de nuevas ──
 // Vive acá (y no en AdminInscripcionesTab) para que AdminPage y BarraAdmin
