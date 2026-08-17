@@ -264,8 +264,14 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // Gestión del armado: semáforo, quiénes buscan pareja (con cruces) y quiénes
   // fueron declarados como pareja pero no se anotaron.
   const armado = resumenArmado(secciones, filas ?? []);
-  // Con gente van primero (aunque no armen dupla todavía); las vacías al final.
-  const armadoOrdenado = [...armado.filter(a => a.totalPersonas > 0), ...armado.filter(a => a.totalPersonas === 0)];
+  // Separado por estado (pedido de Brian): qué se juega, qué viene en camino y
+  // qué está flojo — dentro de cada grupo, las que tienen gente primero.
+  const porGente = (a: typeof armado[number], b: typeof armado[number]) => b.totalPersonas - a.totalPersonas;
+  const gruposArmado = [
+    { titulo: 'Se juegan', nota: `${MIN_UNIDADES_VIABLE}+ duplas/jugadores`, clase: 'text-green-700', items: armado.filter(a => a.nivel === 'verde') },
+    { titulo: 'En armado', nota: '2-3, les falta poco', clase: 'text-amber-600', items: armado.filter(a => a.nivel === 'ambar') },
+    { titulo: 'Flojas o vacías', nota: '0-1', clase: 'text-gray-400', items: [...armado.filter(a => a.nivel === 'gris')].sort(porGente) },
+  ].filter(g => g.items.length > 0);
   const buscan = buscanPareja(secciones, filas ?? []);
   const faltan = faltaInscribirse(filas ?? []);
   const PUNTO_NIVEL = { verde: 'bg-green-500', ambar: 'bg-amber-400', gris: 'bg-gray-300' } as const;
@@ -361,35 +367,39 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
-      {/* Semáforo de armado: qué categorías se juegan (umbral: 4 duplas/jugadores) */}
+      {/* Semáforo de armado, separado por estado (umbral: 4 duplas/jugadores) */}
       {evt && filas !== null && filas.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-gray-400">
-            Armado del torneo <span className="font-normal normal-case">(verde = se juega con {MIN_UNIDADES_VIABLE}+)</span>
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {armadoOrdenado.map(a => (
-              <button key={a.categoria} type="button"
-                onClick={() => a.totalPersonas > 0 && abrirCategoria(a.categoria)}
-                disabled={a.totalPersonas === 0}
-                title={a.totalPersonas > 0 ? `Ver ${a.categoria}` : undefined}
-                className={`rounded-xl border border-gray-100 bg-white px-3 py-2 text-left transition-colors ${
-                  a.totalPersonas === 0 ? 'opacity-50' : 'cursor-pointer hover:border-lime-400 hover:bg-lime-50/50'
-                }`}>
-                <div className="flex items-center gap-1.5">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${PUNTO_NIVEL[a.nivel]}`} />
-                  <p className="truncate font-display text-xs font-bold text-navy-700">{a.categoria}</p>
-                </div>
-                <p className="mt-0.5 text-[11px] text-gray-500">
-                  {a.totalPersonas === 0
-                    ? 'sin anotados'
-                    : a.esDoble
-                      ? `${a.unidades} ${a.unidades === 1 ? 'dupla' : 'duplas'}${a.buscanPareja > 0 ? ` + ${a.buscanPareja} busca${a.buscanPareja > 1 ? 'n' : ''}` : ''}`
-                      : `${a.unidades} ${a.unidades === 1 ? 'jugador' : 'jugadores'}`}
-                </p>
-              </button>
-            ))}
-          </div>
+        <div className="space-y-3">
+          {gruposArmado.map(g => (
+            <div key={g.titulo}>
+              <p className={`mb-1.5 text-xs font-bold uppercase tracking-wide ${g.clase}`}>
+                {g.titulo} ({g.items.length}) <span className="font-normal normal-case text-gray-400">· {g.nota}</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                {g.items.map(a => (
+                  <button key={a.categoria} type="button"
+                    onClick={() => a.totalPersonas > 0 && abrirCategoria(a.categoria)}
+                    disabled={a.totalPersonas === 0}
+                    title={a.totalPersonas > 0 ? `Ver ${a.categoria}` : undefined}
+                    className={`rounded-xl border border-gray-100 bg-white px-3 py-2 text-left transition-colors ${
+                      a.totalPersonas === 0 ? 'opacity-50' : 'cursor-pointer hover:border-lime-400 hover:bg-lime-50/50'
+                    }`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${PUNTO_NIVEL[a.nivel]}`} />
+                      <p className="truncate font-display text-xs font-bold text-navy-700">{a.categoria}</p>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-gray-500">
+                      {a.totalPersonas === 0
+                        ? 'sin anotados'
+                        : a.esDoble
+                          ? `${a.unidades} ${a.unidades === 1 ? 'dupla' : 'duplas'}${a.buscanPareja > 0 ? ` + ${a.buscanPareja} busca${a.buscanPareja > 1 ? 'n' : ''}` : ''}`
+                          : `${a.unidades} ${a.unidades === 1 ? 'jugador' : 'jugadores'}`}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
