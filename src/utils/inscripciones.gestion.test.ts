@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  armarSeccionesCategoria, buscanPareja, costoInscripcion, faltaInscribirse, generoDe, resumenArmado,
+  armarSeccionesCategoria, buscanPareja, costoInscripcion, estadisticasTorneo, faltaInscribirse, generoDe, resumenArmado,
   MIN_UNIDADES_VIABLE,
 } from './inscripciones';
 import type { Inscripcion } from '../types';
@@ -10,6 +10,39 @@ const base = {
   createdAt: '2026-08-15T12:00:00Z', eventId: 'evt', pareja: '',
   pagoCosto: null, pagoMonto: null, pagoMetodo: null, pagoDeuda: null, pagoAt: null,
 };
+
+describe('estadisticasTorneo', () => {
+  it('cuenta jugadores, géneros, la más jugada y estima partidos (2×unidades−1 por categoría jugable)', () => {
+    const filas = [
+      insc('1', 'Ana', 'Doble Femenino A, Doble Mixto A', { 'Doble Femenino A': 'Bea' }),
+      insc('2', 'Bea', 'Doble Femenino A', { 'Doble Femenino A': 'Ana' }),
+      insc('3', 'Juan', 'Doble Masculino A, Doble Mixto A'),
+      insc('4', 'X Sin Genero', 'Doble Mixto A'),
+    ];
+    const armado = resumenArmado(armarSeccionesCategoria(filas, ['Doble Femenino A', 'Doble Mixto A', 'Doble Masculino A']), filas);
+    const s = estadisticasTorneo(filas, armado);
+    expect(s.jugadores).toBe(4);
+    expect(s.mujeres).toBe(2);
+    expect(s.hombres).toBe(1);
+    expect(s.sinGenero).toBe(1);
+    expect(s.masJugada).toEqual({ categoria: 'Doble Mixto A', personas: 3 });
+    // Fem A: 1 dupla (unidades 1, no juega) · Mixto A: 3 sueltos sin pareja (0 unidades) ·
+    // Masc A: 1 suelto (0) → ninguna llega a 2 unidades ⇒ 0 partidos estimados.
+    expect(s.partidosAprox).toBe(0);
+  });
+
+  it('las bajas no cuentan y los partidos suman por categoría jugable', () => {
+    const filas = [
+      insc('1', 'A', 'Singles Masculino A'), insc('2', 'B', 'Singles Masculino A'),
+      insc('3', 'C', 'Singles Masculino A'), insc('4', 'D', 'Singles Masculino A'),
+      { ...insc('9', 'Baja', 'Singles Masculino A'), estado: 'baja' as const },
+    ];
+    const armado = resumenArmado(armarSeccionesCategoria(filas, ['Singles Masculino A']), filas);
+    const s = estadisticasTorneo(filas, armado);
+    expect(s.jugadores).toBe(4);
+    expect(s.partidosAprox).toBe(7); // 2×4−1
+  });
+});
 
 describe('costoInscripcion', () => {
   const tarifa = { base: 1200, incluye: 3, extra: 200 };

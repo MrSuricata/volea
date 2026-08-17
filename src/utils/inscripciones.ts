@@ -115,6 +115,43 @@ export function resumenArmado(secciones: SeccionCategoria[], inscripciones: Insc
   });
 }
 
+export interface EstadisticasTorneo {
+  jugadores: number;
+  mujeres: number;
+  hombres: number;
+  sinGenero: number;
+  masJugada: { categoria: string; personas: number } | null;
+  /** ≈ 2×unidades − 1 por categoría con 2+ unidades (grupos + llave, ballpark). */
+  partidosAprox: number;
+}
+
+/** Números generales del torneo para el resumen de la pestaña. */
+export function estadisticasTorneo(inscripciones: Inscripcion[], armado: ArmadoCategoria[]): EstadisticasTorneo {
+  const activos = inscripciones.filter(i => i.estado !== 'baja');
+  let mujeres = 0;
+  let hombres = 0;
+  for (const i of activos) {
+    const g = generoDe(i);
+    if (g === 'F') mujeres++;
+    else if (g === 'M') hombres++;
+  }
+  const conGente = armado.filter(a => a.totalPersonas > 0);
+  const top = conGente.length > 0
+    ? conGente.reduce((max, a) => (a.totalPersonas > max.totalPersonas ? a : max))
+    : null;
+  const partidosAprox = armado
+    .filter(a => a.unidades >= 2)
+    .reduce((s, a) => s + (2 * a.unidades - 1), 0);
+  return {
+    jugadores: activos.length,
+    mujeres,
+    hombres,
+    sinGenero: activos.length - mujeres - hombres,
+    masJugada: top ? { categoria: top.categoria, personas: top.totalPersonas } : null,
+    partidosAprox,
+  };
+}
+
 export interface BuscanCategoria {
   categoria: string;
   buscan: Inscripcion[];

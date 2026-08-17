@@ -5,8 +5,8 @@ import { toast } from 'sonner';
 import type { Event, Inscripcion, TarifaEvento } from '../types';
 import { SupabaseService } from '../services/supabaseService';
 import {
-  armarSeccionesCategoria, buscanPareja, categoriasDe, costoInscripcion, faltaInscribirse, parejaDe, resumenArmado,
-  MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
+  armarSeccionesCategoria, buscanPareja, categoriasDe, costoInscripcion, estadisticasTorneo, faltaInscribirse,
+  parejaDe, resumenArmado, MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
 } from '../utils/inscripciones';
 import { distancia, normalizar } from '../utils/nombres';
 
@@ -274,6 +274,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   ].filter(g => g.items.length > 0);
   const buscan = buscanPareja(secciones, filas ?? []);
   const faltan = faltaInscribirse(filas ?? []);
+  const stats = estadisticasTorneo(filas ?? [], armado);
   const PUNTO_NIVEL = { verde: 'bg-green-500', ambar: 'bg-amber-400', gris: 'bg-gray-300' } as const;
 
   return (
@@ -364,6 +365,23 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               Sin registrar {money(sinRegistrarTotal)} ({sinRegistrar.length})
             </span>
           )}
+        </div>
+      )}
+
+      {/* Números del torneo (pedido de Brian: jugadores, géneros, más jugada, partidos ≈) */}
+      {evt && filas !== null && filas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-gray-100 bg-white px-4 py-2.5 text-sm text-gray-600">
+          <span><b className="text-navy-700">{stats.jugadores}</b> jugadores únicos</span>
+          <span>
+            <b className="text-pink-600">{stats.mujeres}</b> mujeres · <b className="text-blue-700">{stats.hombres}</b> hombres
+            {stats.sinGenero > 0 && <span className="text-gray-400"> · {stats.sinGenero} sin definir</span>}
+          </span>
+          {stats.masJugada && (
+            <span>más jugada: <b className="text-navy-700">{stats.masJugada.categoria}</b> ({stats.masJugada.personas})</span>
+          )}
+          <span title="Estimado grueso: ~2 partidos por dupla/jugador entre grupos y llave, en las categorías con 2+">
+            ≈ <b className="text-navy-700">{stats.partidosAprox}</b> partidos estimados
+          </span>
         </div>
       )}
 
