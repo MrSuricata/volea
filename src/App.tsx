@@ -2972,6 +2972,22 @@ function InscripcionPage() {
     return () => { vivo = false; };
   }, []);
 
+  // Aviso "ya estás anotado": chequeo por nombre (boolean pelado, sin datos de
+  // nadie) con debounce, para que no se duplique gente que se anotó por otra
+  // vía. El server además RECHAZA el duplicado por nombre al enviar.
+  const [yaAnotado, setYaAnotado] = useState(false);
+  useEffect(() => {
+    const nombre = form.nombre.trim();
+    if (!evt || nombre.length < 5) { setYaAnotado(false); return; }
+    let vivo = true;
+    const t = setTimeout(() => {
+      void SupabaseService.inscripcionExiste(evt.id, nombre).then(existe => {
+        if (vivo) setYaAnotado(existe);
+      });
+    }, 600);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [form.nombre, evt]);
+
   usePageMeta({
     title: evt ? `Inscripción — ${evt.name} | VOLEA` : 'Inscripción | VOLEA',
     description: evt ? `Inscribite online al ${evt.name} en ${evt.location}.` : 'Inscripción a eventos VOLEA.',
@@ -3130,6 +3146,20 @@ function InscripcionPage() {
               onChange={e => setForm({ ...form, celular: e.target.value })} className={inputCls} />
           </div>
         </div>
+
+        {yaAnotado && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p className="font-bold">Parece que ya estás anotado en este torneo 👀</p>
+            <p className="mt-0.5">
+              Si querés cambiar algo de tu inscripción (categorías, pareja), escribinos por{' '}
+              {waUruguay(evt.phone) ? (
+                <a href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Ya estoy inscripto al ${evt.name} y quiero modificar mi inscripción (soy ${form.nombre.trim()}).`)}`}
+                  target="_blank" rel="noopener noreferrer" className="font-bold underline">WhatsApp</a>
+              ) : 'WhatsApp'}
+              {' '}y lo ajustamos. Si sos otra persona con el mismo nombre, avisanos por ahí también.
+            </p>
+          </div>
+        )}
 
         <div>
           <span className={labelCls}>Categorías *</span>

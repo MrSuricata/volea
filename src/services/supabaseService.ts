@@ -593,6 +593,16 @@ export const SupabaseService = {
     };
   },
 
+  /** ¿Este nombre ya está anotado en el evento? Boolean pelado, apto público. */
+  async inscripcionExiste(eventId: string, nombre: string): Promise<boolean> {
+    if (!supabase || nombre.trim() === '') return false;
+    const { data, error } = await conTechoLectura(
+      supabase.rpc('inscripcion_existe', { p_event_id: eventId, p_nombre: nombre.trim() }),
+    );
+    if (error) return false;
+    return data === true;
+  },
+
   /** Cuántos inscriptos tiene un evento (número agregado, apto público). */
   async contarInscriptos(eventId: string): Promise<number | null> {
     if (!supabase) return null;

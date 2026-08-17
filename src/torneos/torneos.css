@@ -75,11 +75,16 @@
 .rk .grupo-titulo { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 10px; }
 .rk .grupo-titulo h3 { margin: 0; font-size: 1.25rem; }
 .rk .aviso { background: rgba(204, 255, 0, 0.08); border: 1px solid rgba(204, 255, 0, 0.35); color: var(--texto); padding: 10px 14px; border-radius: 10px; margin: 12px 0; }
-.rk .llave { display: flex; gap: 28px; overflow-x: auto; padding: 10px 2px 20px; align-items: stretch; }
-.rk .ronda-llave { display: flex; flex-direction: column; justify-content: space-around; gap: 18px; min-width: 250px; }
-.rk .ronda-llave h3 { color: var(--lima); letter-spacing: 0.08em; font-size: 0.95rem; }
-.rk .partido-llave { border: 1px solid var(--borde); border-radius: 14px; background: var(--navy-3); overflow: hidden; }
-.rk .partido-llave .slot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; min-height: 46px; }
+/* Llave COMPACTA (pedido de Brian 17/8: "se va a lo ancho y alto"): columnas
+   más angostas, cajas más bajas y menos aire entre rondas — mismas clases para
+   el gestor y la página pública. */
+.rk .llave { display: flex; gap: 14px; overflow-x: auto; padding: 8px 2px 14px; align-items: stretch; }
+.rk .ronda-llave { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; min-width: 200px; }
+.rk .ronda-llave h3 { color: var(--lima); letter-spacing: 0.08em; font-size: 0.8rem; }
+.rk .partido-llave { border: 1px solid var(--borde); border-radius: 10px; background: var(--navy-3); overflow: hidden; font-size: 0.9rem; }
+.rk .partido-llave .slot { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 10px; min-height: 34px; }
+.rk .partido-llave .chip { font-size: 0.72rem; padding: 1px 7px; }
+.rk .partido-llave input[type='number'].puntos { width: 54px; font-size: 1.05rem; padding: 3px 4px; }
 .rk .partido-llave .slot + .slot { border-top: 1px solid var(--borde); }
 .rk .partido-llave .slot.ganador { background: var(--lima-suave); color: var(--lima); font-weight: 800; }
 .rk .campeon { text-align: center; padding: 32px 20px; margin-bottom: 16px; border-color: var(--lima); box-shadow: 0 0 0 1px var(--lima), 0 0 70px rgba(204, 255, 0, 0.12); }
@@ -100,7 +105,7 @@
 .rk label.boton:focus-within { outline: 2px solid var(--lima); outline-offset: 2px; }
 .rk .tanda-titulo { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--lima); opacity: 0.85; margin: 10px 0 2px; }
 .rk .chip-cancha { background: var(--lima); color: #001f3f; font-weight: 800; }
-.rk .partido-llave .slot.slot-cancha { min-height: 0; padding: 4px 12px; justify-content: center; }
+.rk .partido-llave .slot.slot-cancha { min-height: 0; padding: 2px 10px; justify-content: center; }
 .rk ::selection { background: var(--lima); color: #001f3f; }
 .rk ::-webkit-scrollbar { width: 10px; height: 10px; }
 .rk ::-webkit-scrollbar-track { background: var(--navy-1); }
