@@ -155,3 +155,7 @@
 .rk .cinta-resultados { overflow: hidden; }
 .rk .cinta-resultados:hover .cinta-track { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .rk .cinta-track { animation: none !important; } }
+
+/* EN VIVO: campeones a la izquierda en pantallas anchas, apilado en el celular */
+.rk .envivo-grid { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .rk .envivo-grid { grid-template-columns: 1fr; } }

@@ -69,6 +69,7 @@ type CatProg = {
   jugados: number;
   total: number;
   terminado: boolean;
+  campeon: string | null;
 };
 type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string } & RefPartido;
 
@@ -129,6 +130,22 @@ function llaveProyectada(nGrupos: number): PartidoProg[][] {
     [{ a: 'Ganador QF1', b: 'Ganador QF2', fase: 'SEMIS' }, { a: 'Ganador QF3', b: 'Ganador QF4', fase: 'SEMIS' }],
     [{ a: 'Ganador SF1', b: 'Ganador SF2', fase: 'FINAL' }],
   ];
+}
+
+// Campeón declarado: ganador de la final (la ronda más alta de la llave, sin
+// contar 3er puesto) cuando ya tiene resultado. Antes de eso, null.
+function campeonDe(t: Torneo): string | null {
+  if (!t.partidosLlave || t.partidosLlave.length === 0) return null;
+  const finales = t.partidosLlave.filter((p) => !p.esTercerPuesto && p.a !== null && p.b !== null);
+  if (finales.length === 0) return null;
+  const maxRonda = Math.max(...finales.map((p) => p.ronda));
+  const final = finales.find((p) => p.ronda === maxRonda);
+  if (!final) return null;
+  const r = resultadoDe(final);
+  if (!r) return null;
+  const porId = new Map(t.partidosLlave.map((p) => [p.id, p]));
+  const id = parejaDeSlot(r.a > r.b ? final.a : final.b, porId);
+  return id ? nombreDe(t, id) : null;
 }
 
 // Extrae del torneo lo pendiente (real si existe, proyectado si no) y lo jugado.
@@ -227,6 +244,7 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
   return {
     nombre: t.nombre, corto: t.nombre.replace(' RACKET ROLL', ''), dia: cfg.dia, inicio: cfg.inicio,
     rondas, llave, resultados, jugados, total, terminado: t.fase === 'terminado',
+    campeon: campeonDe(t),
   };
 }
 
@@ -561,6 +579,23 @@ export default function ProgramacionPage() {
     .sort((x, y) => y.inicio - x.inicio)
     .flatMap((c) => c.resultados.map((r) => ({ cat: c.corto, ...r })))
     .slice(0, 30);
+  // Campeones en orden de aparición (el último título arriba).
+  const campeones = cats
+    .filter((c) => c.campeon)
+    .sort((x, y) => (x.dia === y.dia ? x.inicio - y.inicio : x.dia === 'SAB' ? -1 : 1))
+    .reverse();
+  // Quién está jugando AHORA en alguna cancha (para avisar antes de mandar a
+  // una misma persona a dos canchas: pasa con los que juegan varias categorías).
+  const ocupados = new Map<string, string>();
+  enCancha.forEach((e) => {
+    const et = e.partidoId ? etiquetaEnCancha(torneos, e) : null;
+    if (!et) return;
+    [...et.a.split(/\s+y\s+/i), ...et.b.split(/\s+y\s+/i)].forEach((n) => ocupados.set(normalizar(n), e.cancha));
+  });
+  const conflictosDe = (f: Fila) =>
+    [...f.a.split(/\s+y\s+/i), ...f.b.split(/\s+y\s+/i)]
+      .map((n) => ({ jugador: n.trim(), cancha: ocupados.get(normalizar(n)) }))
+      .filter((c): c is { jugador: string; cancha: string } => !!c.cancha);
 
   return (
     <div className="rk" style={{ position: 'relative' }}>
@@ -626,6 +661,40 @@ export default function ProgramacionPage() {
             )}
           </div>
         </header>
+
+        <div className="envivo-grid">
+        <aside>
+          <div style={{ ...carta, borderColor: 'var(--lima)', position: 'sticky', top: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: '1.4rem' }}>🏆</span>
+              <span style={{ fontWeight: 900, letterSpacing: '0.1em', fontSize: '1rem' }}>CAMPEONES</span>
+            </div>
+            {campeones.length === 0 ? (
+              <div style={{ opacity: 0.5, fontSize: '0.9rem' }}>El primer título se está jugando…</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 12 }}>
+                {campeones.map((c, i) => (
+                  <div key={c.corto} style={{ borderLeft: '3px solid var(--lima)', paddingLeft: 10 }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--lima)', textTransform: 'uppercase' }}>
+                        {c.corto}
+                      </span>
+                      {i === 0 && (
+                        <span style={{ fontSize: '0.62rem', fontWeight: 900, background: 'var(--lima)', color: '#101c33', borderRadius: 999, padding: '1px 7px', letterSpacing: '0.06em' }}>
+                          ✨ NUEVO
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', lineHeight: 1.3, textTransform: 'uppercase' }}>
+                      {c.campeon}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+        <div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
           {(['SAB', 'DOM'] as Dia[]).map((d) => (
@@ -740,18 +809,32 @@ export default function ProgramacionPage() {
                       <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
                       {f.b}
                     </div>
-                    {modoCarga && f.partidoId && (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-                        <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
-                        {CANCHAS.map((nombre) => (
-                          <button key={nombre} className="boton secundario"
-                            style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                            onClick={() => void mandarACancha(nombre, f)}>
-                            {nombre.replace('Cancha ', 'C')}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {modoCarga && f.partidoId && (() => {
+                      const choques = conflictosDe(f);
+                      return (
+                        <>
+                          {choques.length > 0 && (
+                            <div style={{ marginTop: 8, fontSize: '0.82rem', color: '#ffd28a', fontWeight: 700 }}>
+                              ⚠ {choques.map((c) => `${c.jugador} está jugando en ${c.cancha}`).join(' · ')}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
+                            {CANCHAS.map((nombre) => (
+                              <button key={nombre} className="boton secundario"
+                                style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                onClick={() => {
+                                  if (choques.length > 0 && !window.confirm(
+                                    `${choques.map((c) => `${c.jugador} está jugando en ${c.cancha}`).join('. ')}. ¿Mandar igual?`)) return;
+                                  void mandarACancha(nombre, f);
+                                }}>
+                                {nombre.replace('Cancha ', 'C')}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -787,6 +870,9 @@ export default function ProgramacionPage() {
             </div>
           </>
         )}
+
+        </div>
+        </div>
       </main>
     </div>
   );
