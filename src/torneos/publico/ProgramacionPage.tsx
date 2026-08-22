@@ -495,13 +495,13 @@ export default function ProgramacionPage() {
     setEstado('ok');
   }, []);
 
-  async function mandarACancha(cancha: string, f: Fila) {
+  async function mandarACancha(cancha: string, ref: { torneoId?: string | null; partidoId?: string | null }) {
     const sb = supabase;
-    if (!sb || !f.partidoId) return;
+    if (!sb || !ref.partidoId) return;
     const ahora = new Date().toISOString();
     // si ya estaba marcado en otra cancha, primero se lo saca de ahí
-    await sb.from('rk_en_cancha').update({ torneo_id: null, partido_id: null, updated_at: ahora }).eq('partido_id', f.partidoId);
-    await sb.from('rk_en_cancha').update({ torneo_id: f.torneoId, partido_id: f.partidoId, updated_at: ahora }).eq('cancha', cancha);
+    await sb.from('rk_en_cancha').update({ torneo_id: null, partido_id: null, updated_at: ahora }).eq('partido_id', ref.partidoId);
+    await sb.from('rk_en_cancha').update({ torneo_id: ref.torneoId, partido_id: ref.partidoId, updated_at: ahora }).eq('cancha', cancha);
     void cargar(false);
   }
 
@@ -645,26 +645,36 @@ export default function ProgramacionPage() {
             const et = e ? etiquetaEnCancha(torneos, e) : null;
             return (
               <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ marginBottom: 6 }}>
                   <span style={{ ...chip, background: et ? 'var(--lima)' : 'transparent', color: et ? '#101c33' : 'var(--texto)' }}>
                     {et ? '▶ ' : ''}{nombre}
                   </span>
-                  {modoCarga && et && (
-                    <button onClick={() => void liberarCancha(nombre)}
-                      style={{ background: 'none', border: 'none', color: 'var(--lima)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, padding: 0 }}>
-                      Liberar
-                    </button>
-                  )}
                 </div>
                 {et ? (
                   <>
                     <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
                     <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
                     {modoCarga && e?.torneoId && e?.partidoId && (
-                      <CargaResultado
-                        partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
-                        onGuardado={() => void cargar(false)}
-                      />
+                      <>
+                        <CargaResultado
+                          partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
+                          onGuardado={() => void cargar(false)}
+                        />
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mover a</span>
+                          {CANCHAS.filter((otra) => otra !== nombre).map((otra) => (
+                            <button key={otra} className="boton secundario"
+                              style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                              onClick={() => void mandarACancha(otra, e)}>
+                              {otra.replace('Cancha ', 'C')}
+                            </button>
+                          ))}
+                          <button className="boton secundario" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                            onClick={() => void liberarCancha(nombre)}>
+                            ✕ Cancelar
+                          </button>
+                        </div>
+                      </>
                     )}
                   </>
                 ) : (
