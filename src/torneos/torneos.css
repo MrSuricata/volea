@@ -160,8 +160,8 @@
    En pantallas medianas las canchas pasan arriba del centro; en el celular el
    orden es canchas -> proximos -> resultados. min-width:0 evita que la fila de
    chips (scroll horizontal) imponga su ancho y desborde la pagina. */
-.rk .envivo-grid { display: grid; gap: 16px; align-items: start;
-  grid-template-columns: 280px minmax(0, 1fr) 330px; grid-template-areas: "izq centro der"; }
+.rk .envivo-grid { display: grid; gap: 22px; align-items: start;
+  grid-template-columns: 320px minmax(0, 1fr) 360px; grid-template-areas: "izq centro der"; }
 .rk .envivo-grid > * { min-width: 0; }
 .rk .envivo-grid > .col-izq { grid-area: izq; }
 .rk .envivo-grid > .col-centro { grid-area: centro; }

@@ -563,7 +563,7 @@ const chip: React.CSSProperties = {
   padding: '3px 9px', borderRadius: 999, border: '1px solid var(--borde)', whiteSpace: 'nowrap',
 };
 const carta: React.CSSProperties = {
-  background: 'var(--navy-1)', border: '1px solid var(--borde)', borderRadius: 14, padding: '10px 14px',
+  background: 'var(--navy-1)', border: '1px solid var(--borde)', borderRadius: 14, padding: '12px 16px',
 };
 
 export default function ProgramacionPage() {
@@ -722,7 +722,7 @@ export default function ProgramacionPage() {
         backgroundImage: 'radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1.4px)',
         backgroundSize: '22px 22px',
       }} />
-      <main className="contenedor" style={{ position: 'relative', zIndex: 1 }}>
+      <main className="contenedor" style={{ position: 'relative', zIndex: 1, maxWidth: 1760 }}>
         <div aria-hidden style={{
           height: 4, borderRadius: 999, marginBottom: 14,
           background: 'linear-gradient(90deg, #FF2D9E, #22D3EE 55%, #CCFF00)',
@@ -895,7 +895,7 @@ export default function ProgramacionPage() {
             {pendientes.length === 0 ? (
               <p className="vacio">No queda nada pendiente para este día 🎉</p>
             ) : (
-              <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
                 {visibles.map((f, i) => (
                   <div key={f.partidoId ?? i} style={carta}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
