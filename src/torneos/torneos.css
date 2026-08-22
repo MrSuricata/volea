@@ -148,3 +148,10 @@
   50% { opacity: 0.35; transform: scale(0.75); }
 }
 .rk .puntaje-llave { font-size: 1.15rem; font-weight: 800; min-width: 26px; text-align: center; }
+
+/* Cinta de resultados (EN VIVO): marquee continuo, pausable con el mouse.
+   El track lleva el contenido DUPLICADO y se desplaza -50%: loop perfecto. */
+@keyframes rk-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.rk .cinta-resultados { overflow: hidden; }
+.rk .cinta-resultados:hover .cinta-track { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .rk .cinta-track { animation: none !important; } }

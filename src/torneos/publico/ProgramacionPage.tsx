@@ -74,6 +74,17 @@ type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: st
 
 const aHora = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
+// "ANTONELLA TERRA y CRISTINA MAICH" -> "Antonella y Cristina" (para la cinta:
+// nombres de pila capitalizados; en nombres triples conserva el compuesto: "Ana Laura").
+function nombresPila(nombre: string): string {
+  const pila = (persona: string) => {
+    const partes = persona.trim().split(/\s+/);
+    const sinApellido = partes.length > 1 ? partes.slice(0, -1) : partes;
+    return sinApellido.map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+  };
+  return nombre.split(/\s+y\s+/i).map(pila).join(' y ');
+}
+
 // Rondas todos-contra-todos con descansos repartidos (método del círculo), por tamaño.
 const RONDAS_RR: Record<number, [number, number][][]> = {
   2: [[[1, 2]]],
@@ -543,6 +554,13 @@ export default function ProgramacionPage() {
     }))
     .filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
   const domSinConfirmar = dia === 'DOM' && !DOM_CONFIRMADO;
+  // Cinta de últimos resultados (todas las categorías, las más recientes primero:
+  // categorías de inicio más tarde arriba y, dentro de cada una, la llave primero).
+  const cinta = cats
+    .slice()
+    .sort((x, y) => y.inicio - x.inicio)
+    .flatMap((c) => c.resultados.map((r) => ({ cat: c.corto, ...r })))
+    .slice(0, 30);
 
   return (
     <div className="rk" style={{ position: 'relative' }}>
@@ -566,6 +584,32 @@ export default function ProgramacionPage() {
           height: 4, borderRadius: 999, marginBottom: 14,
           background: 'linear-gradient(90deg, #FF2D9E, #22D3EE 55%, #CCFF00)',
         }} />
+
+        {cinta.length > 0 && (
+          <div className="cinta-resultados" aria-label="Últimos resultados"
+            style={{ border: '1px solid var(--borde)', borderRadius: 999, background: 'var(--navy-1)', marginBottom: 14 }}>
+            <div className="cinta-track" style={{
+              display: 'inline-flex', whiteSpace: 'nowrap', alignItems: 'center',
+              animation: `rk-marquee ${Math.max(25, cinta.length * 6)}s linear infinite`, willChange: 'transform',
+            }}>
+              {[...cinta, ...cinta].map((r, i) => {
+                const ganaA = r.pa > r.pb;
+                return (
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '8px 16px' }}>
+                    <span style={{ color: 'var(--lima)', fontWeight: 800, fontSize: '0.7rem', letterSpacing: '0.07em' }}>{r.cat}</span>
+                    <span style={{ fontSize: '0.92rem' }}>
+                      <span style={{ fontWeight: ganaA ? 800 : 400, opacity: ganaA ? 1 : 0.75 }}>{nombresPila(r.a)} {r.pa}</span>
+                      <span style={{ opacity: 0.45 }}> – </span>
+                      <span style={{ fontWeight: ganaA ? 400 : 800, opacity: ganaA ? 0.75 : 1 }}>{r.pb} {nombresPila(r.b)}</span>
+                    </span>
+                    <span style={{ opacity: 0.25, color: 'var(--lima)' }}>◆</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <header className="cabecera">
           <h1><span className="marca">EN VIVO</span> RACKET ROLL 🪩</h1>
           <div className="acciones">
