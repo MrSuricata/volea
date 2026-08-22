@@ -17,6 +17,13 @@ type Dia = 'SAB' | 'DOM';
 
 // 3 canchas (definido por Brian la víspera): el greedy reparte sobre estas.
 const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3'];
+// El domingo depende de cuantas canchas haya (se define el sabado): hasta entonces
+// NO se publican horarios por partido, solo los inicios de bloque del flyer.
+const DOM_CONFIRMADO = false;
+const BLOQUES_DOM = [
+  ['9:30', 'Femenino B'], ['11:00', 'Mixto B'], ['12:30', 'Masculino B'],
+  ['14:00', 'Femenino A'], ['15:30', 'Mixto A'], ['17:00', 'Masculino A'],
+];
 const FECHA_DIA: Record<Dia, string> = { SAB: '2026-08-22', DOM: '2026-08-23' };
 const NOMBRE_DIA: Record<Dia, string> = { SAB: 'Sábado 22', DOM: 'Domingo 23' };
 // Duración real por partido con calentamiento (dato de Brian, 22/08): ~15 min
@@ -314,7 +321,18 @@ export default function ProgramacionPage() {
           ))}
         </div>
 
-        {delDia.length === 0 ? (
+        {dia === 'DOM' && !DOM_CONFIRMADO ? (
+          <div className="carta" style={{ padding: 16 }}>
+            <p style={{ margin: '0 0 10px' }}>
+              <strong>Programacion del domingo a confirmar</strong> - depende de las canchas
+              disponibles; el detalle por partido se publica el sabado a la noche.
+              Los inicios de cada categoria segun el flyer:
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.9 }}>
+              {BLOQUES_DOM.map(([h, c]) => <li key={c}><strong>{h}</strong> - {c}</li>)}
+            </ul>
+          </div>
+        ) : delDia.length === 0 ? (
           <p className="vacio">No queda nada pendiente para este día. 🎉</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
