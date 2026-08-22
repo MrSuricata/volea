@@ -78,8 +78,11 @@
 /* Llave COMPACTA (pedido de Brian 17/8: "se va a lo ancho y alto"): columnas
    más angostas, cajas más bajas y menos aire entre rondas — mismas clases para
    el gestor y la página pública. */
-.rk .llave { display: flex; gap: 14px; overflow-x: auto; padding: 8px 2px 14px; align-items: stretch; }
-.rk .ronda-llave { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; min-width: 200px; }
+/* align-items flex-start + columnas flex-start: cada ronda apila sus partidos
+   arriba y ocupa solo su alto. Con llaves grandes (OPC de 71) el space-around
+   desparramaba las rondas cortas a lo alto de la ronda de 32. */
+.rk .llave { display: flex; gap: 14px; overflow-x: auto; padding: 8px 2px 14px; align-items: flex-start; }
+.rk .ronda-llave { display: flex; flex-direction: column; justify-content: flex-start; gap: 10px; min-width: 200px; }
 .rk .ronda-llave h3 { color: var(--lima); letter-spacing: 0.08em; font-size: 0.8rem; }
 .rk .partido-llave { border: 1px solid var(--borde); border-radius: 10px; background: var(--navy-3); overflow: hidden; font-size: 0.9rem; }
 .rk .partido-llave .slot { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 10px; min-height: 34px; }
