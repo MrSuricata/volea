@@ -317,14 +317,14 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
 
 type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null };
 
-// Etiqueta legible de un partido marcado en cancha, buscándolo en los datos vivos.
-function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; partido: string } | null {
+// Datos legibles de un partido marcado en cancha, buscándolo en los datos vivos.
+function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; a: string; b: string; tipo: 'grupo' | 'llave' } | null {
   if (!e.torneoId || !e.partidoId) return null;
   const t = torneos.find((x) => x.id === e.torneoId);
   if (!t) return null;
   const pg = t.partidosGrupo.find((p) => p.id === e.partidoId);
   if (pg) {
-    return { cat: t.nombre.replace(' RACKET ROLL', ''), partido: `${nombreDe(t, pg.aId)} vs ${nombreDe(t, pg.bId)}` };
+    return { cat: t.nombre.replace(' RACKET ROLL', ''), a: nombreDe(t, pg.aId), b: nombreDe(t, pg.bId), tipo: 'grupo' };
   }
   const pl = (t.partidosLlave ?? []).find((p) => p.id === e.partidoId);
   if (pl) {
@@ -333,7 +333,7 @@ function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; partid
       const id = parejaDeSlot(s, porId);
       return id ? nombreDe(t, id) : '¿?';
     };
-    return { cat: t.nombre.replace(' RACKET ROLL', ''), partido: `${nom(pl.a)} vs ${nom(pl.b)}` };
+    return { cat: t.nombre.replace(' RACKET ROLL', ''), a: nom(pl.a), b: nom(pl.b), tipo: 'llave' };
   }
   return null;
 }
@@ -543,9 +543,9 @@ export default function ProgramacionPage() {
     .filter((f) =>
       f.dia === dia
       && (!filtro || f.categoria === filtro || f.categoria === 'ONE POINT CHALLENGE')
-      && coincide(`${f.a} ${f.b} ${f.categoria}`))
-    // los que están jugando ahora van arriba de todo
-    .sort((a, b) => Number(canchaDePartido.has(b.partidoId ?? '')) - Number(canchaDePartido.has(a.partidoId ?? '')));
+      && coincide(`${f.a} ${f.b} ${f.categoria}`)
+      // los que están jugando viven en el tablero de arriba, no se repiten acá
+      && !(f.partidoId && canchaDePartido.has(f.partidoId)));
   const visibles = verTodos || filtro || q ? pendientes : pendientes.slice(0, 12);
   const conResultados = catsDelDia
     .map((c) => ({
@@ -659,7 +659,13 @@ export default function ProgramacionPage() {
                 {et ? (
                   <>
                     <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
-                    <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.partido}</div>
+                    <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
+                    {modoCarga && e?.torneoId && e?.partidoId && (
+                      <CargaResultado
+                        partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
+                        onGuardado={() => void cargar(false)}
+                      />
+                    )}
                   </>
                 ) : (
                   <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>
@@ -711,46 +717,33 @@ export default function ProgramacionPage() {
               <p className="vacio">No queda nada pendiente para este día 🎉</p>
             ) : (
               <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
-                {visibles.map((f, i) => {
-                  const jugandoEn = f.partidoId ? canchaDePartido.get(f.partidoId) : undefined;
-                  return (
-                    <div key={f.partidoId ?? i} style={{ ...carta, borderColor: jugandoEn ? 'var(--lima)' : 'var(--borde)' }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
-                        {jugandoEn ? (
-                          <span style={{ ...chip, background: 'var(--lima)', color: '#101c33' }}>▶ EN {jugandoEn}</span>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--lima)' }}>{aHora(f.ini)}</span>
-                            <span style={chip}>{f.cancha}</span>
-                          </>
-                        )}
-                        <span style={chip}>{f.categoria}</span>
-                        <span style={{ ...chip, border: 'none', opacity: 0.7, fontWeight: f.fase === 'FINAL' ? 800 : 700 }}>{f.fase}</span>
-                      </div>
-                      <div style={{ fontSize: '1.02rem', fontWeight: 600, lineHeight: 1.45 }}>
-                        {f.a}
-                        <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
-                        {f.b}
-                      </div>
-                      {modoCarga && f.partidoId && (
-                        <>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
-                            {CANCHAS.map((nombre) => (
-                              <button key={nombre} className="boton secundario"
-                                style={{ padding: '4px 10px', fontSize: '0.8rem', opacity: jugandoEn === nombre ? 0.4 : 1 }}
-                                disabled={jugandoEn === nombre}
-                                onClick={() => void mandarACancha(nombre, f)}>
-                                {nombre.replace('Cancha ', 'C')}
-                              </button>
-                            ))}
-                          </div>
-                          <CargaResultado partido={f} onGuardado={() => void cargar(false)} />
-                        </>
-                      )}
+                {visibles.map((f, i) => (
+                  <div key={f.partidoId ?? i} style={carta}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--lima)' }}>{aHora(f.ini)}</span>
+                      <span style={chip}>{f.cancha}</span>
+                      <span style={chip}>{f.categoria}</span>
+                      <span style={{ ...chip, border: 'none', opacity: 0.7, fontWeight: f.fase === 'FINAL' ? 800 : 700 }}>{f.fase}</span>
                     </div>
-                  );
-                })}
+                    <div style={{ fontSize: '1.02rem', fontWeight: 600, lineHeight: 1.45 }}>
+                      {f.a}
+                      <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
+                      {f.b}
+                    </div>
+                    {modoCarga && f.partidoId && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                        <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
+                        {CANCHAS.map((nombre) => (
+                          <button key={nombre} className="boton secundario"
+                            style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                            onClick={() => void mandarACancha(nombre, f)}>
+                            {nombre.replace('Cancha ', 'C')}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
             {!verTodos && !filtro && pendientes.length > visibles.length && (
