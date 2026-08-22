@@ -20,9 +20,9 @@ const FECHA_DIA: Record<Dia, string> = { SAB: '2026-08-22', DOM: '2026-08-23' };
 const NOMBRE_DIA: Record<Dia, string> = { SAB: 'Sábado 22', DOM: 'Domingo 23' };
 // Duración estimada por partido, en minutos (grupos a 11 puntos, llave a 15).
 const DUR = { grupoDobles: 18, grupoSingles: 15, llaveDobles: 22, llaveSingles: 18 };
-// OPC del sábado 19:00-20:30: ocupa todas las canchas; los singles arrancan después.
-const OPC_INICIO = 19 * 60;
-const OPC_FIN = 20 * 60 + 30;
+// OPC del sábado 18:00-19:30: ocupa todas las canchas; los singles arrancan después.
+const OPC_INICIO = 18 * 60;
+const OPC_FIN = 19 * 60 + 30;
 
 // Hora de inicio de cada categoría según el flyer (minutos desde las 00:00).
 const PROGRAMA: Record<string, { dia: Dia; inicio: number; singles?: boolean }> = {
@@ -33,7 +33,7 @@ const PROGRAMA: Record<string, { dia: Dia; inicio: number; singles?: boolean }> 
   'MASCULINO +50 RACKET ROLL': { dia: 'SAB', inicio: 14 * 60 },
   'SINGLES MASCULINO B RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN, singles: true },
   'SINGLES FEMENINO RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN, singles: true },
-  'SINGLES MASCULINO A RACKET ROLL': { dia: 'SAB', inicio: 22 * 60, singles: true },
+  'SINGLES MASCULINO A RACKET ROLL': { dia: 'SAB', inicio: 21 * 60, singles: true },
   'FEMENINO B RACKET ROLL': { dia: 'DOM', inicio: 9 * 60 + 30 },
   'MIXTO B RACKET ROLL': { dia: 'DOM', inicio: 11 * 60 },
   'MASCULINO B RACKET ROLL': { dia: 'DOM', inicio: 12 * 60 + 30 },
