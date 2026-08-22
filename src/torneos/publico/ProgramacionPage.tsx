@@ -18,8 +18,9 @@ type Dia = 'SAB' | 'DOM';
 const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4 (ext)', 'Cancha 5 (ext)'];
 const FECHA_DIA: Record<Dia, string> = { SAB: '2026-08-22', DOM: '2026-08-23' };
 const NOMBRE_DIA: Record<Dia, string> = { SAB: 'Sábado 22', DOM: 'Domingo 23' };
-// Duración estimada por partido, en minutos (grupos a 11 puntos, llave a 15).
-const DUR = { grupoDobles: 18, grupoSingles: 15, llaveDobles: 22, llaveSingles: 18 };
+// Duración real por partido con calentamiento (dato de Brian, 22/08): ~15 min
+// tanto a 11 standard como a 21 rally (las C). La final lleva 5 min extra.
+const DUR = { grupoDobles: 15, grupoSingles: 15, llaveDobles: 15, llaveSingles: 15 };
 // OPC del sábado 18:00-19:30: ocupa todas las canchas; los singles arrancan después.
 const OPC_INICIO = 18 * 60;
 const OPC_FIN = 19 * 60 + 30;
