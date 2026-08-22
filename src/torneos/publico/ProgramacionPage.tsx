@@ -587,7 +587,7 @@ export default function ProgramacionPage() {
 
         {cinta.length > 0 && (
           <div className="cinta-resultados" aria-label="Últimos resultados"
-            style={{ border: '1px solid var(--borde)', borderRadius: 999, background: 'var(--navy-1)', marginBottom: 14 }}>
+            style={{ border: '1px solid var(--borde)', borderRadius: 14, background: 'var(--navy-1)', marginBottom: 14 }}>
             <div className="cinta-track" style={{
               display: 'inline-flex', whiteSpace: 'nowrap', alignItems: 'center',
               animation: `rk-marquee ${Math.max(25, cinta.length * 6)}s linear infinite`, willChange: 'transform',
@@ -595,14 +595,18 @@ export default function ProgramacionPage() {
               {[...cinta, ...cinta].map((r, i) => {
                 const ganaA = r.pa > r.pb;
                 return (
-                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '8px 16px' }}>
-                    <span style={{ color: 'var(--lima)', fontWeight: 800, fontSize: '0.7rem', letterSpacing: '0.07em' }}>{r.cat}</span>
-                    <span style={{ fontSize: '0.92rem' }}>
-                      <span style={{ fontWeight: ganaA ? 800 : 400, opacity: ganaA ? 1 : 0.75 }}>{nombresPila(r.a)} {r.pa}</span>
-                      <span style={{ opacity: 0.45 }}> – </span>
-                      <span style={{ fontWeight: ganaA ? 400 : 800, opacity: ganaA ? 0.75 : 1 }}>{r.pb} {nombresPila(r.b)}</span>
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 12, padding: '12px 22px', textTransform: 'uppercase' }}>
+                    <span style={{ color: 'var(--lima)', fontWeight: 800, fontSize: '0.95rem', letterSpacing: '0.06em' }}>{r.cat}</span>
+                    <span style={{ fontSize: '1.25rem', letterSpacing: '0.02em', color: '#fff' }}>
+                      <span style={{ fontWeight: ganaA ? 800 : 500, opacity: ganaA ? 1 : 0.85 }}>
+                        {nombresPila(r.a)} <span style={{ color: ganaA ? 'var(--lima)' : '#fff' }}>{r.pa}</span>
+                      </span>
+                      <span style={{ opacity: 0.5 }}> – </span>
+                      <span style={{ fontWeight: ganaA ? 500 : 800, opacity: ganaA ? 0.85 : 1 }}>
+                        <span style={{ color: ganaA ? '#fff' : 'var(--lima)' }}>{r.pb}</span> {nombresPila(r.b)}
+                      </span>
                     </span>
-                    <span style={{ opacity: 0.25, color: 'var(--lima)' }}>◆</span>
+                    <span style={{ opacity: 0.3, color: 'var(--lima)' }}>◆</span>
                   </span>
                 );
               })}
