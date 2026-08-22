@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Torneo } from '../engine/tipos';
+import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
 import { podioDeTorneo } from './resultado';
 import { listarTorneosPublicos } from './datos';
@@ -19,6 +20,18 @@ export default function TorneosListaPage() {
   const [estado, setEstado] = useState<Estado>('cargando');
   const [mensajeError, setMensajeError] = useState('');
   const [torneos, setTorneos] = useState<Torneo[]>([]);
+  const [busqueda, setBusqueda] = useState('');
+
+  // Filtro por categoría (nombre del torneo) o por jugador: en la cancha la gente
+  // se busca a sí misma. Acento- y mayúscula-insensible (mismo normalizar del padrón).
+  const filtrados = useMemo(() => {
+    const q = normalizar(busqueda);
+    if (!q) return torneos;
+    return torneos.filter((t) =>
+      normalizar(t.nombre).includes(q) ||
+      t.parejas.some((p) => normalizar(p.nombre).includes(q)),
+    );
+  }, [torneos, busqueda]);
 
   const cargar = useCallback(async () => {
     setEstado('cargando');
@@ -49,11 +62,22 @@ export default function TorneosListaPage() {
           </div>
         </header>
 
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar categoría o jugador… (ej: mixto b, femenino, tu nombre)"
+          aria-label="Buscar torneo por categoría o jugador"
+          style={{ width: '100%', marginBottom: 16 }}
+        />
+
         {torneos.length === 0 ? (
           <p className="vacio">Todavía no hay torneos publicados.</p>
+        ) : filtrados.length === 0 ? (
+          <p className="vacio">Nada con "{busqueda}". Probá con la categoría (ej: "mixto b") o un apellido.</p>
         ) : (
           <ul className="lista-torneos">
-            {torneos.map((t) => {
+            {filtrados.map((t) => {
               const podio = podioDeTorneo(t);
               const individual = (t.formato ?? 'grupos') === 'individual';
               return (
