@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
+import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
 import { RkCargando, RkError } from './Estados';
+import { supabase } from '../../services/supabaseClient';
 import '../torneos.css';
 
 // ─── Programación en vivo del Racket Roll ────────────────────────────────────
@@ -51,7 +53,10 @@ const PROGRAMA: Record<string, { dia: Dia; inicio: number }> = {
   'MASCULINO A RACKET ROLL': { dia: 'DOM', inicio: 17 * 60 },
 };
 
-type PartidoProg = { a: string; b: string; fase: string };
+// torneoId/partidoId/tipo solo existen en partidos REALES del fixture: son los que
+// el modo admin puede cargar desde esta pantalla. Los proyectados no se editan.
+type RefPartido = { torneoId?: string; partidoId?: string; tipo?: 'grupo' | 'llave' };
+type PartidoProg = { a: string; b: string; fase: string } & RefPartido;
 type ResultadoItem = { fase: string; a: string; b: string; pa: number; pb: number };
 type CatProg = {
   nombre: string;
@@ -65,7 +70,7 @@ type CatProg = {
   total: number;
   terminado: boolean;
 };
-type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string };
+type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string } & RefPartido;
 
 const aHora = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -136,7 +141,10 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
           continue;
         }
         const lista = porRonda.get(p.ronda) ?? [];
-        lista.push({ a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), fase: `Grupo ${g.nombre}` });
+        lista.push({
+          a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), fase: `Grupo ${g.nombre}`,
+          torneoId: t.id, partidoId: p.id, tipo: 'grupo',
+        });
         porRonda.set(p.ronda, lista);
       }
       rondas.push([...porRonda.entries()].sort((x, y) => x[0] - y[0]).map(([, lista]) => lista));
@@ -186,7 +194,7 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
         continue;
       }
       const lista = porRonda.get(p.ronda) ?? [];
-      lista.push({ a: nombreSlot(p.a), b: nombreSlot(p.b), fase });
+      lista.push({ a: nombreSlot(p.a), b: nombreSlot(p.b), fase, torneoId: t.id, partidoId: p.id, tipo: 'llave' });
       porRonda.set(p.ronda, lista);
     }
     llave = [...porRonda.entries()].sort((x, y) => x[0] - y[0]).map(([, lista]) => lista);
@@ -232,7 +240,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
             const ini = Math.max(disp[gi], canchas[ci], cat.inicio);
             canchas[ci] = ini + DUR_PARTIDO;
             finRonda = Math.max(finRonda, ini + DUR_PARTIDO);
-            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b });
+            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo });
           }
           disp[gi] = finRonda;
         });
@@ -246,13 +254,83 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
           const ini = Math.max(listo, canchas[ci]);
           canchas[ci] = ini + d;
           finOla = Math.max(finOla, ini + d);
-          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b });
+          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo });
         }
         listo = finOla;
       }
     }
   }
   return filas.sort((a, b) => a.ini - b.ini || a.cancha.localeCompare(b.cancha));
+}
+
+// Escritura del modo admin: lee la fila fresca, anota el puntaje en ESE partido y
+// guarda solo si nadie tocó el torneo en el medio (updated_at como candado optimista).
+// El gestor detecta cambios remotos por baseline, así que nunca pisa en silencio.
+async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', partidoId: string, pa: number, pb: number): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  for (let intento = 0; intento < 2; intento++) {
+    const { data: fila, error } = await sb.from('rk_torneos').select('data, updated_at').eq('id', torneoId).maybeSingle();
+    if (error || !fila) return 'No se pudo leer el torneo';
+    const t = fila.data as Torneo;
+    const lista = tipo === 'grupo' ? t.partidosGrupo : t.partidosLlave ?? [];
+    const p = lista.find((x) => x.id === partidoId);
+    if (!p) return 'El partido ya no existe (¿se rearmó el cuadro?)';
+    p.puntosA = pa;
+    p.puntosB = pb;
+    const { data: upd, error: e2 } = await sb.from('rk_torneos')
+      .update({ data: t, updated_at: new Date().toISOString() })
+      .eq('id', torneoId)
+      .eq('updated_at', fila.updated_at as string)
+      .select('id');
+    if (e2) return 'No se pudo guardar (¿sesión vencida?)';
+    if (upd && upd.length > 0) return null;
+    // otro dispositivo escribió entre la lectura y el guardado: reintenta con la versión fresca
+  }
+  return 'Se está editando desde otro lado: probá de nuevo';
+}
+
+// Mini formulario de carga en cada tarjeta (solo modo admin, solo partidos reales).
+function CargaResultado({ fila, onGuardado }: { fila: Fila; onGuardado: () => void }) {
+  const [pa, setPa] = useState('');
+  const [pb, setPb] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+
+  async function guardar() {
+    const a = Number(pa);
+    const b = Number(pb);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || pa === '' || pb === '') {
+      setError('Puntajes inválidos');
+      return;
+    }
+    if (a === b) {
+      setError('No puede haber empate');
+      return;
+    }
+    setGuardando(true);
+    setError('');
+    const problema = await guardarResultado(fila.torneoId!, fila.tipo!, fila.partidoId!, a, b);
+    setGuardando(false);
+    if (problema) {
+      setError(problema);
+      return;
+    }
+    onGuardado();
+  }
+
+  const caja: React.CSSProperties = { width: 62, textAlign: 'center', fontSize: '1.1rem', fontWeight: 800, padding: '7px 4px' };
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+      <input type="number" inputMode="numeric" min={0} value={pa} onChange={(e) => setPa(e.target.value)} placeholder="—" aria-label={`Puntos ${fila.a}`} style={caja} />
+      <span style={{ opacity: 0.6, fontWeight: 700 }}>–</span>
+      <input type="number" inputMode="numeric" min={0} value={pb} onChange={(e) => setPb(e.target.value)} placeholder="—" aria-label={`Puntos ${fila.b}`} style={caja} />
+      <button className="boton" disabled={guardando} onClick={() => void guardar()}>
+        {guardando ? 'Guardando…' : 'Cargar'}
+      </button>
+      {error && <span style={{ color: '#ff8fa8', fontSize: '0.85rem' }}>{error}</span>}
+    </div>
+  );
 }
 
 type Estado = 'cargando' | 'ok' | 'error';
@@ -277,6 +355,15 @@ export default function ProgramacionPage() {
   }, []);
   const [dia, setDia] = useState<Dia>(hoyISO === FECHA_DIA.DOM ? 'DOM' : 'SAB');
   const [filtro, setFiltro] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  // Modo admin: visible solo con sesión iniciada, y aún así apagado por defecto
+  // (la misma página va en la TV del club: ahí nadie tiene que ver inputs).
+  const [esAdmin, setEsAdmin] = useState(false);
+  const [modoCarga, setModoCarga] = useState(false);
+
+  useEffect(() => {
+    void supabase?.auth.getSession().then(({ data }) => setEsAdmin(!!data.session));
+  }, []);
 
   const cargar = useCallback(async (primera: boolean) => {
     if (primera) setEstado('cargando');
@@ -313,19 +400,54 @@ export default function ProgramacionPage() {
   if (estado === 'error') return <RkError mensaje={mensajeError} onReintentar={() => void cargar(true)} />;
 
   const catsDelDia = cats.filter((c) => c.dia === dia).sort((a, b) => a.inicio - b.inicio);
-  const pendientes = filas.filter((f) => f.dia === dia && (!filtro || f.categoria === filtro || f.categoria === 'ONE POINT CHALLENGE'));
-  const visibles = verTodos || filtro ? pendientes : pendientes.slice(0, 12);
-  const conResultados = catsDelDia.filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
+  // Búsqueda por jugador o categoría (acento- y mayúscula-insensible), combinable con los chips.
+  const q = normalizar(busqueda);
+  const coincide = (texto: string) => !q || normalizar(texto).includes(q);
+  const pendientes = filas.filter((f) =>
+    f.dia === dia
+    && (!filtro || f.categoria === filtro || f.categoria === 'ONE POINT CHALLENGE')
+    && coincide(`${f.a} ${f.b} ${f.categoria}`));
+  const visibles = verTodos || filtro || q ? pendientes : pendientes.slice(0, 12);
+  const conResultados = catsDelDia
+    .map((c) => ({
+      ...c,
+      resultados: !q || coincide(c.corto) ? c.resultados : c.resultados.filter((r) => coincide(`${r.a} ${r.b}`)),
+    }))
+    .filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
   const domSinConfirmar = dia === 'DOM' && !DOM_CONFIRMADO;
 
   return (
-    <div className="rk">
-      <main className="contenedor">
+    <div className="rk" style={{ position: 'relative' }}>
+      {/* Fondo con vida: glows en los colores del flyer (rosa/cian/lima) + puntillado
+          disco, fijos y sin capturar toques. El contenido va arriba con zIndex 1. */}
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
+        background: [
+          'radial-gradient(620px 420px at 88% -60px, rgba(255,45,158,0.16), transparent 70%)',
+          'radial-gradient(720px 520px at -12% 34%, rgba(34,211,238,0.12), transparent 70%)',
+          'radial-gradient(640px 640px at 72% 112%, rgba(204,255,0,0.09), transparent 70%)',
+        ].join(', '),
+      }} />
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, opacity: 0.5,
+        backgroundImage: 'radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1.4px)',
+        backgroundSize: '22px 22px',
+      }} />
+      <main className="contenedor" style={{ position: 'relative', zIndex: 1 }}>
+        <div aria-hidden style={{
+          height: 4, borderRadius: 999, marginBottom: 14,
+          background: 'linear-gradient(90deg, #FF2D9E, #22D3EE 55%, #CCFF00)',
+        }} />
         <header className="cabecera">
-          <h1><span className="marca">EN VIVO</span> RACKET ROLL</h1>
+          <h1><span className="marca">EN VIVO</span> RACKET ROLL 🪩</h1>
           <div className="acciones">
             <Link className="boton secundario" to="/torneos">Cuadros</Link>
             <button className="boton secundario" onClick={() => void cargar(false)}>Actualizar</button>
+            {esAdmin && (
+              <button className={`boton ${modoCarga ? '' : 'secundario'}`} onClick={() => setModoCarga(!modoCarga)}>
+                {modoCarga ? '✓ Cargando resultados' : 'Cargar resultados'}
+              </button>
+            )}
           </div>
         </header>
 
@@ -339,6 +461,15 @@ export default function ProgramacionPage() {
             Horarios estimados{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })}` : ''}
           </span>
         </div>
+
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscá tu nombre o categoría…"
+          aria-label="Buscar por jugador o categoría"
+          style={{ width: '100%', marginBottom: 12, fontSize: '1.05rem' }}
+        />
 
         {/* Filtro por categoría: un toque y ves solo lo tuyo */}
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 16 }}>
@@ -386,6 +517,9 @@ export default function ProgramacionPage() {
                       <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
                       {f.b}
                     </div>
+                    {modoCarga && f.partidoId && (
+                      <CargaResultado fila={f} onGuardado={() => void cargar(false)} />
+                    )}
                   </div>
                 ))}
               </div>
