@@ -58,6 +58,7 @@ export default function TorneosListaPage() {
         <header className="cabecera">
           <h1><span className="marca">TORNEOS</span> VOLEA</h1>
           <div className="acciones">
+            <Link className="boton secundario" to="/programacion">Programación</Link>
             <Link className="boton secundario" to="/ranking">Ver ranking</Link>
           </div>
         </header>

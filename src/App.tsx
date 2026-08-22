@@ -109,6 +109,7 @@ const cargandoTab = <div className="text-navy-500 text-sm py-8 text-center">Carg
 const RankingPageLazy = lazyConRecarga(() => import('./torneos/publico/RankingPage'));
 const TorneosListaPageLazy = lazyConRecarga(() => import('./torneos/publico/TorneosListaPage'));
 const TorneoDetallePageLazy = lazyConRecarga(() => import('./torneos/publico/TorneoDetallePage'));
+const ProgramacionPageLazy = lazyConRecarga(() => import('./torneos/publico/ProgramacionPage'));
 // Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
 // los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
 // entra a /galeria. Su módulo de datos (src/galeria/datos.ts, ~12 KB) también quedó fuera
@@ -6093,6 +6094,17 @@ function TorneosListaRoute() {
     </Suspense>
   );
 }
+function ProgramacionRoute() {
+  usePageMeta({
+    title: 'Programación',
+    description: 'Programación en vivo del torneo: hora y cancha estimadas de cada partido, recalculadas con cada resultado.',
+  });
+  return (
+    <Suspense fallback={<TorneosCargando />}>
+      <ProgramacionPageLazy />
+    </Suspense>
+  );
+}
 function TorneoDetalleRoute() {
   const [nombre, setNombre] = useState<string | undefined>(undefined);
   usePageMeta({
@@ -6154,6 +6166,7 @@ function AnimatedRoutes() {
       <Route path="/ranking" element={<PageTransition><RankingRoute /></PageTransition>} />
       <Route path="/galeria" element={<PageTransition><GaleriaRoute /></PageTransition>} />
       <Route path="/torneos" element={<PageTransition><TorneosListaRoute /></PageTransition>} />
+      <Route path="/programacion" element={<PageTransition><ProgramacionRoute /></PageTransition>} />
       <Route path="/torneos/:id" element={<PageTransition><TorneoDetalleRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
       <Route path="/inscripcion/:eventId" element={<PageTransition><InscripcionPage /></PageTransition>} />
