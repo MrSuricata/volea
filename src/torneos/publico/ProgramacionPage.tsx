@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { SlotLlave, Torneo } from '../engine/tipos';
-import { resultadoValido } from '../engine/tipos';
+import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
+import { resultadoDe } from '../engine/tipos';
 import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
 import { RkCargando, RkError } from './Estados';
 import '../torneos.css';
 
 // ─── Programación en vivo del Racket Roll ────────────────────────────────────
-// Proyecta hora y cancha de TODOS los partidos pendientes con un greedy sobre las
-// 5 canchas, anclado en la hora actual: cada resultado que el admin carga en el
-// gestor saca ese partido de la cola y el resto se reacomoda solo (la página se
-// refresca cada 60s). Los horarios son estimados, no promesas — se dice arriba.
+// Dos vistas en una: los partidos PENDIENTES con hora y cancha proyectadas
+// (greedy sobre las canchas, anclado en la hora actual) y los RESULTADOS que se
+// van cargando en el gestor, con puntaje. Pensada para el celular en la cancha:
+// tarjetas grandes, filtro por categoría con un toque, refresh cada 60s.
 
 type Dia = 'SAB' | 'DOM';
 
 // 3 canchas (definido por Brian la víspera): el greedy reparte sobre estas.
 const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3'];
-// El domingo depende de cuantas canchas haya (se define el sabado): hasta entonces
+// El domingo depende de cuántas canchas haya (se define el sábado): hasta entonces
 // NO se publican horarios por partido, solo los inicios de bloque del flyer.
 const DOM_CONFIRMADO = false;
-const BLOQUES_DOM = [
+const BLOQUES_DOM: [string, string][] = [
   ['9:30', 'Femenino B'], ['11:00', 'Mixto B'], ['12:30', 'Masculino B'],
   ['14:00', 'Femenino A'], ['15:30', 'Mixto A'], ['17:00', 'Masculino A'],
 ];
@@ -28,21 +28,21 @@ const FECHA_DIA: Record<Dia, string> = { SAB: '2026-08-22', DOM: '2026-08-23' };
 const NOMBRE_DIA: Record<Dia, string> = { SAB: 'Sábado 22', DOM: 'Domingo 23' };
 // Duración real por partido con calentamiento (dato de Brian, 22/08): ~15 min
 // tanto a 11 standard como a 21 rally (las C). La final lleva 5 min extra.
-const DUR = { grupoDobles: 15, grupoSingles: 15, llaveDobles: 15, llaveSingles: 15 };
+const DUR_PARTIDO = 15;
 // OPC del sábado 18:00-19:30: ocupa todas las canchas; los singles arrancan después.
 const OPC_INICIO = 18 * 60;
 const OPC_FIN = 19 * 60 + 30;
 
 // Hora de inicio de cada categoría según el flyer (minutos desde las 00:00).
-const PROGRAMA: Record<string, { dia: Dia; inicio: number; singles?: boolean }> = {
+const PROGRAMA: Record<string, { dia: Dia; inicio: number }> = {
   'FEMENINO C RACKET ROLL': { dia: 'SAB', inicio: 10 * 60 },
   'MIXTO C RACKET ROLL': { dia: 'SAB', inicio: 12 * 60 },
   'MIXTO +50 RACKET ROLL': { dia: 'SAB', inicio: 12 * 60 },
   'MASCULINO C RACKET ROLL': { dia: 'SAB', inicio: 14 * 60 },
   'MASCULINO +50 RACKET ROLL': { dia: 'SAB', inicio: 14 * 60 },
-  'SINGLES MASCULINO B RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN, singles: true },
-  'SINGLES FEMENINO RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN, singles: true },
-  'SINGLES MASCULINO A RACKET ROLL': { dia: 'SAB', inicio: 21 * 60, singles: true },
+  'SINGLES MASCULINO B RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN },
+  'SINGLES FEMENINO RACKET ROLL': { dia: 'SAB', inicio: OPC_FIN },
+  'SINGLES MASCULINO A RACKET ROLL': { dia: 'SAB', inicio: 21 * 60 },
   'FEMENINO B RACKET ROLL': { dia: 'DOM', inicio: 9 * 60 + 30 },
   'MIXTO B RACKET ROLL': { dia: 'DOM', inicio: 11 * 60 },
   'MASCULINO B RACKET ROLL': { dia: 'DOM', inicio: 12 * 60 + 30 },
@@ -51,19 +51,21 @@ const PROGRAMA: Record<string, { dia: Dia; inicio: number; singles?: boolean }> 
   'MASCULINO A RACKET ROLL': { dia: 'DOM', inicio: 17 * 60 },
 };
 
-type PartidoProg = { etiqueta: string; fase: string };
+type PartidoProg = { a: string; b: string; fase: string };
+type ResultadoItem = { fase: string; a: string; b: string; pa: number; pb: number };
 type CatProg = {
   nombre: string;
+  corto: string;
   dia: Dia;
   inicio: number;
-  singles: boolean;
   rondas: PartidoProg[][][]; // [grupo][ronda][partidos en paralelo]
   llave: PartidoProg[][]; // olas: 4tos → semis → final
+  resultados: ResultadoItem[];
   jugados: number;
   total: number;
   terminado: boolean;
 };
-type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; partido: string };
+type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string };
 
 const aHora = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -85,70 +87,76 @@ function tamanosProyectados(n: number): number[] {
   return mapa[n] ?? [4, 4, 4, 4];
 }
 
-function slotNombre(t: Torneo, s: SlotLlave | null): string {
-  if (!s) return 'BYE';
-  if (s.tipo === 'seed') return nombreDe(t, s.parejaId);
-  return s.tipo === 'ganadorDe' ? 'Ganador ronda previa' : 'Perdedor ronda previa';
+// Sigue la cadena ganadorDe/perdedorDe hasta la pareja real, si ya se puede saber.
+function parejaDeSlot(s: SlotLlave | null, porId: Map<string, PartidoLlave>): string | null {
+  if (!s) return null;
+  if (s.tipo === 'seed') return s.parejaId;
+  const p = porId.get(s.partidoId);
+  if (!p) return null;
+  const r = resultadoDe(p);
+  if (!r) return null;
+  const ganoA = r.a > r.b;
+  const siguiente = (s.tipo === 'ganadorDe') === ganoA ? p.a : p.b;
+  return parejaDeSlot(siguiente, porId);
 }
 
 function llaveProyectada(nGrupos: number): PartidoProg[][] {
-  if (nGrupos <= 1) return [[{ etiqueta: '1° vs 2° de la liga', fase: 'FINAL' }]];
+  if (nGrupos <= 1) return [[{ a: '1° de la liga', b: '2° de la liga', fase: 'FINAL' }]];
   if (nGrupos === 2) {
     return [
-      [{ etiqueta: '1° G1 vs 2° G2', fase: 'SEMIS' }, { etiqueta: '1° G2 vs 2° G1', fase: 'SEMIS' }],
-      [{ etiqueta: 'Ganadores de semis', fase: 'FINAL' }],
+      [{ a: '1° Grupo A', b: '2° Grupo B', fase: 'SEMIS' }, { a: '1° Grupo B', b: '2° Grupo A', fase: 'SEMIS' }],
+      [{ a: 'Ganador SF1', b: 'Ganador SF2', fase: 'FINAL' }],
     ];
   }
   return [
-    Array.from({ length: 4 }, (_, i) => ({ etiqueta: `Cruce ${i + 1} según tabla`, fase: '4TOS' })),
-    [{ etiqueta: 'Ganadores de 4tos', fase: 'SEMIS' }, { etiqueta: 'Ganadores de 4tos', fase: 'SEMIS' }],
-    [{ etiqueta: 'Ganadores de semis', fase: 'FINAL' }],
+    Array.from({ length: 4 }, (_, i) => ({ a: `Cruce ${i + 1}`, b: 'según tabla', fase: '4TOS' })),
+    [{ a: 'Ganador QF1', b: 'Ganador QF2', fase: 'SEMIS' }, { a: 'Ganador QF3', b: 'Ganador QF4', fase: 'SEMIS' }],
+    [{ a: 'Ganador SF1', b: 'Ganador SF2', fase: 'FINAL' }],
   ];
 }
 
-// Extrae del torneo lo pendiente, con datos reales si existen y proyección si no.
-function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number; singles?: boolean }): CatProg {
+// Extrae del torneo lo pendiente (real si existe, proyectado si no) y lo jugado.
+function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
   const rondas: PartidoProg[][][] = [];
   let llave: PartidoProg[][] = [];
+  const resultados: ResultadoItem[] = [];
   let jugados = 0;
   let total = 0;
 
   if (t.partidosGrupo.length > 0) {
-    // Fixture real del gestor: por grupo, por ronda, solo lo que falta jugar.
     for (const g of t.grupos) {
       const delGrupo = t.partidosGrupo.filter((p) => p.grupoId === g.id);
       total += delGrupo.length;
       const porRonda = new Map<number, PartidoProg[]>();
       for (const p of delGrupo) {
-        if (resultadoValido(p.puntosA, p.puntosB)) { jugados += 1; continue; }
+        const r = resultadoDe(p);
+        if (r) {
+          jugados += 1;
+          resultados.push({ fase: `Grupo ${g.nombre}`, a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), pa: r.a, pb: r.b });
+          continue;
+        }
         const lista = porRonda.get(p.ronda) ?? [];
-        lista.push({ etiqueta: `${nombreDe(t, p.aId)} vs ${nombreDe(t, p.bId)}`, fase: `Grupo ${g.nombre}` });
+        lista.push({ a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), fase: `Grupo ${g.nombre}` });
         porRonda.set(p.ronda, lista);
       }
-      rondas.push([...porRonda.entries()].sort((a, b) => a[0] - b[0]).map(([, lista]) => lista));
+      rondas.push([...porRonda.entries()].sort((x, y) => x[0] - y[0]).map(([, lista]) => lista));
     }
   } else if (t.grupos.length > 0) {
-    // Grupos sorteados pero fixture aún no generado: se proyecta el todos-contra-todos.
     for (const g of t.grupos) {
       const n = Math.min(g.parejaIds.length, 5);
       const plan = (RONDAS_RR[n] ?? []).map((ronda) =>
         ronda.map(([a, b]) => ({
-          etiqueta: `${nombreDe(t, g.parejaIds[a - 1])} vs ${nombreDe(t, g.parejaIds[b - 1])}`,
-          fase: `Grupo ${g.nombre}`,
+          a: nombreDe(t, g.parejaIds[a - 1]), b: nombreDe(t, g.parejaIds[b - 1]), fase: `Grupo ${g.nombre}`,
         })),
       );
       rondas.push(plan);
       total += plan.reduce((s, r) => s + r.length, 0);
     }
   } else {
-    // Ni grupos: proyección pura por cantidad de anotados.
     const tams = tamanosProyectados(t.parejas.length);
     tams.forEach((n, gi) => {
       const plan = (RONDAS_RR[Math.min(n, 5)] ?? []).map((ronda) =>
-        ronda.map(([a, b]) => ({
-          etiqueta: `${t.formato === 'individual' || cfg.singles ? 'J' : 'Dupla '}${a} vs ${cfg.singles ? 'J' : 'Dupla '}${b}`,
-          fase: `Grupo ${gi + 1}`,
-        })),
+        ronda.map(([a, b]) => ({ a: `Dupla ${a}`, b: `Dupla ${b}`, fase: `Grupo ${gi + 1}` })),
       );
       rondas.push(plan);
       total += plan.reduce((s, r) => s + r.length, 0);
@@ -156,34 +164,49 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number; singles?: bo
   }
 
   if (t.partidosLlave && t.partidosLlave.length > 0) {
+    const porId = new Map(t.partidosLlave.map((p) => [p.id, p]));
     const jugables = t.partidosLlave.filter((p) => p.a !== null && p.b !== null);
     total += jugables.length;
     const maxRonda = Math.max(...t.partidosLlave.map((p) => p.ronda));
+    const nombreSlot = (s: SlotLlave | null): string => {
+      const id = parejaDeSlot(s, porId);
+      if (id) return nombreDe(t, id);
+      if (!s) return 'BYE';
+      return s.tipo === 'ganadorDe' ? 'Ganador ronda previa' : 'Perdedor ronda previa';
+    };
     const porRonda = new Map<number, PartidoProg[]>();
     for (const p of jugables) {
-      if (resultadoValido(p.puntosA, p.puntosB)) { jugados += 1; continue; }
       const fase = p.esTercerPuesto ? '3er PUESTO'
         : p.ronda === maxRonda ? 'FINAL'
         : p.ronda === maxRonda - 1 ? 'SEMIS' : '4TOS';
+      const r = resultadoDe(p);
+      if (r) {
+        jugados += 1;
+        resultados.push({ fase, a: nombreSlot(p.a), b: nombreSlot(p.b), pa: r.a, pb: r.b });
+        continue;
+      }
       const lista = porRonda.get(p.ronda) ?? [];
-      lista.push({ etiqueta: `${slotNombre(t, p.a)} vs ${slotNombre(t, p.b)}`, fase });
+      lista.push({ a: nombreSlot(p.a), b: nombreSlot(p.b), fase });
       porRonda.set(p.ronda, lista);
     }
-    llave = [...porRonda.entries()].sort((a, b) => a[0] - b[0]).map(([, lista]) => lista);
+    llave = [...porRonda.entries()].sort((x, y) => x[0] - y[0]).map(([, lista]) => lista);
   } else if (t.fase !== 'terminado') {
     const nGrupos = Math.max(t.grupos.length, tamanosProyectados(t.parejas.length).length);
     llave = llaveProyectada(nGrupos);
     llave.forEach((ola) => { total += ola.length; });
   }
 
+  // Lo último que se juega (llave) arriba: los resultados se apilan al revés.
+  resultados.reverse();
+
   return {
-    nombre: t.nombre, dia: cfg.dia, inicio: cfg.inicio, singles: cfg.singles === true,
-    rondas, llave, jugados, total, terminado: t.fase === 'terminado',
+    nombre: t.nombre, corto: t.nombre.replace(' RACKET ROLL', ''), dia: cfg.dia, inicio: cfg.inicio,
+    rondas, llave, resultados, jugados, total, terminado: t.fase === 'terminado',
   };
 }
 
-// Greedy de canchas: mismo criterio que el plan impreso — cada partido toma la
-// cancha que antes se libere; una ronda de un grupo no arranca sin cerrar la anterior.
+// Greedy de canchas: cada partido toma la cancha que antes se libere; una ronda
+// de un grupo no arranca sin cerrar la anterior.
 function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
   const filas: Fila[] = [];
   for (const dia of ['SAB', 'DOM'] as Dia[]) {
@@ -194,12 +217,10 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
       if (dia === 'SAB' && cat.inicio >= OPC_FIN && !opcMarcado) {
         opcMarcado = true;
         if (ancla.SAB < OPC_FIN) {
-          filas.push({ dia, ini: Math.max(OPC_INICIO, ancla.SAB), cancha: 'TODAS', categoria: 'ONE POINT CHALLENGE', fase: 'Punto único', partido: 'Eliminación directa — todos los anotados' });
+          filas.push({ dia, ini: Math.max(OPC_INICIO, ancla.SAB), cancha: 'TODAS', categoria: 'ONE POINT CHALLENGE', fase: 'Punto único', a: 'Todos los anotados', b: 'eliminación directa' });
           for (let i = 0; i < canchas.length; i++) canchas[i] = Math.max(canchas[i], OPC_FIN);
         }
       }
-      const durG = cat.singles ? DUR.grupoSingles : DUR.grupoDobles;
-      const durL = cat.singles ? DUR.llaveSingles : DUR.llaveDobles;
       const disp = cat.rondas.map(() => Math.max(cat.inicio, Math.min(...canchas)));
       const maxRondas = Math.max(0, ...cat.rondas.map((g) => g.length));
       for (let r = 0; r < maxRondas; r++) {
@@ -209,9 +230,9 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
           for (const p of grupo[r]) {
             const ci = canchas.indexOf(Math.min(...canchas));
             const ini = Math.max(disp[gi], canchas[ci], cat.inicio);
-            canchas[ci] = ini + durG;
-            finRonda = Math.max(finRonda, ini + durG);
-            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.nombre, fase: p.fase, partido: p.etiqueta });
+            canchas[ci] = ini + DUR_PARTIDO;
+            finRonda = Math.max(finRonda, ini + DUR_PARTIDO);
+            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b });
           }
           disp[gi] = finRonda;
         });
@@ -220,12 +241,12 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
       for (const ola of cat.llave) {
         let finOla = listo;
         for (const p of ola) {
-          const d = p.fase === 'FINAL' ? durL + 5 : durL;
+          const d = p.fase === 'FINAL' ? DUR_PARTIDO + 5 : DUR_PARTIDO;
           const ci = canchas.indexOf(Math.min(...canchas));
           const ini = Math.max(listo, canchas[ci]);
           canchas[ci] = ini + d;
           finOla = Math.max(finOla, ini + d);
-          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.nombre, fase: p.fase, partido: p.etiqueta });
+          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b });
         }
         listo = finOla;
       }
@@ -236,11 +257,20 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
 
 type Estado = 'cargando' | 'ok' | 'error';
 
+const chip: React.CSSProperties = {
+  fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+  padding: '3px 9px', borderRadius: 999, border: '1px solid var(--borde)', whiteSpace: 'nowrap',
+};
+const carta: React.CSSProperties = {
+  background: 'var(--navy-1)', border: '1px solid var(--borde)', borderRadius: 14, padding: '12px 14px',
+};
+
 export default function ProgramacionPage() {
   const [estado, setEstado] = useState<Estado>('cargando');
   const [mensajeError, setMensajeError] = useState('');
   const [torneos, setTorneos] = useState<Torneo[]>([]);
   const [actualizado, setActualizado] = useState<Date | null>(null);
+  const [verTodos, setVerTodos] = useState(false);
   const hoyISO = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -282,83 +312,126 @@ export default function ProgramacionPage() {
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
   if (estado === 'error') return <RkError mensaje={mensajeError} onReintentar={() => void cargar(true)} />;
 
-  const delDia = filas.filter((f) => f.dia === dia && (!filtro || f.categoria === filtro));
   const catsDelDia = cats.filter((c) => c.dia === dia).sort((a, b) => a.inicio - b.inicio);
+  const pendientes = filas.filter((f) => f.dia === dia && (!filtro || f.categoria === filtro || f.categoria === 'ONE POINT CHALLENGE'));
+  const visibles = verTodos || filtro ? pendientes : pendientes.slice(0, 12);
+  const conResultados = catsDelDia.filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
+  const domSinConfirmar = dia === 'DOM' && !DOM_CONFIRMADO;
 
   return (
     <div className="rk">
       <main className="contenedor">
         <header className="cabecera">
-          <h1><span className="marca">PROGRAMACIÓN</span> RACKET ROLL</h1>
+          <h1><span className="marca">EN VIVO</span> RACKET ROLL</h1>
           <div className="acciones">
-            <Link className="boton secundario" to="/torneos">Resultados</Link>
+            <Link className="boton secundario" to="/torneos">Cuadros</Link>
             <button className="boton secundario" onClick={() => void cargar(false)}>Actualizar</button>
           </div>
         </header>
 
-        <p style={{ opacity: 0.75, margin: '0 0 12px' }}>
-          Horarios <strong>estimados</strong>: se recalculan solos a medida que se cargan resultados
-          {actualizado ? ` · actualizado ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })}` : ''}
-        </p>
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
           {(['SAB', 'DOM'] as Dia[]).map((d) => (
-            <button key={d} className={`boton ${dia === d ? '' : 'secundario'}`} onClick={() => setDia(d)}>
+            <button key={d} className={`boton ${dia === d ? '' : 'secundario'}`} onClick={() => { setDia(d); setFiltro(''); setVerTodos(false); }}>
               {NOMBRE_DIA[d]}
             </button>
           ))}
-          <select value={filtro} onChange={(e) => setFiltro(e.target.value)} style={{ marginLeft: 'auto' }}>
-            <option value="">Todas las categorías</option>
-            {catsDelDia.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre.replace(' RACKET ROLL', '')}</option>)}
-          </select>
+          <span style={{ fontSize: '0.8rem', opacity: 0.65, marginLeft: 'auto' }}>
+            Horarios estimados{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })}` : ''}
+          </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, fontSize: '0.85rem', opacity: 0.85 }}>
+        {/* Filtro por categoría: un toque y ves solo lo tuyo */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 16 }}>
+          <button onClick={() => setFiltro('')}
+            style={{ ...chip, cursor: 'pointer', background: filtro === '' ? 'var(--lima)' : 'transparent', color: filtro === '' ? '#101c33' : 'var(--texto)' }}>
+            Todas
+          </button>
           {catsDelDia.map((c) => (
-            <span key={c.nombre}>
-              {c.nombre.replace(' RACKET ROLL', '')}: {c.terminado ? '✅' : `${c.jugados}/${c.total}`}
-            </span>
+            <button key={c.corto} onClick={() => { setFiltro(filtro === c.corto ? '' : c.corto); setVerTodos(false); }}
+              style={{ ...chip, cursor: 'pointer', background: filtro === c.corto ? 'var(--lima)' : 'transparent', color: filtro === c.corto ? '#101c33' : 'var(--texto)' }}>
+              {c.corto} {c.terminado ? '✓' : `${c.jugados}/${c.total}`}
+            </button>
           ))}
         </div>
 
-        {dia === 'DOM' && !DOM_CONFIRMADO ? (
-          <div className="carta" style={{ padding: 16 }}>
-            <p style={{ margin: '0 0 10px' }}>
-              <strong>Programacion del domingo a confirmar</strong> - depende de las canchas
-              disponibles; el detalle por partido se publica el sabado a la noche.
-              Los inicios de cada categoria segun el flyer:
+        {domSinConfirmar ? (
+          <div style={{ ...carta, marginBottom: 20 }}>
+            <p style={{ margin: '0 0 10px', fontSize: '1.05rem' }}>
+              <strong>Programación del domingo a confirmar</strong> — depende de las canchas
+              disponibles; el detalle por partido se publica el sábado a la noche.
             </p>
-            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.9 }}>
-              {BLOQUES_DOM.map(([h, c]) => <li key={c}><strong>{h}</strong> - {c}</li>)}
+            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 2, fontSize: '1.05rem' }}>
+              {BLOQUES_DOM.map(([h, c]) => <li key={c}><strong>{h}</strong> — {c}</li>)}
             </ul>
           </div>
-        ) : delDia.length === 0 ? (
-          <p className="vacio">No queda nada pendiente para este día. 🎉</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--borde)' }}>
-                  <th style={{ padding: '6px 8px' }}>Hora</th>
-                  <th style={{ padding: '6px 8px' }}>Cancha</th>
-                  <th style={{ padding: '6px 8px' }}>Categoría</th>
-                  <th style={{ padding: '6px 8px' }}>Fase</th>
-                  <th style={{ padding: '6px 8px' }}>Partido</th>
-                </tr>
-              </thead>
-              <tbody>
-                {delDia.map((f, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--borde)', fontWeight: f.fase === 'FINAL' ? 700 : 400 }}>
-                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', fontWeight: 700 }}>{aHora(f.ini)}</td>
-                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{f.cancha}</td>
-                    <td style={{ padding: '6px 8px' }}>{f.categoria.replace(' RACKET ROLL', '')}</td>
-                    <td style={{ padding: '6px 8px' }}>{f.fase}</td>
-                    <td style={{ padding: '6px 8px' }}>{f.partido}</td>
-                  </tr>
+          <>
+            <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '0 0 10px' }}>
+              Próximos partidos
+            </h2>
+            {pendientes.length === 0 ? (
+              <p className="vacio">No queda nada pendiente para este día 🎉</p>
+            ) : (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+                {visibles.map((f, i) => (
+                  <div key={i} style={carta}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--lima)' }}>{aHora(f.ini)}</span>
+                      <span style={chip}>{f.cancha}</span>
+                      <span style={chip}>{f.categoria}</span>
+                      <span style={{ ...chip, border: 'none', opacity: 0.7, fontWeight: f.fase === 'FINAL' ? 800 : 700 }}>{f.fase}</span>
+                    </div>
+                    <div style={{ fontSize: '1.02rem', fontWeight: 600, lineHeight: 1.45 }}>
+                      {f.a}
+                      <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
+                      {f.b}
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            )}
+            {!verTodos && !filtro && pendientes.length > visibles.length && (
+              <button className="boton secundario" style={{ width: '100%', marginBottom: 20 }} onClick={() => setVerTodos(true)}>
+                Ver los {pendientes.length} pendientes del día
+              </button>
+            )}
+          </>
+        )}
+
+        {conResultados.length > 0 && (
+          <>
+            <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '18px 0 10px' }}>
+              Resultados
+            </h2>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {conResultados.map((c) => (
+                <div key={c.corto} style={carta}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 8 }}>
+                    <strong style={{ fontSize: '1.02rem' }}>{c.corto}</strong>
+                    <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>{c.jugados}/{c.total} jugados</span>
+                  </div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {c.resultados.map((r, i) => {
+                      const ganaA = r.pa > r.pb;
+                      return (
+                        <div key={i} style={{ borderTop: i ? '1px solid var(--borde)' : 'none', paddingTop: i ? 8 : 0 }}>
+                          <div style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{r.fase}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 700 : 400 }}>
+                            <span>{r.a}</span>
+                            <span style={{ color: ganaA ? 'var(--lima)' : 'inherit', fontWeight: 800 }}>{r.pa}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 400 : 700 }}>
+                            <span>{r.b}</span>
+                            <span style={{ color: ganaA ? 'inherit' : 'var(--lima)', fontWeight: 800 }}>{r.pb}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </main>
     </div>
