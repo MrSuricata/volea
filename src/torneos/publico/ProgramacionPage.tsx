@@ -15,7 +15,8 @@ import '../torneos.css';
 
 type Dia = 'SAB' | 'DOM';
 
-const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4 (ext)', 'Cancha 5 (ext)'];
+// 3 canchas (definido por Brian la víspera): el greedy reparte sobre estas.
+const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3'];
 const FECHA_DIA: Record<Dia, string> = { SAB: '2026-08-22', DOM: '2026-08-23' };
 const NOMBRE_DIA: Record<Dia, string> = { SAB: 'Sábado 22', DOM: 'Domingo 23' };
 // Duración real por partido con calentamiento (dato de Brian, 22/08): ~15 min
