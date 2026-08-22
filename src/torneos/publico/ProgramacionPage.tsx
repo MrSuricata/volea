@@ -771,7 +771,7 @@ export default function ProgramacionPage() {
         </header>
 
         <div className="envivo-grid">
-        <aside>
+        <aside className="col-izq">
           <div style={{ ...carta, borderColor: 'var(--lima)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <span style={{ fontSize: '1.4rem' }}>🏆</span>
@@ -826,7 +826,7 @@ export default function ProgramacionPage() {
         )}
 
         </aside>
-        <div>
+        <div className="col-centro">
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
           {(['SAB', 'DOM'] as Dia[]).map((d) => (
@@ -839,64 +839,17 @@ export default function ProgramacionPage() {
           </span>
         </div>
 
-        {/* Tablero: quién está jugando en cada cancha AHORA (lo ve todo el mundo) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10, marginBottom: 16 }}>
-          {CANCHAS.map((nombre) => {
-            const e = enCancha.find((x) => x.cancha === nombre);
-            const et = e ? etiquetaEnCancha(torneos, e) : null;
-            return (
-              <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)' }}>
-                <div style={{ marginBottom: 6 }}>
-                  <span style={{ ...chip, background: et ? 'var(--lima)' : 'transparent', color: et ? '#101c33' : 'var(--texto)' }}>
-                    {et ? '▶ ' : ''}{nombre}
-                  </span>
-                </div>
-                {et ? (
-                  <>
-                    <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
-                    <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
-                    {modoCarga && e?.torneoId && e?.partidoId && (
-                      <>
-                        <CargaResultado
-                          partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
-                          onGuardado={() => void cargar(false)}
-                        />
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-                          <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mover a</span>
-                          {CANCHAS.filter((otra) => otra !== nombre).map((otra) => (
-                            <button key={otra} className="boton secundario"
-                              style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                              onClick={() => void mandarACancha(otra, e)}>
-                              {otra.replace('Cancha ', 'C')}
-                            </button>
-                          ))}
-                          <button className="boton secundario" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                            onClick={() => void liberarCancha(nombre)}>
-                            ✕ Cancelar
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
         <input
           type="text"
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           placeholder="Buscá tu nombre o categoría…"
           aria-label="Buscar por jugador o categoría"
-          style={{ width: '100%', marginBottom: 12, fontSize: '1.05rem' }}
+          style={{ width: '100%', marginBottom: 10, fontSize: '1rem' }}
         />
 
         {/* Filtro por categoría: un toque y ves solo lo tuyo */}
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10 }}>
           <button onClick={() => setFiltro('')}
             style={{ ...chip, cursor: 'pointer', background: filtro === '' ? 'var(--lima)' : 'transparent', color: filtro === '' ? '#101c33' : 'var(--texto)' }}>
             Todas
@@ -995,6 +948,57 @@ export default function ProgramacionPage() {
         )}
 
 
+        </div>
+        <div className="col-der">
+          <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '0 0 10px' }}>
+            En cancha
+          </h2>
+        {/* Tablero: quién está jugando en cada cancha AHORA (lo ve todo el mundo) */}
+        <div style={{ display: 'grid', gap: 10 }}>
+          {CANCHAS.map((nombre) => {
+            const e = enCancha.find((x) => x.cancha === nombre);
+            const et = e ? etiquetaEnCancha(torneos, e) : null;
+            return (
+              <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)' }}>
+                <div style={{ marginBottom: 6 }}>
+                  <span style={{ ...chip, background: et ? 'var(--lima)' : 'transparent', color: et ? '#101c33' : 'var(--texto)' }}>
+                    {et ? '▶ ' : ''}{nombre}
+                  </span>
+                </div>
+                {et ? (
+                  <>
+                    <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
+                    <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
+                    {modoCarga && e?.torneoId && e?.partidoId && (
+                      <>
+                        <CargaResultado
+                          partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
+                          onGuardado={() => void cargar(false)}
+                        />
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mover a</span>
+                          {CANCHAS.filter((otra) => otra !== nombre).map((otra) => (
+                            <button key={otra} className="boton secundario"
+                              style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                              onClick={() => void mandarACancha(otra, e)}>
+                              {otra.replace('Cancha ', 'C')}
+                            </button>
+                          ))}
+                          <button className="boton secundario" style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                            onClick={() => void liberarCancha(nombre)}>
+                            ✕ Cancelar
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
         </div>
         </div>
       </main>

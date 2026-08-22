@@ -156,13 +156,19 @@
 .rk .cinta-resultados:hover .cinta-track { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .rk .cinta-track { animation: none !important; } }
 
-/* EN VIVO: campeones a la izquierda en pantallas anchas, apilado en el celular */
-.rk .envivo-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
-/* min-width:0: sin esto, la fila de chips (scroll horizontal) impone su ancho
-   minimo intrinseco a la columna y el grid desborda la pagina hacia la derecha */
+/* EN VIVO en 3 columnas: izq campeones+resultados, centro proximos, der canchas.
+   En pantallas medianas las canchas pasan arriba del centro; en el celular el
+   orden es canchas -> proximos -> resultados. min-width:0 evita que la fila de
+   chips (scroll horizontal) imponga su ancho y desborde la pagina. */
+.rk .envivo-grid { display: grid; gap: 16px; align-items: start;
+  grid-template-columns: 280px minmax(0, 1fr) 330px; grid-template-areas: "izq centro der"; }
 .rk .envivo-grid > * { min-width: 0; }
+.rk .envivo-grid > .col-izq { grid-area: izq; }
+.rk .envivo-grid > .col-centro { grid-area: centro; }
+.rk .envivo-grid > .col-der { grid-area: der; }
+@media (max-width: 1250px) {
+  .rk .envivo-grid { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "izq der" "izq centro"; }
+}
 @media (max-width: 900px) {
-  .rk .envivo-grid { grid-template-columns: 1fr; }
-  /* en el celular los resultados van DESPUES de los proximos, no antes */
-  .rk .envivo-grid > aside { order: 2; }
+  .rk .envivo-grid { grid-template-columns: 1fr; grid-template-areas: "der" "centro" "izq"; }
 }
