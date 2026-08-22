@@ -903,6 +903,9 @@ function Navbar() {
   const navLinks = [
     { to: '/', label: 'Inicio' },
     { to: '/tienda', label: 'Tienda' },
+    // Pedido de Brian (2026-08-22, mañana del Racket Roll): pestaña directa a los
+    // torneos entre Tienda y Blog, con link compartible (volea.vercel.app/#/torneos).
+    { to: '/torneos', label: 'Torneos' },
     { to: '/blog', label: 'Blog' },
     // 'Clasificación' (Camino al Mundial) fuera del menú por pedido de Brian (2026-08-05,
     // "quitalo por ahora"): la ruta /clasificacion y la pestaña del admin siguen vivas;
