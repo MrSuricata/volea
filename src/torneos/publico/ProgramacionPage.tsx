@@ -482,7 +482,15 @@ export default function ProgramacionPage() {
   // Modo admin: visible solo con sesión iniciada, y aún así apagado por defecto
   // (la misma página va en la TV del club: ahí nadie tiene que ver inputs).
   const [esAdmin, setEsAdmin] = useState(false);
-  const [modoCarga, setModoCarga] = useState(false);
+  // persiste entre recargas (cada deploy recarga la pagina y lo apagaba);
+  // en la TV no molesta: sin sesion de admin los controles no se muestran igual
+  const [modoCarga, setModoCargaEstado] = useState(() => {
+    try { return localStorage.getItem('volea_envivo_carga') === '1'; } catch { return false; }
+  });
+  const setModoCarga = (v: boolean) => {
+    setModoCargaEstado(v);
+    try { localStorage.setItem('volea_envivo_carga', v ? '1' : '0'); } catch { /* privado */ }
+  };
 
   useEffect(() => {
     void supabase?.auth.getSession().then(({ data }) => setEsAdmin(!!data.session));
