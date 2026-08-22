@@ -161,4 +161,8 @@
 /* min-width:0: sin esto, la fila de chips (scroll horizontal) impone su ancho
    minimo intrinseco a la columna y el grid desborda la pagina hacia la derecha */
 .rk .envivo-grid > * { min-width: 0; }
-@media (max-width: 900px) { .rk .envivo-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .rk .envivo-grid { grid-template-columns: 1fr; }
+  /* en el celular los resultados van DESPUES de los proximos, no antes */
+  .rk .envivo-grid > aside { order: 2; }
+}

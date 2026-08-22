@@ -463,7 +463,7 @@ const chip: React.CSSProperties = {
   padding: '3px 9px', borderRadius: 999, border: '1px solid var(--borde)', whiteSpace: 'nowrap',
 };
 const carta: React.CSSProperties = {
-  background: 'var(--navy-1)', border: '1px solid var(--borde)', borderRadius: 14, padding: '12px 14px',
+  background: 'var(--navy-1)', border: '1px solid var(--borde)', borderRadius: 14, padding: '10px 14px',
 };
 
 export default function ProgramacionPage() {
@@ -672,7 +672,7 @@ export default function ProgramacionPage() {
 
         <div className="envivo-grid">
         <aside>
-          <div style={{ ...carta, borderColor: 'var(--lima)', position: 'sticky', top: 12 }}>
+          <div style={{ ...carta, borderColor: 'var(--lima)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <span style={{ fontSize: '1.4rem' }}>🏆</span>
               <span style={{ fontWeight: 900, letterSpacing: '0.1em', fontSize: '1rem' }}>CAMPEONES</span>
@@ -701,6 +701,30 @@ export default function ProgramacionPage() {
               </div>
             )}
           </div>
+        {conResultados.length > 0 && (
+          <>
+            <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '18px 0 10px' }}>
+              Resultados
+            </h2>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {conResultados.map((c) => (
+                <div key={c.corto} style={carta}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 8 }}>
+                    <strong style={{ fontSize: '1.02rem' }}>{c.corto}</strong>
+                    <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>{c.jugados}/{c.total} jugados</span>
+                  </div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {c.resultados.map((r, i) => (
+                      <FilaResultado key={r.partidoId ?? i} r={r} borde={i > 0} modoCarga={modoCarga}
+                        onGuardado={() => void cargar(false)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         </aside>
         <div>
 
@@ -803,7 +827,7 @@ export default function ProgramacionPage() {
             {pendientes.length === 0 ? (
               <p className="vacio">No queda nada pendiente para este día 🎉</p>
             ) : (
-              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
                 {visibles.map((f, i) => (
                   <div key={f.partidoId ?? i} style={carta}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
@@ -855,29 +879,6 @@ export default function ProgramacionPage() {
           </>
         )}
 
-        {conResultados.length > 0 && (
-          <>
-            <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '18px 0 10px' }}>
-              Resultados
-            </h2>
-            <div style={{ display: 'grid', gap: 14 }}>
-              {conResultados.map((c) => (
-                <div key={c.corto} style={carta}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 8 }}>
-                    <strong style={{ fontSize: '1.02rem' }}>{c.corto}</strong>
-                    <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>{c.jugados}/{c.total} jugados</span>
-                  </div>
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {c.resultados.map((r, i) => (
-                      <FilaResultado key={r.partidoId ?? i} r={r} borde={i > 0} modoCarga={modoCarga}
-                        onGuardado={() => void cargar(false)} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
 
         </div>
         </div>
