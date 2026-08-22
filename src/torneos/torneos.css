@@ -157,5 +157,8 @@
 @media (prefers-reduced-motion: reduce) { .rk .cinta-track { animation: none !important; } }
 
 /* EN VIVO: campeones a la izquierda en pantallas anchas, apilado en el celular */
-.rk .envivo-grid { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+.rk .envivo-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
+/* min-width:0: sin esto, la fila de chips (scroll horizontal) impone su ancho
+   minimo intrinseco a la columna y el grid desborda la pagina hacia la derecha */
+.rk .envivo-grid > * { min-width: 0; }
 @media (max-width: 900px) { .rk .envivo-grid { grid-template-columns: 1fr; } }
