@@ -70,6 +70,10 @@ type CatProg = {
   total: number;
   terminado: boolean;
   campeon: string | null;
+  torneoId: string;
+  nGrupos: number;
+  gruposCompletos: boolean;
+  llaveArmada: boolean;
 };
 type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string } & RefPartido;
 
@@ -245,7 +249,103 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
     nombre: t.nombre, corto: t.nombre.replace(' RACKET ROLL', ''), dia: cfg.dia, inicio: cfg.inicio,
     rondas, llave, resultados, jugados, total, terminado: t.fase === 'terminado',
     campeon: campeonDe(t),
+    torneoId: t.id,
+    nGrupos: t.grupos.length,
+    gruposCompletos: t.partidosGrupo.length > 0 && t.partidosGrupo.every((p) => resultadoDe(p) !== null),
+    llaveArmada: !!t.partidosLlave && t.partidosLlave.length > 0,
   };
+}
+
+// Posiciones de un grupo: victorias, y los empates se resuelven por DUELO DIRECTO
+// entre las empatadas (mini-liga: victorias y luego diferencia entre ellas) antes
+// que por diferencia global — la regla de la casa (caso Fem C del 22/08).
+function posicionesDeGrupo(t: Torneo, parejaIds: string[]): string[] {
+  const stats = new Map(parejaIds.map((id) => [id, { w: 0, dif: 0 }]));
+  const jugadosEntre = (ids: Set<string>) =>
+    t.partidosGrupo.filter((p) => ids.has(p.aId) && ids.has(p.bId) && resultadoDe(p) !== null);
+  for (const p of jugadosEntre(new Set(parejaIds))) {
+    const r = resultadoDe(p)!;
+    const sa = stats.get(p.aId)!;
+    const sb = stats.get(p.bId)!;
+    sa.dif += r.a - r.b;
+    sb.dif += r.b - r.a;
+    (r.a > r.b ? sa : sb).w += 1;
+  }
+  const orden = [...parejaIds].sort((x, y) => stats.get(y)!.w - stats.get(x)!.w);
+  // desempate por bloques de igual cantidad de victorias
+  const resultado: string[] = [];
+  let i = 0;
+  while (i < orden.length) {
+    let j = i;
+    while (j < orden.length && stats.get(orden[j])!.w === stats.get(orden[i])!.w) j++;
+    const bloque = orden.slice(i, j);
+    if (bloque.length > 1) {
+      const ids = new Set(bloque);
+      const mini = new Map(bloque.map((id) => [id, { w: 0, dif: 0 }]));
+      for (const p of jugadosEntre(ids)) {
+        const r = resultadoDe(p)!;
+        const sa = mini.get(p.aId)!;
+        const sb = mini.get(p.bId)!;
+        sa.dif += r.a - r.b;
+        sb.dif += r.b - r.a;
+        (r.a > r.b ? sa : sb).w += 1;
+      }
+      bloque.sort((x, y) =>
+        mini.get(y)!.w - mini.get(x)!.w
+        || mini.get(y)!.dif - mini.get(x)!.dif
+        || stats.get(y)!.dif - stats.get(x)!.dif);
+    }
+    resultado.push(...bloque);
+    i = j;
+  }
+  return resultado;
+}
+
+const idCorto = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+
+// Arma la llave en el servidor cuando la fase de grupos está completa. Soporta
+// liga única (final 1° vs 2°) y 2 grupos (semis cruzadas + final). Con 3+ grupos
+// (mejores terceros) devuelve un aviso para armarla desde el gestor.
+async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  const { data: fila, error } = await sb.from('rk_torneos').select('data, updated_at').eq('id', torneoId).maybeSingle();
+  if (error || !fila) return 'No se pudo leer el torneo';
+  const t = fila.data as Torneo;
+  if (t.partidosLlave && t.partidosLlave.length > 0) return null; // ya estaba armada
+  if (t.partidosGrupo.length === 0 || t.partidosGrupo.some((p) => resultadoDe(p) === null)) {
+    return 'Todavía quedan partidos de grupo sin resultado';
+  }
+  const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
+  let llave: PartidoLlave[];
+  if (t.grupos.length === 1) {
+    const pos = posicionesDeGrupo(t, t.grupos[0].parejaIds);
+    llave = [{ id: idCorto(), ronda: 1, posicion: 0, esTercerPuesto: false, a: seed(pos[0]), b: seed(pos[1]), puntosA: null, puntosB: null }];
+  } else if (t.grupos.length === 2) {
+    const posA = posicionesDeGrupo(t, t.grupos[0].parejaIds);
+    const posB = posicionesDeGrupo(t, t.grupos[1].parejaIds);
+    const sf1 = { id: idCorto(), ronda: 1, posicion: 0, esTercerPuesto: false, a: seed(posA[0]), b: seed(posB[1]), puntosA: null, puntosB: null };
+    const sf2 = { id: idCorto(), ronda: 1, posicion: 1, esTercerPuesto: false, a: seed(posB[0]), b: seed(posA[1]), puntosA: null, puntosB: null };
+    const final = {
+      id: idCorto(), ronda: 2, posicion: 0, esTercerPuesto: false,
+      a: { tipo: 'ganadorDe', partidoId: sf1.id } as SlotLlave,
+      b: { tipo: 'ganadorDe', partidoId: sf2.id } as SlotLlave,
+      puntosA: null, puntosB: null,
+    };
+    llave = [sf1, sf2, final];
+  } else {
+    return 'Esta categoría lleva mejores terceros: armá la llave desde el gestor';
+  }
+  t.partidosLlave = llave;
+  t.configLlave = { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false };
+  const { data: upd, error: e2 } = await sb.from('rk_torneos')
+    .update({ data: t, updated_at: new Date().toISOString() })
+    .eq('id', torneoId)
+    .eq('updated_at', fila.updated_at as string)
+    .select('id');
+  if (e2) return 'No se pudo guardar (¿sesión vencida?)';
+  if (!upd || upd.length === 0) return 'Se editó desde otro lado: probá de nuevo';
+  return null;
 }
 
 // Greedy de canchas: cada partido toma la cancha que antes se libere; una ronda
@@ -821,6 +921,21 @@ export default function ProgramacionPage() {
           </div>
         ) : (
           <>
+            {modoCarga && catsDelDia
+              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado)
+              .map((c) => (
+                <div key={c.corto} style={{ ...carta, borderColor: 'var(--lima)', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 800 }}>🏁 {c.corto}: grupos completos</span>
+                  <button className="boton" onClick={async () => {
+                    const problema = await armarLlaveEnServidor(c.torneoId);
+                    if (problema) window.alert(problema);
+                    void cargar(false);
+                  }}>
+                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : 'Ver cómo armar'}
+                  </button>
+                </div>
+              ))}
+
             <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '0 0 10px' }}>
               Próximos partidos
             </h2>
