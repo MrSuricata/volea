@@ -57,7 +57,7 @@ const PROGRAMA: Record<string, { dia: Dia; inicio: number }> = {
 // el modo admin puede cargar desde esta pantalla. Los proyectados no se editan.
 type RefPartido = { torneoId?: string; partidoId?: string; tipo?: 'grupo' | 'llave' };
 type PartidoProg = { a: string; b: string; fase: string } & RefPartido;
-type ResultadoItem = { fase: string; a: string; b: string; pa: number; pb: number };
+type ResultadoItem = { fase: string; a: string; b: string; pa: number; pb: number } & RefPartido;
 type CatProg = {
   nombre: string;
   corto: string;
@@ -137,7 +137,10 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
         const r = resultadoDe(p);
         if (r) {
           jugados += 1;
-          resultados.push({ fase: `Grupo ${g.nombre}`, a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), pa: r.a, pb: r.b });
+          resultados.push({
+            fase: `Grupo ${g.nombre}`, a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), pa: r.a, pb: r.b,
+            torneoId: t.id, partidoId: p.id, tipo: 'grupo',
+          });
           continue;
         }
         const lista = porRonda.get(p.ronda) ?? [];
@@ -190,7 +193,10 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
       const r = resultadoDe(p);
       if (r) {
         jugados += 1;
-        resultados.push({ fase, a: nombreSlot(p.a), b: nombreSlot(p.b), pa: r.a, pb: r.b });
+        resultados.push({
+          fase, a: nombreSlot(p.a), b: nombreSlot(p.b), pa: r.a, pb: r.b,
+          torneoId: t.id, partidoId: p.id, tipo: 'llave',
+        });
         continue;
       }
       const lista = porRonda.get(p.ronda) ?? [];
@@ -266,7 +272,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
 // Escritura del modo admin: lee la fila fresca, anota el puntaje en ESE partido y
 // guarda solo si nadie tocó el torneo en el medio (updated_at como candado optimista).
 // El gestor detecta cambios remotos por baseline, así que nunca pisa en silencio.
-async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', partidoId: string, pa: number, pb: number): Promise<string | null> {
+async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', partidoId: string, pa: number | null, pb: number | null): Promise<string | null> {
   const sb = supabase;
   if (!sb) return 'Sin conexión con el servidor';
   for (let intento = 0; intento < 2; intento++) {
@@ -290,27 +296,24 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
   return 'Se está editando desde otro lado: probá de nuevo';
 }
 
-// Mini formulario de carga en cada tarjeta (solo modo admin, solo partidos reales).
-function CargaResultado({ fila, onGuardado }: { fila: Fila; onGuardado: () => void }) {
-  const [pa, setPa] = useState('');
-  const [pb, setPb] = useState('');
+// Mini formulario de carga/edición (solo modo admin, solo partidos reales).
+// Con `borrable` ofrece quitar el resultado: el partido vuelve a Próximos.
+function CargaResultado({ partido, inicialA, inicialB, borrable, onGuardado }: {
+  partido: { a: string; b: string } & RefPartido;
+  inicialA?: number;
+  inicialB?: number;
+  borrable?: boolean;
+  onGuardado: () => void;
+}) {
+  const [pa, setPa] = useState(inicialA !== undefined ? String(inicialA) : '');
+  const [pb, setPb] = useState(inicialB !== undefined ? String(inicialB) : '');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
 
-  async function guardar() {
-    const a = Number(pa);
-    const b = Number(pb);
-    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || pa === '' || pb === '') {
-      setError('Puntajes inválidos');
-      return;
-    }
-    if (a === b) {
-      setError('No puede haber empate');
-      return;
-    }
+  async function mandar(a: number | null, b: number | null) {
     setGuardando(true);
     setError('');
-    const problema = await guardarResultado(fila.torneoId!, fila.tipo!, fila.partidoId!, a, b);
+    const problema = await guardarResultado(partido.torneoId!, partido.tipo!, partido.partidoId!, a, b);
     setGuardando(false);
     if (problema) {
       setError(problema);
@@ -319,16 +322,76 @@ function CargaResultado({ fila, onGuardado }: { fila: Fila; onGuardado: () => vo
     onGuardado();
   }
 
+  function guardar() {
+    const a = Number(pa);
+    const b = Number(pb);
+    if (pa === '' || pb === '' || !Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+      setError('Puntajes inválidos');
+      return;
+    }
+    if (a === b) {
+      setError('No puede haber empate');
+      return;
+    }
+    void mandar(a, b);
+  }
+
+  function borrar() {
+    if (!window.confirm('¿Quitar este resultado? El partido vuelve a Próximos.')) return;
+    void mandar(null, null);
+  }
+
   const caja: React.CSSProperties = { width: 62, textAlign: 'center', fontSize: '1.1rem', fontWeight: 800, padding: '7px 4px' };
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-      <input type="number" inputMode="numeric" min={0} value={pa} onChange={(e) => setPa(e.target.value)} placeholder="—" aria-label={`Puntos ${fila.a}`} style={caja} />
+      <input type="number" inputMode="numeric" min={0} value={pa} onChange={(e) => setPa(e.target.value)} placeholder="—" aria-label={`Puntos ${partido.a}`} style={caja} />
       <span style={{ opacity: 0.6, fontWeight: 700 }}>–</span>
-      <input type="number" inputMode="numeric" min={0} value={pb} onChange={(e) => setPb(e.target.value)} placeholder="—" aria-label={`Puntos ${fila.b}`} style={caja} />
-      <button className="boton" disabled={guardando} onClick={() => void guardar()}>
-        {guardando ? 'Guardando…' : 'Cargar'}
+      <input type="number" inputMode="numeric" min={0} value={pb} onChange={(e) => setPb(e.target.value)} placeholder="—" aria-label={`Puntos ${partido.b}`} style={caja} />
+      <button className="boton" disabled={guardando} onClick={guardar}>
+        {guardando ? 'Guardando…' : 'Guardar'}
       </button>
+      {borrable && (
+        <button className="boton secundario" disabled={guardando} onClick={borrar}>Quitar</button>
+      )}
       {error && <span style={{ color: '#ff8fa8', fontSize: '0.85rem' }}>{error}</span>}
+    </div>
+  );
+}
+
+// Un resultado en la lista: en modo carga muestra "Editar" para corregir o quitar.
+function FilaResultado({ r, borde, modoCarga, onGuardado }: {
+  r: ResultadoItem;
+  borde: boolean;
+  modoCarga: boolean;
+  onGuardado: () => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const ganaA = r.pa > r.pb;
+  return (
+    <div style={{ borderTop: borde ? '1px solid var(--borde)' : 'none', paddingTop: borde ? 8 : 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+        <span style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700 }}>{r.fase}</span>
+        {modoCarga && r.partidoId && (
+          <button
+            onClick={() => setEditando(!editando)}
+            style={{ background: 'none', border: 'none', color: 'var(--lima)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, padding: 0 }}
+          >
+            {editando ? 'Cancelar' : 'Editar'}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 700 : 400 }}>
+        <span>{r.a}</span>
+        <span style={{ color: ganaA ? 'var(--lima)' : 'inherit', fontWeight: 800 }}>{r.pa}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 400 : 700 }}>
+        <span>{r.b}</span>
+        <span style={{ color: ganaA ? 'inherit' : 'var(--lima)', fontWeight: 800 }}>{r.pb}</span>
+      </div>
+      {editando && (
+        <CargaResultado partido={r} inicialA={r.pa} inicialB={r.pb} borrable
+          onGuardado={() => { setEditando(false); onGuardado(); }} />
+      )}
     </div>
   );
 }
@@ -518,7 +581,7 @@ export default function ProgramacionPage() {
                       {f.b}
                     </div>
                     {modoCarga && f.partidoId && (
-                      <CargaResultado fila={f} onGuardado={() => void cargar(false)} />
+                      <CargaResultado partido={f} onGuardado={() => void cargar(false)} />
                     )}
                   </div>
                 ))}
@@ -545,22 +608,10 @@ export default function ProgramacionPage() {
                     <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>{c.jugados}/{c.total} jugados</span>
                   </div>
                   <div style={{ display: 'grid', gap: 8 }}>
-                    {c.resultados.map((r, i) => {
-                      const ganaA = r.pa > r.pb;
-                      return (
-                        <div key={i} style={{ borderTop: i ? '1px solid var(--borde)' : 'none', paddingTop: i ? 8 : 0 }}>
-                          <div style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{r.fase}</div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 700 : 400 }}>
-                            <span>{r.a}</span>
-                            <span style={{ color: ganaA ? 'var(--lima)' : 'inherit', fontWeight: 800 }}>{r.pa}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '1rem', fontWeight: ganaA ? 400 : 700 }}>
-                            <span>{r.b}</span>
-                            <span style={{ color: ganaA ? 'inherit' : 'var(--lima)', fontWeight: 800 }}>{r.pb}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {c.resultados.map((r, i) => (
+                      <FilaResultado key={r.partidoId ?? i} r={r} borde={i > 0} modoCarga={modoCarga}
+                        onGuardado={() => void cargar(false)} />
+                    ))}
                   </div>
                 </div>
               ))}
