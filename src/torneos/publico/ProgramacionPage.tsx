@@ -645,10 +645,34 @@ export default function ProgramacionPage() {
     void cargar(false);
   }
 
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     void cargar(true);
+    // el sondeo queda como respaldo: lo instantaneo lo trae Realtime
     const timer = window.setInterval(() => void cargar(false), 60000);
-    return () => window.clearInterval(timer);
+    const reloj = window.setInterval(() => setTick((t) => t + 1), 15000);
+    return () => { window.clearInterval(timer); window.clearInterval(reloj); };
+  }, [cargar]);
+
+  // Tiempo real: cualquier cambio en canchas o torneos (desde este u otro
+  // dispositivo, o el gestor) refresca al instante en todos lados, TV incluida.
+  useEffect(() => {
+    const sb = supabase;
+    if (!sb) return;
+    let timer: number | undefined;
+    const pedir = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void cargar(false), 250);
+    };
+    const canal = sb.channel('envivo-racket-roll')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rk_en_cancha' }, pedir)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rk_torneos' }, pedir)
+      .subscribe();
+    return () => {
+      window.clearTimeout(timer);
+      void sb.removeChannel(canal);
+    };
   }, [cargar]);
 
   const { filas, cats } = useMemo(() => {
@@ -672,7 +696,7 @@ export default function ProgramacionPage() {
     });
     const enJuego = new Set(enCancha.filter((e) => e.partidoId).map((e) => e.partidoId as string));
     return { filas: programar(cats, ancla, libreDesde, hoy, enJuego), cats };
-  }, [torneos, hoyISO, actualizado, enCancha]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [torneos, hoyISO, actualizado, enCancha, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
   if (estado === 'error') return <RkError mensaje={mensajeError} onReintentar={() => void cargar(true)} />;
@@ -988,10 +1012,15 @@ export default function ProgramacionPage() {
             const et = e ? etiquetaEnCancha(torneos, e) : null;
             return (
               <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)' }}>
-                <div style={{ marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span style={{ ...chip, background: et ? 'var(--lima)' : 'transparent', color: et ? '#101c33' : 'var(--texto)' }}>
                     {et ? '▶ ' : ''}{nombre}
                   </span>
+                  {et && e?.desde && (
+                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--lima)', fontVariantNumeric: 'tabular-nums' }}>
+                      ⏱ {Math.max(0, Math.floor((Date.now() - new Date(e.desde).getTime()) / 60000))}′
+                    </span>
+                  )}
                 </div>
                 {et ? (
                   <>
