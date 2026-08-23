@@ -350,10 +350,13 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
 
 // Greedy de canchas: cada partido toma la cancha que antes se libere; una ronda
 // de un grupo no arranca sin cerrar la anterior.
-function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
+function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: number[], hoy: Dia | null, enJuego: Set<string>): Fila[] {
   const filas: Fila[] = [];
   for (const dia of ['SAB', 'DOM'] as Dia[]) {
-    const canchas = CANCHAS.map(() => ancla[dia]);
+    // Para el día en curso cada cancha arranca cuando se libera (lo que está
+    // jugando ahora la ocupa ~15 min desde que se marcó); los otros días, en el
+    // horario del bloque.
+    const canchas = CANCHAS.map((_, i) => (dia === hoy ? Math.max(ancla[dia], libreDesde[i]) : ancla[dia]));
     let opcMarcado = false;
     const delDia = cats.filter((c) => c.dia === dia && !c.terminado).sort((a, b) => a.inicio - b.inicio);
     for (const cat of delDia) {
@@ -371,6 +374,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
           if (r >= grupo.length) return;
           let finRonda = disp[gi];
           for (const p of grupo[r]) {
+            if (p.partidoId && enJuego.has(p.partidoId)) continue;
             const ci = canchas.indexOf(Math.min(...canchas));
             const ini = Math.max(disp[gi], canchas[ci], cat.inicio);
             canchas[ci] = ini + DUR_PARTIDO;
@@ -384,6 +388,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>): Fila[] {
       for (const ola of cat.llave) {
         let finOla = listo;
         for (const p of ola) {
+          if (p.partidoId && enJuego.has(p.partidoId)) continue;
           const d = p.fase === 'FINAL' ? DUR_PARTIDO + 5 : DUR_PARTIDO;
           const ci = canchas.indexOf(Math.min(...canchas));
           const ini = Math.max(listo, canchas[ci]);
@@ -433,7 +438,7 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
   return 'Se está editando desde otro lado: probá de nuevo';
 }
 
-type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null };
+type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null; desde: string | null };
 
 // Datos legibles de un partido marcado en cancha, buscándolo en los datos vivos.
 function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; a: string; b: string; tipo: 'grupo' | 'llave' } | null {
@@ -608,12 +613,13 @@ export default function ProgramacionPage() {
     setTorneos(r.torneos);
     // Tablero de canchas (lectura pública). Si falla, se conserva lo último visto.
     if (supabase) {
-      const { data } = await supabase.from('rk_en_cancha').select('cancha, torneo_id, partido_id');
+      const { data } = await supabase.from('rk_en_cancha').select('cancha, torneo_id, partido_id, updated_at');
       if (data) {
         setEnCancha(data.map((f) => ({
           cancha: f.cancha as string,
           torneoId: (f.torneo_id as string | null) ?? null,
           partidoId: (f.partido_id as string | null) ?? null,
+          desde: (f.updated_at as string | null) ?? null,
         })));
       }
     }
@@ -650,12 +656,22 @@ export default function ProgramacionPage() {
       .map((t) => armarCategoria(t, PROGRAMA[t.nombre]));
     const ahora = new Date();
     const nowMin = ahora.getHours() * 60 + ahora.getMinutes();
+    const hoy: Dia | null = hoyISO === FECHA_DIA.SAB ? 'SAB' : hoyISO === FECHA_DIA.DOM ? 'DOM' : null;
+    // Antes de que arranque el día manda el horario del bloque; una vez arrancado,
+    // la hora real (si no, lo pendiente se proyectaría en el pasado o de más).
     const ancla: Record<Dia, number> = {
-      SAB: hoyISO === FECHA_DIA.SAB ? Math.max(10 * 60, nowMin) : 10 * 60,
-      DOM: hoyISO === FECHA_DIA.DOM ? Math.max(9 * 60 + 30, nowMin) : 9 * 60 + 30,
+      SAB: hoy === 'SAB' ? Math.max(10 * 60, nowMin) : 10 * 60,
+      DOM: hoy === 'DOM' ? Math.max(9 * 60 + 30, nowMin) : 9 * 60 + 30,
     };
-    return { filas: programar(cats, ancla), cats };
-  }, [torneos, hoyISO, actualizado]); // eslint-disable-line react-hooks/exhaustive-deps
+    const libreDesde = CANCHAS.map((c) => {
+      const e = enCancha.find((x) => x.cancha === c);
+      if (!e?.partidoId || !e.desde) return nowMin;
+      const d = new Date(e.desde);
+      return Math.max(nowMin, d.getHours() * 60 + d.getMinutes() + DUR_PARTIDO);
+    });
+    const enJuego = new Set(enCancha.filter((e) => e.partidoId).map((e) => e.partidoId as string));
+    return { filas: programar(cats, ancla, libreDesde, hoy, enJuego), cats };
+  }, [torneos, hoyISO, actualizado, enCancha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
   if (estado === 'error') return <RkError mensaje={mensajeError} onReintentar={() => void cargar(true)} />;
