@@ -680,6 +680,12 @@ export default function ProgramacionPage() {
     }))
     .filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
   const domSinConfirmar = dia === 'DOM' && !DOM_CONFIRMADO;
+  // Candidatos para llenar una cancha vacia: del dia, todavia no en cancha y sin
+  // jugadores ocupados. Ignora el buscador a proposito (sugiere de TODO el dia,
+  // incluso de otra categoria: asi no queda una cancha parada esperando el bloque).
+  const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
+  const sugeridos = filas.filter((f) =>
+    f.dia === dia && f.partidoId && !canchaDePartido.has(f.partidoId) && conflictosDe(f).length === 0);
   // Cinta de últimos resultados (todas las categorías, las más recientes primero:
   // categorías de inicio más tarde arriba y, dentro de cada una, la llave primero).
   const cinta = cats
@@ -992,9 +998,23 @@ export default function ProgramacionPage() {
                       </>
                     )}
                   </>
-                ) : (
-                  <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>
-                )}
+                ) : (() => {
+                  const sug = modoCarga ? sugeridos[canchasLibres.indexOf(nombre)] : undefined;
+                  if (!sug) return <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>;
+                  return (
+                    <>
+                      <div style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
+                        Libre — sugerido: {sug.categoria}
+                      </div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35, marginBottom: 8 }}>
+                        {sug.a} <span style={{ opacity: 0.5, fontWeight: 400 }}>vs</span> {sug.b}
+                      </div>
+                      <button className="boton" style={{ width: '100%' }} onClick={() => void mandarACancha(nombre, sug)}>
+                        Mandar a {nombre}
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             );
           })}
