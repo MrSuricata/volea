@@ -351,13 +351,13 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
 
 // Greedy de canchas: cada partido toma la cancha que antes se libere; una ronda
 // de un grupo no arranca sin cerrar la anterior.
-function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: number[], hoy: Dia | null, enJuego: Set<string>): Fila[] {
+function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: number[], hoy: Dia | null, enJuego: Set<string>, nombresCanchas: string[]): Fila[] {
   const filas: Fila[] = [];
   for (const dia of ['SAB', 'DOM'] as Dia[]) {
     // Para el día en curso cada cancha arranca cuando se libera (lo que está
     // jugando ahora la ocupa ~15 min desde que se marcó); los otros días, en el
     // horario del bloque.
-    const canchas = CANCHAS.map((_, i) => (dia === hoy ? Math.max(ancla[dia], libreDesde[i]) : ancla[dia]));
+    const canchas = nombresCanchas.map((_, i) => (dia === hoy ? Math.max(ancla[dia], libreDesde[i]) : ancla[dia]));
     let opcMarcado = false;
     const delDia = cats.filter((c) => c.dia === dia && !c.terminado).sort((a, b) => a.inicio - b.inicio);
     for (const cat of delDia) {
@@ -380,7 +380,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: numb
             const ini = Math.max(disp[gi], canchas[ci], cat.inicio);
             canchas[ci] = ini + DUR_PARTIDO;
             finRonda = Math.max(finRonda, ini + DUR_PARTIDO);
-            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
+            filas.push({ dia, ini, cancha: nombresCanchas[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
           }
           disp[gi] = finRonda;
         });
@@ -395,7 +395,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: numb
           const ini = Math.max(listo, canchas[ci]);
           canchas[ci] = ini + d;
           finOla = Math.max(finOla, ini + d);
-          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
+          filas.push({ dia, ini, cancha: nombresCanchas[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
         }
         listo = finOla;
       }
@@ -439,7 +439,7 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
   return 'Se está editando desde otro lado: probá de nuevo';
 }
 
-type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null; desde: string | null };
+type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null; desde: string | null; habilitada: boolean };
 
 // Datos legibles de un partido marcado en cancha, buscándolo en los datos vivos.
 function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; a: string; b: string; tipo: 'grupo' | 'llave' } | null {
@@ -614,13 +614,14 @@ export default function ProgramacionPage() {
     setTorneos(r.torneos);
     // Tablero de canchas (lectura pública). Si falla, se conserva lo último visto.
     if (supabase) {
-      const { data } = await supabase.from('rk_en_cancha').select('cancha, torneo_id, partido_id, updated_at');
+      const { data } = await supabase.from('rk_en_cancha').select('cancha, torneo_id, partido_id, updated_at, habilitada');
       if (data) {
         setEnCancha(data.map((f) => ({
           cancha: f.cancha as string,
           torneoId: (f.torneo_id as string | null) ?? null,
           partidoId: (f.partido_id as string | null) ?? null,
           desde: (f.updated_at as string | null) ?? null,
+          habilitada: (f.habilitada as boolean | null) ?? true,
         })));
       }
     }
@@ -635,6 +636,13 @@ export default function ProgramacionPage() {
     // si ya estaba marcado en otra cancha, primero se lo saca de ahí
     await sb.from('rk_en_cancha').update({ torneo_id: null, partido_id: null, updated_at: ahora }).eq('partido_id', ref.partidoId);
     await sb.from('rk_en_cancha').update({ torneo_id: ref.torneoId, partido_id: ref.partidoId, updated_at: ahora }).eq('cancha', cancha);
+    void cargar(false);
+  }
+
+  async function setHabilitada(cancha: string, valor: boolean) {
+    const sb = supabase;
+    if (!sb) return;
+    await sb.from('rk_en_cancha').update({ habilitada: valor, updated_at: new Date().toISOString() }).eq('cancha', cancha);
     void cargar(false);
   }
 
@@ -675,6 +683,11 @@ export default function ProgramacionPage() {
     };
   }, [cargar]);
 
+  const ordenCancha = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+  const activas = enCancha.length > 0
+    ? enCancha.filter((e) => e.habilitada).map((e) => e.cancha).sort(ordenCancha)
+    : CANCHAS;
+
   const { filas, cats } = useMemo(() => {
     const cats = torneos
       .filter((t) => PROGRAMA[t.nombre])
@@ -688,14 +701,14 @@ export default function ProgramacionPage() {
       SAB: hoy === 'SAB' ? Math.max(10 * 60, nowMin) : 10 * 60,
       DOM: hoy === 'DOM' ? Math.max(9 * 60 + 30, nowMin) : 9 * 60 + 30,
     };
-    const libreDesde = CANCHAS.map((c) => {
+    const libreDesde = activas.map((c) => {
       const e = enCancha.find((x) => x.cancha === c);
       if (!e?.partidoId || !e.desde) return nowMin;
       const d = new Date(e.desde);
       return Math.max(nowMin, d.getHours() * 60 + d.getMinutes() + DUR_PARTIDO);
     });
     const enJuego = new Set(enCancha.filter((e) => e.partidoId).map((e) => e.partidoId as string));
-    return { filas: programar(cats, ancla, libreDesde, hoy, enJuego), cats };
+    return { filas: programar(cats, ancla, libreDesde, hoy, enJuego, activas), cats };
   }, [torneos, hoyISO, actualizado, enCancha, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
@@ -748,7 +761,7 @@ export default function ProgramacionPage() {
   // Candidatos para llenar una cancha vacia: del dia, todavia no en cancha y sin
   // jugadores ocupados. Ignora el buscador a proposito (sugiere de TODO el dia,
   // incluso de otra categoria: asi no queda una cancha parada esperando el bloque).
-  const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
+  const canchasLibres = activas.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
   // Primero los rezagados del OTRO dia (semis/finales que quedaron colgadas de
   // ayer), despues la cola del dia: una cancha libre siempre tiene que ofrecer algo.
   const jugable = (f: Fila) => !!f.partidoId && f.listo !== false && !canchaDePartido.has(f.partidoId!) && conflictosDe(f).length === 0;
@@ -972,7 +985,7 @@ export default function ProgramacionPage() {
                           )}
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                             <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
-                            {CANCHAS.map((nombre) => (
+                            {activas.map((nombre) => (
                               <button key={nombre} className="boton secundario"
                                 style={{ padding: '4px 10px', fontSize: '0.8rem' }}
                                 onClick={() => {
@@ -1007,11 +1020,13 @@ export default function ProgramacionPage() {
           </h2>
         {/* Tablero: quién está jugando en cada cancha AHORA (lo ve todo el mundo) */}
         <div style={{ display: 'grid', gap: 10 }}>
-          {CANCHAS.map((nombre) => {
-            const e = enCancha.find((x) => x.cancha === nombre);
-            const et = e ? etiquetaEnCancha(torneos, e) : null;
+          {(modoCarga ? enCancha : enCancha.filter((e) => e.habilitada))
+            .slice().sort((a, b) => ordenCancha(a.cancha, b.cancha)).map((e) => {
+            const nombre = e.cancha;
+            const off = !e.habilitada;
+            const et = off ? null : etiquetaEnCancha(torneos, e);
             return (
-              <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)' }}>
+              <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)', opacity: off ? 0.55 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span style={{ ...chip, background: et ? 'var(--lima)' : 'transparent', color: et ? '#101c33' : 'var(--texto)' }}>
                     {et ? '▶ ' : ''}{nombre}
@@ -1034,7 +1049,7 @@ export default function ProgramacionPage() {
                         />
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                           <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mover a</span>
-                          {CANCHAS.filter((otra) => otra !== nombre).map((otra) => (
+                          {activas.filter((otra) => otra !== nombre).map((otra) => (
                             <button key={otra} className="boton secundario"
                               style={{ padding: '4px 10px', fontSize: '0.8rem' }}
                               onClick={() => void mandarACancha(otra, e)}>
@@ -1049,9 +1064,25 @@ export default function ProgramacionPage() {
                       </>
                     )}
                   </>
+                ) : off ? (
+                  <div>
+                    <div style={{ opacity: 0.6, fontWeight: 700, marginBottom: 8 }}>Deshabilitada</div>
+                    {modoCarga && (
+                      <button className="boton secundario" style={{ padding: '4px 12px', fontSize: '0.85rem' }}
+                        onClick={() => void setHabilitada(nombre, true)}>
+                        Habilitar
+                      </button>
+                    )}
+                  </div>
                 ) : (() => {
                   const sug = modoCarga ? sugeridos[canchasLibres.indexOf(nombre)] : undefined;
-                  if (!sug) return <div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>;
+                  const apagar = modoCarga ? (
+                    <button onClick={() => void setHabilitada(nombre, false)}
+                      style={{ background: 'none', border: 'none', color: 'var(--lima)', opacity: 0.7, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, padding: 0, marginTop: 8, display: 'block' }}>
+                      Deshabilitar cancha
+                    </button>
+                  ) : null;
+                  if (!sug) return <div><div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>{apagar}</div>;
                   return (
                     <>
                       <div style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
@@ -1063,6 +1094,7 @@ export default function ProgramacionPage() {
                       <button className="boton" style={{ width: '100%' }} onClick={() => void mandarACancha(nombre, sug)}>
                         Mandar a {nombre}
                       </button>
+                      {apagar}
                     </>
                   );
                 })()}
