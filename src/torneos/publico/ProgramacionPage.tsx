@@ -56,7 +56,7 @@ const PROGRAMA: Record<string, { dia: Dia; inicio: number }> = {
 // torneoId/partidoId/tipo solo existen en partidos REALES del fixture: son los que
 // el modo admin puede cargar desde esta pantalla. Los proyectados no se editan.
 type RefPartido = { torneoId?: string; partidoId?: string; tipo?: 'grupo' | 'llave' };
-type PartidoProg = { a: string; b: string; fase: string } & RefPartido;
+type PartidoProg = { a: string; b: string; fase: string; listo?: boolean } & RefPartido;
 type ResultadoItem = { fase: string; a: string; b: string; pa: number; pb: number } & RefPartido;
 type CatProg = {
   nombre: string;
@@ -75,7 +75,7 @@ type CatProg = {
   gruposCompletos: boolean;
   llaveArmada: boolean;
 };
-type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string } & RefPartido;
+type Fila = { dia: Dia; ini: number; cancha: string; categoria: string; fase: string; a: string; b: string; listo?: boolean } & RefPartido;
 
 const aHora = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -178,7 +178,7 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
         const lista = porRonda.get(p.ronda) ?? [];
         lista.push({
           a: nombreDe(t, p.aId), b: nombreDe(t, p.bId), fase: `Grupo ${g.nombre}`,
-          torneoId: t.id, partidoId: p.id, tipo: 'grupo',
+          torneoId: t.id, partidoId: p.id, tipo: 'grupo', listo: true,
         });
         porRonda.set(p.ronda, lista);
       }
@@ -232,7 +232,8 @@ function armarCategoria(t: Torneo, cfg: { dia: Dia; inicio: number }): CatProg {
         continue;
       }
       const lista = porRonda.get(p.ronda) ?? [];
-      lista.push({ a: nombreSlot(p.a), b: nombreSlot(p.b), fase, torneoId: t.id, partidoId: p.id, tipo: 'llave' });
+      const resuelto = parejaDeSlot(p.a, porId) !== null && parejaDeSlot(p.b, porId) !== null;
+      lista.push({ a: nombreSlot(p.a), b: nombreSlot(p.b), fase, torneoId: t.id, partidoId: p.id, tipo: 'llave', listo: resuelto });
       porRonda.set(p.ronda, lista);
     }
     llave = [...porRonda.entries()].sort((x, y) => x[0] - y[0]).map(([, lista]) => lista);
@@ -379,7 +380,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: numb
             const ini = Math.max(disp[gi], canchas[ci], cat.inicio);
             canchas[ci] = ini + DUR_PARTIDO;
             finRonda = Math.max(finRonda, ini + DUR_PARTIDO);
-            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo });
+            filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
           }
           disp[gi] = finRonda;
         });
@@ -394,7 +395,7 @@ function programar(cats: CatProg[], ancla: Record<Dia, number>, libreDesde: numb
           const ini = Math.max(listo, canchas[ci]);
           canchas[ci] = ini + d;
           finOla = Math.max(finOla, ini + d);
-          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo });
+          filas.push({ dia, ini, cancha: CANCHAS[ci], categoria: cat.corto, fase: p.fase, a: p.a, b: p.b, torneoId: p.torneoId, partidoId: p.partidoId, tipo: p.tipo, listo: p.listo });
         }
         listo = finOla;
       }
@@ -726,7 +727,7 @@ export default function ProgramacionPage() {
   const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
   // Primero los rezagados del OTRO dia (semis/finales que quedaron colgadas de
   // ayer), despues la cola del dia: una cancha libre siempre tiene que ofrecer algo.
-  const jugable = (f: Fila) => !!f.partidoId && !canchaDePartido.has(f.partidoId!) && conflictosDe(f).length === 0;
+  const jugable = (f: Fila) => !!f.partidoId && f.listo !== false && !canchaDePartido.has(f.partidoId!) && conflictosDe(f).length === 0;
   const sugeridos = [
     ...filas.filter((f) => f.dia !== dia && jugable(f)),
     ...filas.filter((f) => f.dia === dia && jugable(f)),
@@ -936,7 +937,7 @@ export default function ProgramacionPage() {
                       <span style={{ opacity: 0.55, fontWeight: 400 }}> vs </span>
                       {f.b}
                     </div>
-                    {modoCarga && f.partidoId && (() => {
+                    {modoCarga && f.partidoId && f.listo !== false && (() => {
                       const choques = conflictosDe(f);
                       return (
                         <>
