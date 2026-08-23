@@ -724,8 +724,13 @@ export default function ProgramacionPage() {
   // jugadores ocupados. Ignora el buscador a proposito (sugiere de TODO el dia,
   // incluso de otra categoria: asi no queda una cancha parada esperando el bloque).
   const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
-  const sugeridos = filas.filter((f) =>
-    f.dia === dia && f.partidoId && !canchaDePartido.has(f.partidoId) && conflictosDe(f).length === 0);
+  // Primero los rezagados del OTRO dia (semis/finales que quedaron colgadas de
+  // ayer), despues la cola del dia: una cancha libre siempre tiene que ofrecer algo.
+  const jugable = (f: Fila) => !!f.partidoId && !canchaDePartido.has(f.partidoId!) && conflictosDe(f).length === 0;
+  const sugeridos = [
+    ...filas.filter((f) => f.dia !== dia && jugable(f)),
+    ...filas.filter((f) => f.dia === dia && jugable(f)),
+  ];
 
   return (
     <div className="rk" style={{ position: 'relative' }}>
