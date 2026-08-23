@@ -696,12 +696,6 @@ export default function ProgramacionPage() {
     }))
     .filter((c) => c.resultados.length > 0 && (!filtro || c.corto === filtro));
   const domSinConfirmar = dia === 'DOM' && !DOM_CONFIRMADO;
-  // Candidatos para llenar una cancha vacia: del dia, todavia no en cancha y sin
-  // jugadores ocupados. Ignora el buscador a proposito (sugiere de TODO el dia,
-  // incluso de otra categoria: asi no queda una cancha parada esperando el bloque).
-  const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
-  const sugeridos = filas.filter((f) =>
-    f.dia === dia && f.partidoId && !canchaDePartido.has(f.partidoId) && conflictosDe(f).length === 0);
   // Cinta de últimos resultados (todas las categorías, las más recientes primero:
   // categorías de inicio más tarde arriba y, dentro de cada una, la llave primero).
   const cinta = cats
@@ -726,6 +720,12 @@ export default function ProgramacionPage() {
     [...f.a.split(/\s+y\s+/i), ...f.b.split(/\s+y\s+/i)]
       .map((n) => ({ jugador: n.trim(), cancha: ocupados.get(normalizar(n)) }))
       .filter((c): c is { jugador: string; cancha: string } => !!c.cancha);
+  // Candidatos para llenar una cancha vacia: del dia, todavia no en cancha y sin
+  // jugadores ocupados. Ignora el buscador a proposito (sugiere de TODO el dia,
+  // incluso de otra categoria: asi no queda una cancha parada esperando el bloque).
+  const canchasLibres = CANCHAS.filter((c) => !enCancha.find((e) => e.cancha === c)?.partidoId);
+  const sugeridos = filas.filter((f) =>
+    f.dia === dia && f.partidoId && !canchaDePartido.has(f.partidoId) && conflictosDe(f).length === 0);
 
   return (
     <div className="rk" style={{ position: 'relative' }}>
