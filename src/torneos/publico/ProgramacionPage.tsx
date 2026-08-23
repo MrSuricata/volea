@@ -21,7 +21,7 @@ type Dia = 'SAB' | 'DOM';
 const CANCHAS = ['Cancha 1', 'Cancha 2', 'Cancha 3'];
 // El domingo depende de cuántas canchas haya (se define el sábado): hasta entonces
 // NO se publican horarios por partido, solo los inicios de bloque del flyer.
-const DOM_CONFIRMADO = false;
+const DOM_CONFIRMADO = true;   // 22/08 23h: 3 canchas confirmadas y los 6 cuadros sorteados
 const BLOQUES_DOM: [string, string][] = [
   ['9:30', 'Femenino B'], ['11:00', 'Mixto B'], ['12:30', 'Masculino B'],
   ['14:00', 'Femenino A'], ['15:30', 'Mixto A'], ['17:00', 'Masculino A'],
