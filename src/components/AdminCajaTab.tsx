@@ -87,6 +87,9 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [loadFailed, setLoadFailed] = useState(false);
   const [period, setPeriod] = useState<PeriodFilter>('7d');
   const [kind, setKind] = useState<KindFilter>('todos');
+  // Buscador de movimientos (pedido de Brian): matchea etiqueta, deudor, quién
+  // lo registró y la variante, sin tildes. No toca los totales de arriba.
+  const [buscarMov, setBuscarMov] = useState('');
   const [aAnular, setAAnular] = useState<LedgerEntry | null>(null);
   const [aCobrar, setACobrar] = useState<{ nombre: string; total: number } | null>(null);
   const [aBorrarDeuda, setABorrarDeuda] = useState<{ nombre: string; total: number; movs: LedgerEntry[] } | null>(null);
@@ -151,8 +154,13 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const filtered = useMemo(() => {
     const now = new Date();
     const todayMvd = dayInMontevideo(now);
+    const q = normalizar(buscarMov.trim());
     return entries.filter(e => {
       if (kind !== 'todos' && e.kind !== kind) return false;
+      if (q !== '') {
+        const texto = `${e.label} ${e.debtorName ?? ''} ${e.reportedBy ?? ''} ${e.variantKey ? formatVariant(e.variantKey) : ''}`;
+        if (!normalizar(texto).includes(q)) return false;
+      }
       if (period === 'todo') return true;
       const created = new Date(e.createdAt);
       if (isNaN(created.getTime())) return true;
@@ -160,7 +168,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
       const days = period === '7d' ? 7 : 30;
       return now.getTime() - created.getTime() <= days * 24 * 60 * 60 * 1000;
     });
-  }, [entries, period, kind]);
+  }, [entries, period, kind, buscarMov]);
 
   // Totales del período (ignoran el filtro de tipo para que el balance siempre cierre)
   const totals = useMemo(() => {
@@ -425,6 +433,21 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                 {k.label}
               </button>
             ))}
+            <div className="relative w-full sm:ml-auto sm:w-64">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={buscarMov}
+                onChange={e => setBuscarMov(e.target.value)}
+                placeholder="Buscar producto, persona…"
+                aria-label="Buscar movimientos"
+                className="w-full rounded-full border border-gray-200 py-1.5 pl-9 pr-8 text-xs focus:border-lime-400 outline-none"
+              />
+              {buscarMov !== '' && (
+                <button onClick={() => setBuscarMov('')} aria-label="Limpiar búsqueda"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy-700">✕</button>
+              )}
+            </div>
           </div>
 
           {filtered.length === 0 ? (
@@ -436,13 +459,23 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
             ) : (
               <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
                 <Wallet size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-                <p className="font-display text-sm font-bold text-gray-500">Sin movimientos en este período</p>
-                <p className="mt-1 text-xs text-gray-400">Registrá una con «Nueva venta» o desde el bot de Telegram.</p>
+                <p className="font-display text-sm font-bold text-gray-500">
+                  {buscarMov.trim() !== ''
+                    ? <>Nada matchea «{buscarMov.trim()}» en este período</>
+                    : 'Sin movimientos en este período'}
+                </p>
+                <p className="mt-1 text-xs text-gray-400">
+                  {buscarMov.trim() !== ''
+                    ? 'Probá con otra palabra, o ampliá el período a «Todo».'
+                    : 'Registrá una con «Nueva venta» o desde el bot de Telegram.'}
+                </p>
               </div>
             )
           ) : (
             <div>
-              <h2 className={sectionTitleClass}>Movimientos ({filtered.length})</h2>
+              <h2 className={sectionTitleClass}>
+                Movimientos ({buscarMov.trim() !== '' ? `${filtered.length} de ${entries.length}` : filtered.length})
+              </h2>
               <div className="space-y-2">
                 {filtered.map(entry => (
                   <div

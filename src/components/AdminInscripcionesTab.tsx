@@ -58,6 +58,9 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // Registro de pago (solo eventos con tarifa) y buscador de jugadores.
   const [pagando, setPagando] = useState<Inscripcion | null>(null);
   const [busqueda, setBusqueda] = useState('');
+  // Filtro por estado de cobro (chips de la barra de totales). Tocar el chip
+  // activo lo apaga; filtra Recientes igual que el buscador.
+  const [filtroPago, setFiltroPago] = useState<'todos' | 'cobrados' | 'deudores' | 'sin'>('todos');
   const [duprAbierto, setDuprAbierto] = useState(false);
   // Tocar una tarjeta del semáforo abre esa categoría en la vista Por categoría
   // (scroll + resaltado breve).
@@ -121,6 +124,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   useEffect(() => {
     setFilas(null);
     setFallo(false);
+    setFiltroPago('todos');
     void cargar();
   }, [cargar]);
 
@@ -167,8 +171,17 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
     q === '' || normalizar(i.nombre).includes(q)
     || Object.values(i.parejas).some(p => normalizar(p).includes(q))
     || normalizar(i.pareja).includes(q);
-  const recientesFiltradas = recientes.filter(matchBusqueda);
-  const bajasFiltradas = bajas.filter(matchBusqueda);
+  // Estado de cobro de una fila: sin registrar, con deuda o al día (free pass
+  // cuenta como cobrado: pagó $0 sin deuda).
+  const estadoPagoDe = (i: Inscripcion): 'cobrados' | 'deudores' | 'sin' =>
+    !i.pagoAt ? 'sin' : (i.pagoDeuda ?? 0) > 0 ? 'deudores' : 'cobrados';
+  const matchPago = (i: Inscripcion) => filtroPago === 'todos' || estadoPagoDe(i) === filtroPago;
+  const recientesFiltradas = recientes.filter(i => matchBusqueda(i) && matchPago(i));
+  const bajasFiltradas = bajas.filter(i => matchBusqueda(i) && matchPago(i));
+  const toggleFiltroPago = (f: typeof filtroPago) => {
+    setFiltroPago(prev => (prev === f ? 'todos' : f));
+    setVista('recientes');
+  };
 
   // Cobros (solo eventos con tarifa): resumen arriba + chip por fila.
   const tarifa: TarifaEvento | null = evt?.tarifa ?? null;
@@ -178,6 +191,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const sinRegistrarTotal = tarifa
     ? sinRegistrar.reduce((s, i) => s + costoInscripcion(categoriasDe(i).length, tarifa), 0)
     : 0;
+  const nCobrados = activos.filter(i => estadoPagoDe(i) === 'cobrados').length;
+  const nDeudores = activos.filter(i => estadoPagoDe(i) === 'deudores').length;
   const esNueva = (i: Inscripcion) => i.createdAt > marcaVisitaPrevia();
   const linkPublico = evt ? `volea.vercel.app/#/inscripcion/${evt.id}` : '';
 
@@ -403,19 +418,43 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
-      {/* Tarifa y totales de cobro */}
+      {/* Tarifa y totales de cobro. Los totales son chips que filtran la lista
+          (pedido de Brian: ver deudores o cobrados de una, sin revolver). */}
       {evt && tarifa && filas !== null && filas.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-gray-100 bg-white px-4 py-2.5 text-sm">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-gray-100 bg-white px-4 py-2.5 text-sm">
           <span className="text-gray-500">
             Inscripción <b className="text-navy-700">{money(tarifa.base)}</b> (hasta {tarifa.incluye} categorías)
             + <b className="text-navy-700">{money(tarifa.extra)}</b> c/adicional
           </span>
-          <span className="font-semibold text-green-700">Cobrado {money(cobrado)}</span>
-          {enDeuda > 0 && <span className="font-semibold text-amber-600">En deuda {money(enDeuda)}</span>}
-          {sinRegistrar.length > 0 && (
-            <span className="font-semibold text-gray-500">
-              Sin registrar {money(sinRegistrarTotal)} ({sinRegistrar.length})
-            </span>
+          <button onClick={() => toggleFiltroPago('cobrados')} aria-pressed={filtroPago === 'cobrados'}
+            disabled={nCobrados === 0}
+            title="Ver solo los que están al día"
+            className={`rounded-full px-3 py-1 text-xs font-bold transition-colors disabled:opacity-40 ${
+              filtroPago === 'cobrados' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'
+            }`}>
+            ✓ Cobrados ({nCobrados}) {money(cobrado)}
+          </button>
+          <button onClick={() => toggleFiltroPago('deudores')} aria-pressed={filtroPago === 'deudores'}
+            disabled={nDeudores === 0}
+            title="Ver solo los que deben plata"
+            className={`rounded-full px-3 py-1 text-xs font-bold transition-colors disabled:opacity-40 ${
+              filtroPago === 'deudores' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+            }`}>
+            Deben ({nDeudores}) {money(enDeuda)}
+          </button>
+          <button onClick={() => toggleFiltroPago('sin')} aria-pressed={filtroPago === 'sin'}
+            disabled={sinRegistrar.length === 0}
+            title="Ver solo los que no tienen ningún pago registrado"
+            className={`rounded-full px-3 py-1 text-xs font-bold transition-colors disabled:opacity-40 ${
+              filtroPago === 'sin' ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}>
+            Sin registrar ({sinRegistrar.length}) {money(sinRegistrarTotal)}
+          </button>
+          {filtroPago !== 'todos' && (
+            <button onClick={() => setFiltroPago('todos')}
+              className="text-xs font-bold text-gray-400 underline underline-offset-2 hover:text-navy-700">
+              ver todos
+            </button>
           )}
         </div>
       )}
@@ -556,9 +595,13 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
 
       {evt && filas !== null && filas.length > 0 && vista === 'recientes' && (
         <div className="space-y-2">
-          {q !== '' && (
+          {(q !== '' || filtroPago !== 'todos') && (
             <p className="text-xs text-gray-400">
-              {recientesFiltradas.length} de {recientes.length} inscripciones matchean «{busqueda.trim()}»
+              Mostrando {recientesFiltradas.length} de {recientes.length} inscripciones
+              {q !== '' && <> que matchean «{busqueda.trim()}»</>}
+              {filtroPago === 'cobrados' && ' · solo cobrados'}
+              {filtroPago === 'deudores' && ' · solo con deuda'}
+              {filtroPago === 'sin' && ' · solo sin pago registrado'}
             </p>
           )}
           {recientesFiltradas.map(filaPersona)}
