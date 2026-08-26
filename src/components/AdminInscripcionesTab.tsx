@@ -459,18 +459,59 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
-      {/* Alertas de DUPR: jugadores/duplas fuera del tope de su categoría */}
-      {evt && filas !== null && alertas.length > 0 && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <p className="text-xs font-bold uppercase tracking-wide text-red-700">
-              ⚠ Fuera de categoría por DUPR ({alertas.length})
-            </p>
-            <button onClick={() => setTopesAbierto(true)}
-              className="text-[11px] font-bold text-red-700 underline underline-offset-2 hover:text-red-900">
-              revisar límites
-            </button>
+      {/* Panel de cobranza (pedido de Brian): quién debe y cuánto, de un vistazo,
+          con el alta de pago a un toque para los que no registraron nada. */}
+      {evt && tarifa && filas !== null && (nDeudores > 0 || sinRegistrar.length > 0) && (
+        <div className="rounded-2xl border border-amber-200 bg-white p-4">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-amber-700">
+            Por cobrar {money(enDeuda + sinRegistrarTotal)}
+          </p>
+          <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            {activos.filter(i => estadoPagoDe(i) === 'deudores')
+              .sort((a, b) => (b.pagoDeuda ?? 0) - (a.pagoDeuda ?? 0))
+              .map(i => (
+                <div key={i.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate font-semibold text-navy-700">{i.nombre}</span>
+                  <span className="text-[11px] text-gray-400 whitespace-nowrap">pagó {money(i.pagoMonto ?? 0)}</span>
+                  <span className="font-bold tabular-nums text-amber-600 whitespace-nowrap">debe {money(i.pagoDeuda ?? 0)}</span>
+                </div>
+              ))}
+            {[...sinRegistrar]
+              .sort((a, b) => costoInscripcion(categoriasDe(b).length, tarifa) - costoInscripcion(categoriasDe(a).length, tarifa))
+              .map(i => (
+                <div key={i.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate font-semibold text-navy-700">{i.nombre}</span>
+                  <button onClick={() => setPagando(i)}
+                    className="rounded-lg bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700 hover:bg-lime-300">
+                    $ Registrar
+                  </button>
+                  <span className="font-bold tabular-nums text-gray-500 whitespace-nowrap">
+                    a cobrar {money(costoInscripcion(categoriasDe(i).length, tarifa))}
+                  </span>
+                </div>
+              ))}
           </div>
+          <p className="mt-2 text-[11px] text-gray-400">
+            Los «debe» de pago parcial se cobran desde la Caja, sección «Por cobrar».
+          </p>
+        </div>
+      )}
+
+      {/* Alertas de DUPR: jugadores/duplas fuera del tope de su categoría.
+          Replegadas por default (pedido de Brian). */}
+      {evt && filas !== null && alertas.length > 0 && (
+        <details className="group rounded-2xl border border-red-200 bg-red-50">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+            <span className="text-red-400 transition-transform group-open:rotate-90" aria-hidden="true">▸</span>
+            <span className="text-xs font-bold uppercase tracking-wide text-red-700">
+              ⚠ Fuera de categoría por DUPR ({alertas.length})
+            </span>
+          </summary>
+          <div className="px-4 pb-4">
+          <button onClick={() => setTopesAbierto(true)}
+            className="mb-2 text-[11px] font-bold text-red-700 underline underline-offset-2 hover:text-red-900">
+            revisar límites
+          </button>
           <div className="space-y-1">
             {alertas.map((a, i) => (
               <p key={`${a.categoria}-${i}`} className="text-sm text-gray-700">
@@ -482,7 +523,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               </p>
             ))}
           </div>
-        </div>
+          </div>
+        </details>
       )}
 
       {/* Números del torneo (pedido de Brian: jugadores, géneros, más jugada, partidos ≈) */}
@@ -502,9 +544,18 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
         </div>
       )}
 
-      {/* Semáforo de armado, separado por estado (umbral: 4 duplas/jugadores) */}
+      {/* Semáforo de armado, separado por estado (umbral: 4 duplas/jugadores).
+          Replegado por default (pedido de Brian): ocupaba media pantalla. */}
       {evt && filas !== null && filas.length > 0 && (
-        <div className="space-y-3">
+        <details className="group rounded-2xl border border-gray-100 bg-white">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+            <span className="text-gray-400 transition-transform group-open:rotate-90" aria-hidden="true">▸</span>
+            <span className="font-display text-sm font-bold text-navy-700">Armado por categoría</span>
+            <span className="text-xs text-gray-400">
+              {gruposArmado.map(g => `${g.items.length} ${g.titulo.toLowerCase()}`).join(' · ')}
+            </span>
+          </summary>
+          <div className="space-y-3 px-4 pb-4">
           {gruposArmado.map(g => (
             <div key={g.titulo}>
               <p className={`mb-1.5 text-xs font-bold uppercase tracking-wide ${g.clase}`}>
@@ -535,7 +586,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        </details>
       )}
 
       {/* Buscan pareja (con cruces sugeridos) y declarados sin anotarse */}
