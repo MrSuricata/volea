@@ -71,6 +71,11 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
 }) {
   const [filterArea, setFilterArea] = useState<'todas' | SocioMove['area']>('todas');
   const [filterTipo, setFilterTipo] = useState<'todos' | SocioMove['tipo']>('todos');
+  // Orden y rango de fechas de la tabla (pedido de Brian). Antes la tabla
+  // salía en el orden crudo de la DB, con las cuotas futuras arriba.
+  const [ordenFecha, setOrdenFecha] = useState<'desc' | 'asc'>('desc');
+  const [desdeFecha, setDesdeFecha] = useState('');
+  const [hastaFecha, setHastaFecha] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -121,10 +126,24 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
     return (['marca', 'showroom', 'cafeteria', 'crp', 'argentinos', 'otros'] as const).filter(a => presentes.has(a));
   }, [moves]);
 
-  const filtered = useMemo(() => (moves || []).filter(m =>
-    (filterArea === 'todas' || m.area === filterArea) &&
-    (filterTipo === 'todos' || m.tipo === filterTipo)
-  ), [moves, filterArea, filterTipo]);
+  const filtered = useMemo(() => {
+    // Con rango activo, los movimientos sin fecha exacta (solo período) quedan
+    // afuera: no se puede saber si caen dentro.
+    const enRango = (m: SocioMove) => {
+      if (desdeFecha === '' && hastaFecha === '') return true;
+      if (!m.fecha) return false;
+      return (desdeFecha === '' || m.fecha >= desdeFecha) && (hastaFecha === '' || m.fecha <= hastaFecha);
+    };
+    const clave = (m: SocioMove) => m.fecha || m.periodo || '';
+    return (moves || [])
+      .filter(m =>
+        (filterArea === 'todas' || m.area === filterArea) &&
+        (filterTipo === 'todos' || m.tipo === filterTipo) &&
+        enRango(m))
+      .sort((a, b) => ordenFecha === 'desc'
+        ? clave(b).localeCompare(clave(a))
+        : clave(a).localeCompare(clave(b)));
+  }, [moves, filterArea, filterTipo, desdeFecha, hastaFecha, ordenFecha]);
 
   const montoNum = parseFloat(form.monto.replace(',', '.'));
   const montoOk = !isNaN(montoNum) && montoNum > 0;
@@ -391,6 +410,19 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-1.5 bg-white rounded-lg border border-gray-200 px-2.5 py-1.5">
+              <input type="date" value={desdeFecha} onChange={e => setDesdeFecha(e.target.value)}
+                aria-label="Desde fecha" title="Desde"
+                className="text-xs text-gray-600 outline-none bg-transparent" />
+              <span className="text-xs text-gray-300">→</span>
+              <input type="date" value={hastaFecha} onChange={e => setHastaFecha(e.target.value)}
+                aria-label="Hasta fecha" title="Hasta"
+                className="text-xs text-gray-600 outline-none bg-transparent" />
+              {(desdeFecha !== '' || hastaFecha !== '') && (
+                <button onClick={() => { setDesdeFecha(''); setHastaFecha(''); }} aria-label="Limpiar fechas"
+                  className="text-gray-400 hover:text-red-500 text-xs font-bold">✕</button>
+              )}
+            </div>
             <span className="text-xs text-gray-400">{filtered.length} movimiento{filtered.length === 1 ? '' : 's'}</span>
           </div>
 
@@ -400,7 +432,13 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                   <tr>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Cuándo</th>
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">
+                      <button onClick={() => setOrdenFecha(o => (o === 'desc' ? 'asc' : 'desc'))}
+                        title={ordenFecha === 'desc' ? 'Más recientes primero — tocá para invertir' : 'Más viejos primero — tocá para invertir'}
+                        className="inline-flex items-center gap-1 uppercase hover:text-navy-700">
+                        Cuándo <span aria-hidden="true">{ordenFecha === 'desc' ? '↓' : '↑'}</span>
+                      </button>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden sm:table-cell">Área</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Tipo</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Detalle</th>
