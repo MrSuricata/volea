@@ -23,6 +23,7 @@ import { StorageService } from './services/storageService';
 import { SupabaseService } from './services/supabaseService';
 import { isSupabaseConnected, supabaseReady } from './services/supabaseClient';
 import { conLimite } from './utils/arranque';
+import { agruparPorEvento, listarTorneosPublicos, type EventoAgrupado } from './torneos/publico/datos';
 import {
   sendMagicLink,
   signInWithPassword,
@@ -4052,6 +4053,18 @@ function AdminPage() {
   const [panelOculto, setPanelOculto] = useState(false);
   const useSupabaseAuth = isSupabaseConnected();
 
+  // Torneos agrupados por evento para el Dashboard (pedido de Brian: torneos
+  // arriba). Mismo fetch público que /torneos; se carga al entrar al tab.
+  const [eventosDash, setEventosDash] = useState<EventoAgrupado[] | null>(null);
+  useEffect(() => {
+    if (activeTab !== 'dashboard' || eventosDash !== null) return;
+    let vivo = true;
+    void listarTorneosPublicos().then(r => {
+      if (vivo && !r.error) setEventosDash(agruparPorEvento(r.torneos, Date.now()));
+    });
+    return () => { vivo = false; };
+  }, [activeTab, eventosDash]);
+
   // Product modal state
   const [productModal, setProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -4376,38 +4389,56 @@ function AdminPage() {
           <div className="fade-in">
             <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700 mb-6">Dashboard</h1>
 
-            {/* Stock alert banners */}
-            {stockMetrics.outOfStockVariants > 0 && (
-              <button
-                onClick={() => setActiveTab('stock')}
-                className="w-full mb-3 flex items-center gap-3 bg-red-50 hover:bg-red-100 border-l-4 border-red-500 text-red-800 px-4 py-3 rounded-r-lg transition-colors text-left"
-              >
-                <AlertCircle size={20} className="flex-shrink-0" />
-                <div className="flex-1 text-sm">
-                  <strong>{stockMetrics.outOfStockVariants} variantes sin stock.</strong> Ver detalle.
+            {/* Torneos primero (pedido de Brian): una carta por evento real */}
+            <div className="mb-8">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-lg font-bold text-navy-700">Torneos</h2>
+                <a href="#/torneos" className="text-sm font-semibold text-navy-500 hover:text-navy-700">
+                  Ver página pública →
+                </a>
+              </div>
+              {eventosDash === null ? (
+                <p className="text-sm text-gray-400">Cargando torneos…</p>
+              ) : eventosDash.length === 0 ? (
+                <p className="text-sm text-gray-400">Todavía no hay torneos.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {eventosDash.slice(0, 6).map(ev => (
+                    <a
+                      key={ev.nombre}
+                      href="#/torneos"
+                      className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:border-lime-400 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-display font-bold text-navy-700 leading-snug">{ev.nombre}</p>
+                        {ev.enVivo ? (
+                          <span className="flex-shrink-0 rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">EN VIVO</span>
+                        ) : ev.terminado ? (
+                          <span className="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">Terminado</span>
+                        ) : (
+                          <span className="flex-shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-600">Abierto</span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {ev.torneos.length === 1
+                          ? `${ev.torneos[0].parejas.length} ${(ev.torneos[0].formato ?? 'grupos') === 'individual' ? 'jugadores' : 'parejas'}`
+                          : `${ev.torneos.length} categorías`}
+                        {' · '}{new Date(ev.ultimaFecha).toLocaleDateString('es-UY')}
+                      </p>
+                    </a>
+                  ))}
                 </div>
-                <ArrowRight size={18} />
-              </button>
-            )}
-            {stockMetrics.lowStockVariants > 0 && (
-              <button
-                onClick={() => setActiveTab('stock')}
-                className="w-full mb-6 flex items-center gap-3 bg-yellow-50 hover:bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 px-4 py-3 rounded-r-lg transition-colors text-left"
-              >
-                <AlertCircle size={20} className="flex-shrink-0" />
-                <div className="flex-1 text-sm">
-                  <strong>{stockMetrics.lowStockVariants} variantes con stock bajo</strong> (≤ 3 unidades). Reponé pronto.
-                </div>
-                <ArrowRight size={18} />
-              </button>
-            )}
+              )}
+            </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {/* Tienda: métricas en tarjetas, con el stock resumido en una línea
+                (los banners gigantes de antes tapaban todo el dashboard) */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               {[
+                { label: 'Pedidos Pendientes', value: pendingOrders, icon: <Store size={24} />, color: pendingOrders > 0 ? 'bg-yellow-50 text-yellow-600' : 'bg-gray-50 text-gray-400' },
                 { label: 'Productos', value: products.length, icon: <Package size={24} />, color: 'bg-blue-50 text-blue-600' },
                 { label: 'Unidades en Stock', value: stockMetrics.totalUnits, icon: <BarChart3 size={24} />, color: 'bg-green-50 text-green-600' },
-                { label: 'Pedidos Pendientes', value: pendingOrders, icon: <Store size={24} />, color: 'bg-yellow-50 text-yellow-600' },
-                { label: 'Variantes sin Stock', value: stockMetrics.outOfStockVariants, icon: <AlertCircle size={24} />, color: 'bg-red-50 text-red-600' },
+                { label: 'Variantes sin Stock', value: stockMetrics.outOfStockVariants, icon: <AlertCircle size={24} />, color: 'bg-gray-50 text-gray-500' },
               ].map((stat, i) => (
                 <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${stat.color}`}>
@@ -4418,6 +4449,18 @@ function AdminPage() {
                 </div>
               ))}
             </div>
+            {(stockMetrics.outOfStockVariants > 0 || stockMetrics.lowStockVariants > 0) && (
+              <button
+                onClick={() => setActiveTab('stock')}
+                className="w-full mb-8 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-left text-sm text-gray-600 transition-colors hover:border-navy-300"
+              >
+                <AlertCircle size={16} className="flex-shrink-0 text-amber-500" />
+                <span className="flex-1">
+                  Stock: <b>{stockMetrics.outOfStockVariants}</b> variantes sin stock · <b>{stockMetrics.lowStockVariants}</b> con stock bajo
+                </span>
+                <ArrowRight size={16} className="text-gray-400" />
+              </button>
+            )}
             {/* Recent orders */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <h2 className="font-display text-lg font-bold text-navy-700 mb-4">Últimos Pedidos</h2>

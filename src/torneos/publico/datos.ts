@@ -13,7 +13,11 @@ import { CONFIG_PUNTOS_DEFAULT } from '../engine/tipos';
 const MSG_SIN_SERVICIO = 'No se pudo conectar con el servidor. Probá de nuevo en un rato.';
 const TIMEOUT_MS = 8000;
 
-export type ListaTorneosResultado = { torneos: Torneo[]; error: string | null };
+/** Torneo público + metadatos de la fila (no viven en data): evento que agrupa
+ *  categorías de una misma fecha y updated_at para saber si hay actividad real. */
+export type TorneoPublico = Torneo & { evento: string | null; updatedAt: string | null };
+
+export type ListaTorneosResultado = { torneos: TorneoPublico[]; error: string | null };
 export type TorneoResultado = { torneo: Torneo | null; updatedAt: string | null; error: string | null };
 export type JugadoresResultado = { jugadores: Jugador[]; error: string | null };
 
@@ -26,18 +30,22 @@ export type JugadoresResultado = { jugadores: Jugador[]; error: string | null };
 // PC del trabajo de Brian, donde la primera tanda de consultas a veces se queda muda.
 
 async function cargarTorneos(client: SupabaseClient): Promise<ListaTorneosResultado> {
-  const { data: filas, error } = await client.from('rk_torneos').select('id, data, updated_at');
+  const { data: filas, error } = await client.from('rk_torneos').select('id, data, updated_at, evento');
   if (error) {
     console.error('[torneos publico] no se pudo listar torneos', error);
     return { torneos: [], error: MSG_SIN_SERVICIO };
   }
   const torneos = (filas ?? [])
-    .map((f) => f.data as Torneo)
+    .map((f) => {
+      const t = f.data as Torneo | null;
+      if (!t) return null;
+      return { ...t, evento: (f.evento as string | null) ?? null, updatedAt: (f.updated_at as string | null) ?? null };
+    })
     // Filtro endurecido: una fila malformada de rk_torneos (data null, sin id, sin
     // creadoEl para ordenar o sin parejas) se descarta acá y sigue la lista con el
     // resto — antes UNA fila rota alcanzaba para tirar /torneos entera al renderizar.
     .filter(
-      (t): t is Torneo =>
+      (t): t is TorneoPublico =>
         !!t && typeof t.id === 'string' && typeof t.creadoEl === 'string' && Array.isArray(t.parejas),
     );
   return { torneos, error: null };
@@ -50,6 +58,49 @@ export async function listarTorneosPublicos(): Promise<ListaTorneosResultado> {
     () => conLimite(cargarTorneos(sb), TIMEOUT_MS, { torneos: [], error: MSG_SIN_SERVICIO }),
     (r) => r.error !== null,
   );
+}
+
+// ─── Agrupado por evento ─────────────────────────────────────────────────────
+
+const EN_VIVO_MS = 6 * 60 * 60 * 1000;
+
+/** "En vivo" honesto: fase abierta Y actividad en las últimas 6 horas. Una
+ *  categoría que quedó sin cerrar días después del torneo NO está en vivo. */
+export const torneoEnVivo = (t: TorneoPublico, ahoraMs: number): boolean =>
+  t.fase !== 'terminado' && !!t.updatedAt && ahoraMs - new Date(t.updatedAt).getTime() < EN_VIVO_MS;
+
+export type EventoAgrupado = {
+  /** Etiqueta del evento, o el nombre del torneo si no pertenece a ninguno. */
+  nombre: string;
+  torneos: TorneoPublico[];
+  /** true = torneo suelto sin evento: la carta linkea directo a su detalle. */
+  suelto: boolean;
+  enVivo: boolean;
+  terminado: boolean;
+  /** creadoEl más reciente del grupo (ordena la lista de eventos). */
+  ultimaFecha: string;
+};
+
+/** Agrupa las categorías por su evento (columna rk_torneos.evento). Las que no
+ *  tienen evento quedan como carta propia. Más recientes primero. */
+export function agruparPorEvento(torneos: TorneoPublico[], ahoraMs: number): EventoAgrupado[] {
+  const grupos = new Map<string, { nombre: string; suelto: boolean; torneos: TorneoPublico[] }>();
+  for (const t of torneos) {
+    const clave = t.evento ?? `~suelto~${t.id}`;
+    const g = grupos.get(clave);
+    if (g) g.torneos.push(t);
+    else grupos.set(clave, { nombre: t.evento ?? t.nombre, suelto: t.evento === null, torneos: [t] });
+  }
+  return Array.from(grupos.values())
+    .map((g) => ({
+      nombre: g.nombre,
+      suelto: g.suelto && g.torneos.length === 1,
+      torneos: [...g.torneos].sort((a, b) => b.creadoEl.localeCompare(a.creadoEl)),
+      enVivo: g.torneos.some((t) => torneoEnVivo(t, ahoraMs)),
+      terminado: g.torneos.every((t) => t.fase === 'terminado'),
+      ultimaFecha: g.torneos.reduce((m, t) => (t.creadoEl > m ? t.creadoEl : m), ''),
+    }))
+    .sort((a, b) => b.ultimaFecha.localeCompare(a.ultimaFecha));
 }
 
 async function cargarTorneo(client: SupabaseClient, id: string): Promise<TorneoResultado> {
