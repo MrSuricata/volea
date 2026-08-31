@@ -308,3 +308,84 @@ export interface Announcement {
   active: boolean;
   createdAt: string;
 }
+
+// ─── Pedidos a proveedores y trabajos de sublimación ─────────────────────────
+// Una sola entidad para los dos casos: el flujo es el mismo (se pide, se sigue,
+// se recibe y entra a stock). Cambian los campos que se usan.
+export type CompraTipo = 'proveedor' | 'sublimacion';
+export type CompraEstado = 'borrador' | 'pedido' | 'en_proceso' | 'en_camino' | 'recibido' | 'cancelado';
+
+export interface CompraArchivo {
+  nombre: string;
+  url: string;
+}
+
+export interface CompraItem {
+  id: string;
+  compraId: string;
+  /** null = algo que todavía no está en el catálogo; entonces no suma stock. */
+  productId: string | null;
+  descripcion: string;
+  /** Clave de stock_by_size, ej "M / Unisex|Negro". null = no impacta stock. */
+  variante: string | null;
+  cantidad: number;
+  cantidadRecibida: number;
+  costoUnitario: number | null;
+  orden: number;
+}
+
+export interface Compra {
+  id: string;
+  tipo: CompraTipo;
+  proveedor: string;
+  referencia: string;
+  estado: CompraEstado;
+  fechaPedido: string | null;
+  fechaEstimada: string | null;
+  recibidoAt: string | null;
+  notas: string;
+  /** Sublimación: lo que ve el taller. */
+  prendaBase: string;
+  mockupUrl: string;
+  archivos: CompraArchivo[];
+  comentarioTaller: string;
+  creadoPor: string;
+  createdAt: string;
+  updatedAt: string;
+  items: CompraItem[];
+}
+
+/** Lo que se manda al cotejar: cuánto llegó de cada línea. */
+export interface RecepcionItem {
+  itemId: string;
+  recibida: number;
+}
+
+// ─── Tareas del equipo ───────────────────────────────────────────────────────
+export type TareaEstado = 'pendiente' | 'en_curso' | 'hecha';
+export type TareaPrioridad = 'baja' | 'normal' | 'alta';
+
+export interface Tarea {
+  id: string;
+  titulo: string;
+  detalle: string;
+  estado: TareaEstado;
+  prioridad: TareaPrioridad;
+  /** Email del admin asignado; null = sin asignar. */
+  asignadoA: string | null;
+  creadoPor: string;
+  venceEl: string | null;
+  completadaAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Integrante del equipo con acceso al panel. */
+export type RolAdmin = 'owner' | 'admin' | 'sublimacion';
+
+export interface MiembroEquipo {
+  email: string;
+  name: string;
+  role: RolAdmin;
+  activo: boolean;
+}

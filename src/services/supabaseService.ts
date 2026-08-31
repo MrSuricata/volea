@@ -3,7 +3,7 @@ import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
 import type { JugadorPadron } from '../utils/dupr';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -998,4 +998,209 @@ export const SupabaseService = {
     if (!supabase) return;
     await conTechoEscritura(supabase.from('announcements').delete().eq('id', id));
   },
+
+  // ─── Pedidos: proveedores y sublimación ───────────────────────────────────
+  // Se leen con sus líneas en una sola consulta (embed de PostgREST).
+  async getCompras(): Promise<Compra[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('compras').select('*, compra_items(*)').order('created_at', { ascending: false }),
+    );
+    if (error) { console.error('Error fetching compras:', error); return null; }
+    return ((data as Record<string, unknown>[]) || []).map(filaACompra);
+  },
+
+  async saveCompra(c: Compra): Promise<{ ok: boolean; id?: string; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexion' };
+    const fila: Record<string, unknown> = {
+      tipo: c.tipo,
+      proveedor: c.proveedor,
+      referencia: c.referencia || null,
+      estado: c.estado,
+      fecha_pedido: c.fechaPedido || null,
+      fecha_estimada: c.fechaEstimada || null,
+      notas: c.notas || null,
+      prenda_base: c.prendaBase || null,
+      mockup_url: c.mockupUrl || null,
+      archivos: c.archivos ?? [],
+      comentario_taller: c.comentarioTaller || null,
+      creado_por: c.creadoPor || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (c.id) fila.id = c.id;
+
+    const { data, error } = await conTechoEscritura(
+      supabase.from('compras').upsert(fila, { onConflict: 'id' }).select('id').single(),
+    );
+    if (error) { console.error('Error saving compra:', error); return { ok: false, error: error.message }; }
+    const compraId = (data as { id: string } | null)?.id ?? c.id;
+
+    // Las lineas se reemplazan enteras: es un pedido chico y asi no quedan huerfanas.
+    const { error: eDel } = await conTechoEscritura(
+      supabase.from('compra_items').delete().eq('compra_id', compraId),
+    );
+    if (eDel) { console.error('Error limpiando items:', eDel); return { ok: false, error: eDel.message }; }
+
+    if (c.items.length > 0) {
+      const filas = c.items.map((it, i) => ({
+        compra_id: compraId,
+        product_id: it.productId,
+        descripcion: it.descripcion,
+        variante: it.variante,
+        cantidad: it.cantidad,
+        cantidad_recibida: it.cantidadRecibida ?? 0,
+        costo_unitario: it.costoUnitario,
+        orden: i,
+      }));
+      const { error: eIns } = await conTechoEscritura(supabase.from('compra_items').insert(filas));
+      if (eIns) { console.error('Error guardando items:', eIns); return { ok: false, error: eIns.message }; }
+    }
+    return { ok: true, id: compraId };
+  },
+
+  async deleteCompra(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('compras').delete().eq('id', id));
+    if (error) { console.error('Error borrando compra:', error); return false; }
+    return true;
+  },
+
+  /** Cotejo de recepcion: suma al stock solo la diferencia y cierra el pedido si llego todo. */
+  async recibirCompra(compraId: string, items: RecepcionItem[]): Promise<
+    { ok: boolean; estado?: string; unidades?: number; pendientes?: number; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexion' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('recibir_compra', {
+      p_compra_id: compraId,
+      p_items: items.map(i => ({ item_id: i.itemId, recibida: i.recibida })),
+    }));
+    if (error) { console.error('Error recibiendo compra:', error); return { ok: false, error: error.message }; }
+    const r = data as { estado?: string; unidades_a_stock?: number; items_pendientes?: number } | null;
+    return { ok: true, estado: r?.estado, unidades: r?.unidades_a_stock, pendientes: r?.items_pendientes };
+  },
+
+  /** Solo el taller: avanza el estado de su trabajo, sin tocar nada mas. */
+  async sublimacionEstado(compraId: string, estado: 'en_proceso' | 'en_camino'): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(
+      supabase.rpc('sublimacion_estado', { p_compra_id: compraId, p_estado: estado }),
+    );
+    if (error) { console.error('Error actualizando estado:', error); return false; }
+    return true;
+  },
+
+  // ─── Tareas del equipo ────────────────────────────────────────────────────
+  async getTareas(): Promise<Tarea[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('tareas').select('*').order('created_at', { ascending: false }),
+    );
+    if (error) { console.error('Error fetching tareas:', error); return null; }
+    return ((data as Record<string, unknown>[]) || []).map(filaATarea);
+  },
+
+  async saveTarea(t: Tarea): Promise<boolean> {
+    if (!supabase) return false;
+    const fila: Record<string, unknown> = {
+      titulo: t.titulo,
+      detalle: t.detalle || null,
+      estado: t.estado,
+      prioridad: t.prioridad,
+      asignado_a: t.asignadoA || null,
+      creado_por: t.creadoPor || null,
+      vence_el: t.venceEl || null,
+      // La marca de completada la decide el estado, no la UI.
+      completada_at: t.estado === 'hecha' ? (t.completadaAt || new Date().toISOString()) : null,
+      updated_at: new Date().toISOString(),
+    };
+    if (t.id) fila.id = t.id;
+    const { error } = await conTechoEscritura(supabase.from('tareas').upsert(fila, { onConflict: 'id' }));
+    if (error) { console.error('Error guardando tarea:', error); return false; }
+    return true;
+  },
+
+  async deleteTarea(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('tareas').delete().eq('id', id));
+    if (error) { console.error('Error borrando tarea:', error); return false; }
+    return true;
+  },
+
+  // ─── Equipo ───────────────────────────────────────────────────────────────
+  async getEquipo(): Promise<MiembroEquipo[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('admins').select('email, name, role, activo').order('role'),
+    );
+    if (error) { console.error('Error fetching equipo:', error); return null; }
+    return ((data as Record<string, unknown>[]) || []).map(r => ({
+      email: r.email as string,
+      name: (r.name as string) || '',
+      role: (r.role as MiembroEquipo['role']) || 'admin',
+      activo: (r.activo as boolean) ?? true,
+    }));
+  },
+
+  /** Solo el owner (lo impone RLS). Da de alta/baja o cambia el rol. */
+  async saveMiembro(m: MiembroEquipo): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('admins').upsert({
+      email: m.email.toLowerCase().trim(), name: m.name, role: m.role, activo: m.activo,
+    }, { onConflict: 'email' }));
+    if (error) { console.error('Error guardando miembro:', error); return false; }
+    return true;
+  },
 };
+
+
+// ─── Mapeo de filas ──────────────────────────────────────────────────────────
+function filaACompra(row: Record<string, unknown>): Compra {
+  const items = (row.compra_items as Record<string, unknown>[] | null) ?? [];
+  return {
+    id: row.id as string,
+    tipo: (row.tipo as Compra['tipo']) || 'proveedor',
+    proveedor: (row.proveedor as string) || '',
+    referencia: (row.referencia as string) || '',
+    estado: (row.estado as Compra['estado']) || 'borrador',
+    fechaPedido: (row.fecha_pedido as string) ?? null,
+    fechaEstimada: (row.fecha_estimada as string) ?? null,
+    recibidoAt: (row.recibido_at as string) ?? null,
+    notas: (row.notas as string) || '',
+    prendaBase: (row.prenda_base as string) || '',
+    mockupUrl: (row.mockup_url as string) || '',
+    archivos: Array.isArray(row.archivos) ? (row.archivos as CompraArchivo[]) : [],
+    comentarioTaller: (row.comentario_taller as string) || '',
+    creadoPor: (row.creado_por as string) || '',
+    createdAt: (row.created_at as string) || '',
+    updatedAt: (row.updated_at as string) || '',
+    items: items
+      .map((it): CompraItem => ({
+        id: it.id as string,
+        compraId: it.compra_id as string,
+        productId: (it.product_id as string) ?? null,
+        descripcion: (it.descripcion as string) || '',
+        variante: (it.variante as string) ?? null,
+        cantidad: Number(it.cantidad) || 0,
+        cantidadRecibida: Number(it.cantidad_recibida) || 0,
+        costoUnitario: it.costo_unitario !== null && it.costo_unitario !== undefined
+          ? Number(it.costo_unitario) : null,
+        orden: Number(it.orden) || 0,
+      }))
+      .sort((a, b) => a.orden - b.orden),
+  };
+}
+
+function filaATarea(row: Record<string, unknown>): Tarea {
+  return {
+    id: row.id as string,
+    titulo: (row.titulo as string) || '',
+    detalle: (row.detalle as string) || '',
+    estado: (row.estado as Tarea['estado']) || 'pendiente',
+    prioridad: (row.prioridad as Tarea['prioridad']) || 'normal',
+    asignadoA: (row.asignado_a as string) ?? null,
+    creadoPor: (row.creado_por as string) || '',
+    venceEl: (row.vence_el as string) ?? null,
+    completadaAt: (row.completada_at as string) ?? null,
+    createdAt: (row.created_at as string) || '',
+    updatedAt: (row.updated_at as string) || '',
+  };
+}

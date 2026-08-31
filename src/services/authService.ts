@@ -5,7 +5,8 @@ import { tokenVencido } from '../utils/sesion';
 export interface AdminUser {
   email: string;
   name: string | null;
-  role: 'owner' | 'admin';
+  /** 'sublimacion' es el taller externo: entra al panel propio, no al admin. */
+  role: 'owner' | 'admin' | 'sublimacion';
 }
 
 /**
@@ -122,12 +123,16 @@ export async function getCurrentAdmin(): Promise<AdminUser | null> {
 
   const { data, error } = await supabase
     .from('admins')
-    .select('email, name, role')
+    .select('email, name, role, activo')
     .eq('email', email)
     .maybeSingle();
 
   if (error || !data) return null;
-  return data as AdminUser;
+  // Quien perdio el acceso conserva su cuenta pero no entra: el registro queda
+  // para el historial y se le puede devolver el acceso sin recrearlo.
+  if ((data as { activo?: boolean }).activo === false) return null;
+  const { email: mail, name, role } = data as { email: string; name: string | null; role: AdminUser['role'] };
+  return { email: mail, name, role };
 }
 
 /**

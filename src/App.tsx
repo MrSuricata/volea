@@ -8,7 +8,8 @@ import {
   Users, BarChart3, Tag, ArrowRight, Heart, Shield, Zap, Trophy, Eye, Filter,
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
-  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList, UserRound
+  Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList, UserRound,
+  Truck, ListChecks, UserCog,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
@@ -81,6 +82,10 @@ const AdminCajaTab = lazyConRecarga(() =>
 );
 const AdminInscripcionesTab = lazyConRecarga(() => import('./components/AdminInscripcionesTab'));
 const AdminJugadoresTab = lazyConRecarga(() => import('./components/AdminJugadoresTab'));
+const AdminPedidosTab = lazyConRecarga(() => import('./components/AdminPedidosTab'));
+const AdminTareasTab = lazyConRecarga(() => import('./components/AdminTareasTab'));
+const AdminEquipoTab = lazyConRecarga(() => import('./components/AdminEquipoTab'));
+const SublimacionPanel = lazyConRecarga(() => import('./components/SublimacionPanel'));
 const AdminSociosTab = lazyConRecarga(() =>
   import('./components/AdminSociosTab').then((m) => ({ default: m.AdminSociosTab })),
 );
@@ -4049,6 +4054,10 @@ function AdminPage() {
     return 'dashboard';
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Un solo grupo abierto por vez: es lo que mantiene corta la barra.
+  const [grupoAbierto, setGrupoAbierto] = useState<string | null>(null);
+  const [buscarSeccion, setBuscarSeccion] = useState('');
+  const [tareasPendientes, setTareasPendientes] = useState(0);
   // Modo transmisión: esconde la columna del admin en desktop (streaming en vivo).
   const [panelOculto, setPanelOculto] = useState(false);
   const useSupabaseAuth = isSupabaseConnected();
@@ -4081,6 +4090,16 @@ function AdminPage() {
   // el botón de la tabla de Eventos.
   const [inscNuevas, setInscNuevas] = useState(0);
   const [inscEventoAtajo, setInscEventoAtajo] = useState<string | null>(null);
+  // Aviso de tareas sin terminar, para el numero de la barra.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let vivo = true;
+    void SupabaseService.getTareas().then(ts => {
+      if (vivo && ts) setTareasPendientes(ts.filter(t => t.estado !== 'hecha').length);
+    });
+    return () => { vivo = false; };
+  }, [isAdmin, activeTab]);
+
   useEffect(() => {
     if (!isAdmin) return;
     let vivo = true;
@@ -4268,29 +4287,97 @@ function AdminPage() {
     );
   }
 
+  // El taller de sublimacion tiene su propia app: entra aca y no ve el panel.
+  // La base ademas no le devuelve nada mas que sus trabajos (RLS), asi que esto
+  // es comodidad de navegacion, no la barrera de seguridad.
+  if (currentAdmin?.role === 'sublimacion') {
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-navy-500">Cargando…</div>}>
+        <SublimacionPanel nombre={currentAdmin.name || 'Taller'} onSalir={logout} />
+      </Suspense>
+    );
+  }
+
   // Stats
   const pendingOrders = orders.filter(o => o.status === 'pending').length;
   const totalRevenue = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + o.total, 0);
   const outOfStock = products.filter(p => getTotalStock(p) === 0).length;
 
-  const tabs = [
+  // La barra tenia 19 entradas planas y encontrar algo costaba leerlas todas.
+  // Ahora: lo de todos los dias fijo arriba, y el resto en cinco mundos que se
+  // abren de a uno. Caja y Tareas aparecen en los dos lados a proposito (atajo
+  // arriba, lugar conceptual adentro del grupo).
+  const tabsFijos = [
     { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={18} /> },
-    { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={18} /> },
-    { id: 'products', label: 'Productos', icon: <Package size={18} /> },
-    { id: 'orders', label: 'Pedidos', icon: <Store size={18} /> },
-    { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={18} /> },
-    { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={18} /> },
     { id: 'caja', label: 'Caja', icon: <Wallet size={18} /> },
-    { id: 'socios', label: 'Socios', icon: <Users size={18} /> },
-    { id: 'blog', label: 'Blog', icon: <Newspaper size={18} /> },
-    { id: 'galeria', label: 'Galería', icon: <Images size={18} /> },
-    { id: 'standings', label: 'Clasificación', icon: <Trophy size={18} /> },
-    { id: 'events', label: 'Eventos', icon: <CalendarDays size={18} /> },
-    { id: 'categories', label: 'Categorías', icon: <Tag size={18} /> },
-    { id: 'clubs', label: 'Clubes', icon: <Map size={18} /> },
-    { id: 'announcements', label: 'Anuncios', icon: <Megaphone size={18} /> },
-    { id: 'torneos', label: 'Torneos', icon: <Trophy size={18} /> },
+    { id: 'tareas', label: 'Tareas', icon: <ListChecks size={18} /> },
   ];
+
+  const gruposTabs = [
+    {
+      id: 'g-tienda', label: 'Tienda', icon: <Store size={18} />,
+      items: [
+        { id: 'products', label: 'Productos', icon: <Package size={16} /> },
+        { id: 'stock', label: 'Stock & Alertas', icon: <AlertCircle size={16} /> },
+        // 'Pedidos' son los de clientes; 'Compras' las que hacemos nosotros.
+        { id: 'orders', label: 'Pedidos', icon: <Store size={16} /> },
+        { id: 'compras', label: 'Compras', icon: <Truck size={16} /> },
+        { id: 'categories', label: 'Categorías', icon: <Tag size={16} /> },
+      ],
+    },
+    {
+      id: 'g-torneos', label: 'Torneos', icon: <Trophy size={18} />,
+      items: [
+        { id: 'torneos', label: 'Torneos', icon: <Trophy size={16} /> },
+        { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
+        { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
+        { id: 'events', label: 'Eventos', icon: <CalendarDays size={16} /> },
+        { id: 'standings', label: 'Clasificación', icon: <Trophy size={16} /> },
+      ],
+    },
+    {
+      id: 'g-plata', label: 'Plata', icon: <Wallet size={18} />,
+      items: [
+        { id: 'caja', label: 'Caja', icon: <Wallet size={16} /> },
+        { id: 'socios', label: 'Socios', icon: <Users size={16} /> },
+      ],
+    },
+    {
+      id: 'g-web', label: 'Web', icon: <Globe size={18} />,
+      items: [
+        { id: 'blog', label: 'Blog', icon: <Newspaper size={16} /> },
+        { id: 'galeria', label: 'Galería', icon: <Images size={16} /> },
+        { id: 'announcements', label: 'Anuncios', icon: <Megaphone size={16} /> },
+        { id: 'clubs', label: 'Clubes', icon: <Map size={16} /> },
+      ],
+    },
+    {
+      id: 'g-equipo', label: 'Equipo', icon: <Users size={18} />,
+      items: [
+        { id: 'tareas', label: 'Tareas', icon: <ListChecks size={16} /> },
+        // Quien entra al panel lo decide solo el dueno del proyecto.
+        ...(currentAdmin?.role === 'owner'
+          ? [{ id: 'equipo', label: 'Accesos', icon: <UserCog size={16} /> }]
+          : []),
+      ],
+    },
+  ];
+
+  // Cuantos avisos lleva cada seccion: la barra dice donde hay algo esperando.
+  const avisosPorTab: Record<string, number> = {
+    inscripciones: inscNuevas,
+    orders: pendingOrders,
+    tareas: tareasPendientes,
+  };
+  const avisosDelGrupo = (g: typeof gruposTabs[number]) =>
+    g.items.reduce((n, it) => n + (avisosPorTab[it.id] || 0), 0);
+
+  const q = buscarSeccion.trim().toLowerCase();
+  const resultados = q === ''
+    ? []
+    : [...tabsFijos, ...gruposTabs.flatMap(g => g.items)]
+        .filter((it, i, arr) => arr.findIndex(x => x.id === it.id) === i)
+        .filter(it => it.label.toLowerCase().includes(q));
 
   // Stock metrics (nativo: calculado desde los productos de Supabase)
   const stockMetrics = (() => {
@@ -4327,24 +4414,100 @@ function AdminPage() {
           </button>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => { setActiveTab(tab.id); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-display text-sm font-semibold transition-colors ${
-                activeTab === tab.id
+          {(() => {
+            const irA = (id: string) => { setActiveTab(id); setSidebarOpen(false); setBuscarSeccion(''); };
+            const claseItem = (id: string, chico = false) =>
+              `w-full flex items-center gap-3 ${chico ? 'px-3 py-2 text-[13px]' : 'px-4 py-3 text-sm'} rounded-lg font-display font-semibold transition-colors ${
+                activeTab === id
                   ? 'text-lime-400 bg-navy-700 border-l-4 border-lime-400'
                   : 'text-gray-300 hover:text-white hover:bg-navy-700'
-              }`}
-            >
-              {tab.icon} {tab.label}
-              {tab.id === 'inscripciones' && inscNuevas > 0 && (
-                <span className="ml-auto rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">
-                  {inscNuevas}
-                </span>
-              )}
-            </button>
-          ))}
+              }`;
+            const Aviso = ({ n }: { n: number }) => n > 0 ? (
+              <span className="ml-auto rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">{n}</span>
+            ) : null;
+
+            return (
+              <>
+                <div className="px-1 pb-3">
+                  <div className="flex items-center gap-2 rounded-lg border border-navy-600 bg-navy-700/60 px-3 py-2">
+                    <Search size={15} className="flex-shrink-0 text-gray-400" />
+                    <input
+                      type="text"
+                      value={buscarSeccion}
+                      onChange={e => setBuscarSeccion(e.target.value)}
+                      placeholder="Buscar sección…"
+                      aria-label="Buscar sección del panel"
+                      className="w-full min-w-0 bg-transparent text-sm text-white placeholder:text-gray-400 outline-none"
+                    />
+                    {buscarSeccion !== '' && (
+                      <button onClick={() => setBuscarSeccion('')} aria-label="Limpiar búsqueda"
+                        className="flex-shrink-0 text-gray-400 hover:text-white">✕</button>
+                    )}
+                  </div>
+                </div>
+
+                {q !== '' ? (
+                  resultados.length === 0 ? (
+                    <p className="px-4 py-3 text-sm text-gray-400">Nada con «{buscarSeccion.trim()}»</p>
+                  ) : (
+                    resultados.map(it => (
+                      <button key={it.id} onClick={() => irA(it.id)} className={claseItem(it.id)}>
+                        {it.icon} {it.label}
+                        <Aviso n={avisosPorTab[it.id] || 0} />
+                      </button>
+                    ))
+                  )
+                ) : (
+                  <>
+                    <div className="mb-2 space-y-1 border-b border-navy-600 pb-2">
+                      {tabsFijos.map(t => (
+                        <button key={t.id} onClick={() => irA(t.id)} className={claseItem(t.id)}>
+                          {t.icon} {t.label}
+                          <Aviso n={avisosPorTab[t.id] || 0} />
+                        </button>
+                      ))}
+                    </div>
+
+                    {gruposTabs.map(g => {
+                      const tieneActivo = g.items.some(it => it.id === activeTab);
+                      const abierto = grupoAbierto === g.id || (grupoAbierto === null && tieneActivo);
+                      const avisos = avisosDelGrupo(g);
+                      return (
+                        <div key={g.id}>
+                          <button
+                            onClick={() => setGrupoAbierto(abierto ? '' : g.id)}
+                            aria-expanded={abierto}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg font-display text-[13px] font-bold uppercase tracking-wide transition-colors ${
+                              abierto ? 'text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-navy-700'
+                            }`}
+                          >
+                            {g.icon} {g.label}
+                            {!abierto && avisos > 0 && (
+                              <span className="ml-auto rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold text-navy-700">{avisos}</span>
+                            )}
+                            <ChevronRight
+                              size={15}
+                              className={`${!abierto && avisos > 0 ? 'ml-1.5' : 'ml-auto'} transition-transform ${abierto ? 'rotate-90' : ''}`}
+                            />
+                          </button>
+                          {abierto && (
+                            <div className="ml-6 space-y-0.5 border-l border-navy-600 pb-1.5 pl-2">
+                              {g.items.map(it => (
+                                <button key={g.id + it.id} onClick={() => irA(it.id)} className={claseItem(it.id, true)}>
+                                  {it.icon} {it.label}
+                                  <Aviso n={avisosPorTab[it.id] || 0} />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </nav>
         <div className="p-4 border-t border-navy-600 space-y-1">
           <button
@@ -4381,7 +4544,7 @@ function AdminPage() {
           <button onClick={() => setSidebarOpen(true)} className="text-navy-700 hover:text-lime-500">
             <Menu size={24} />
           </button>
-          <h1 className="font-display text-xl font-bold text-navy-700">{tabs.find(t => t.id === activeTab)?.label}</h1>
+          <h1 className="font-display text-xl font-bold text-navy-700">{[...tabsFijos, ...gruposTabs.flatMap(g => g.items)].find(t => t.id === activeTab)?.label}</h1>
         </div>
 
         {/* Dashboard */}
@@ -5153,6 +5316,34 @@ function AdminPage() {
           <div className="fade-in">
             <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando gestor de torneos…</div>}>
               <AdminTorneosTab avisar={avisarTorneos} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 'compras' && (
+          <div className="fade-in">
+            <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando compras…</div>}>
+              <AdminPedidosTab
+                products={products}
+                adminEmail={currentAdmin?.email || ''}
+                onStockChanged={refreshProducts}
+              />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 'tareas' && (
+          <div className="fade-in">
+            <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando tareas…</div>}>
+              <AdminTareasTab adminEmail={currentAdmin?.email || ''} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 'equipo' && currentAdmin?.role === 'owner' && (
+          <div className="fade-in">
+            <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando equipo…</div>}>
+              <AdminEquipoTab miEmail={currentAdmin.email} />
             </Suspense>
           </div>
         )}
