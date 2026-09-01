@@ -296,6 +296,7 @@ CREATE POLICY gallery_admin_write ON public.gallery_albums FOR ALL USING (public
 -- ============================================
 -- v7 (2026-08-09): Nueva venta / Gasto desde la Caja web
 -- ============================================
+-- ⚠️ v14: el guard de estas RPCs cambió de is_admin() a es_equipo().
 -- Migración "caja_web_registrar" aplicada en el proyecto volea-web.
 -- Dos RPCs para que el admin web registre ventas y gastos con la MISMA
 -- semántica que bot_do_register (el bot de Telegram): descuento atómico de
@@ -446,6 +447,7 @@ GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text, text
 -- ============================================
 -- v8 (2026-08-09): Cobro de deudas desde la Caja web
 -- ============================================
+-- ⚠️ v14: el guard de admin_cobrar_deudor cambió de is_admin() a es_equipo().
 -- Migraciones "caja_web_cobrar_deudor" + "caja_web_cobrar_parcial" +
 -- "caja_web_cobrar_drop_v1" aplicadas en volea-web.
 -- admin_cobrar_deudor(p_debtor, p_method, p_monto DEFAULT NULL):
@@ -676,3 +678,179 @@ CREATE POLICY admins_owner_gestiona ON public.admins
 -- Nota de orden: is_admin() (v3, más arriba) sigue existiendo y la usan events,
 -- clubs, announcements, orders e inscripciones. Es a propósito más laxa —
 -- "¿está en la allowlist?" — y por eso NO sirve para la plata: ahí va es_equipo().
+
+-- ============================================
+-- v14 (2026-09-01): La plata solo para el equipo — migración de seguridad
+-- ============================================
+-- Migración "cerrar_caja_y_socios_a_es_equipo" aplicada en volea-web tras una
+-- auditoría adversarial (5 agentes, hallazgos confirmados contra el catálogo).
+-- Tres agujeros cerrados:
+--
+-- (1) sublimacion@volea.uy pasaba is_admin(): leía bot_ledger, podía
+--     insertar/borrar socio_moves y ejecutar las 8 RPCs de plata (liquidar
+--     caja, revertir movimientos, registrar ventas/gastos, cobrar deudores).
+-- (2) bot_pick_variant tenía EXECUTE para anon SIN guard interno; encadenaba
+--     como owner hasta bot_do_register: un anónimo podía insertar ventas y
+--     gastos en la caja y tocar stock salteando el secreto del bot y la
+--     allowlist bot_users. El único caller legítimo es bot_handle (interno).
+-- (3) TRUNCATE (que NO pasa por RLS) estaba grantado a anon y authenticated
+--     en las tablas de plata — y "authenticated" no es rol de confianza acá:
+--     conviven otros sitios en el proyecto y hay usuarios auth fuera de la
+--     allowlist de admins.
+--
+-- Qué cambió:
+--   · is_admin() e is_admin_email(): ahora exigen activo=true (antes la baja
+--     lógica no cortaba nada por esta vía). Siguen siendo la allowlist LAXA
+--     (no miran role) para lo no-monetario: products, events, orders, etc.
+--   · Guard is_admin() -> es_equipo() en: admin_registrar_venta,
+--     admin_registrar_gasto, admin_cobrar_deudor, admin_liquidar_caja,
+--     admin_revert_ledger, admin_pago_inscripcion, admin_vincular_deudor,
+--     admin_set_dupr_ids. (Cuerpos intactos: regenerados desde
+--     pg_get_functiondef con solo el guard reemplazado.)
+--   · Policies renombradas al cambiar el guard:
+--       bot_ledger:  ledger_admin_read -> ledger_equipo_read
+--       socio_moves: socio_moves_admin_select/insert/delete -> socio_moves_equipo_*
+--     socio_moves sigue SIN policy de UPDATE a propósito (se anula y recrea,
+--     no se edita).
+--   · REVOKE TRUNCATE a anon+authenticated y REVOKE INSERT/UPDATE/DELETE a
+--     anon en bot_ledger, socio_moves y gastos_pendientes.
+--   · REVOKE ALL sobre bot_pick_variant a PUBLIC/anon/authenticated (queda
+--     como el resto de la familia bot_*: solo owner/service_role; bot_handle
+--     la sigue llamando internamente sin problema).
+--   · search_path = pg_catalog, public parejo en admin_revert_ledger,
+--     admin_liquidar_caja, mi_rol, es_equipo y es_owner (regla del v6).
+--
+-- Verificado post-migración contra el catálogo: 8/8 RPCs con guard es_equipo
+-- y search_path parejo; bot_pick_variant anon=false auth=false; policies
+-- nuevas con es_equipo(); TRUNCATE fuera y anon sin DML en las 3 tablas de
+-- plata. Chequeo de rotura previo (código + n8n): sublimación solo usa
+-- compras/compra_items/sublimacion_estado; el bot de n8n llama SOLO
+-- bot_handle con p_secret; el webhook MP usa service_role.
+--
+-- Deuda conocida que v14 NO toca (decisión pendiente de Brian): sublimacion
+-- sigue pasando is_admin() en las policies no-monetarias (products, orders,
+-- events, inscripciones, rk_*, standings, gallery, storage product-images).
+-- Si el taller solo debe ver su sector, eso es otra migración.
+
+-- ============================================
+-- Tablas que faltaban documentar (DDL real del catálogo, 01/09/2026)
+-- ============================================
+
+-- La CAJA: cada venta y gasto de VOLEA. Escriben solo las RPC SECURITY DEFINER
+-- (admin_* desde la web, bot_do_register desde Telegram vía bot_handle);
+-- por tabla directa solo lee el equipo (ledger_equipo_read).
+CREATE TABLE IF NOT EXISTS public.bot_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind TEXT NOT NULL CHECK (kind IN ('venta', 'gasto')),
+  product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+  variant_key TEXT,
+  label TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+  amount NUMERIC NOT NULL,
+  reported_by TEXT NOT NULL,
+  chat_id BIGINT NOT NULL,           -- 0 = vino de la web; si no, chat de Telegram
+  reverted BOOLEAN NOT NULL DEFAULT FALSE,  -- anulado: nunca se borra, se marca
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  payment_method TEXT CHECK (payment_method IN ('mp', 'efectivo', 'transferencia', 'debe')),
+  debtor_name TEXT,                  -- si payment_method='debe', quién debe
+  settled_at TIMESTAMPTZ,            -- cuándo se cobró la deuda
+  settled_method TEXT CHECK (settled_method IN ('mp', 'efectivo', 'transferencia')),
+  socio_settled_at TIMESTAMPTZ,      -- cuándo se liquidó a socios (admin_liquidar_caja)
+  paid_by TEXT CHECK (paid_by IS NULL OR paid_by IN ('brian', 'paula', 'gaston')),  -- v9: quién puso la plata
+  jugador_id TEXT REFERENCES rk_jugadores(id) ON DELETE SET NULL
+);
+
+-- El REPARTO entre socios (Brian 50 / Paula 25 / Gastón 25). Cada fila cierra
+-- en cero por diseño (socio_moves_cero). Sin policy UPDATE a propósito.
+CREATE TABLE IF NOT EXISTS public.socio_moves (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  area TEXT NOT NULL CHECK (area IN ('marca', 'showroom', 'cafeteria', 'crp', 'argentinos', 'otros')),
+  tipo TEXT NOT NULL CHECK (tipo IN ('gasto', 'pago', 'venta', 'ajuste')),
+  periodo TEXT,
+  fecha DATE,
+  descripcion TEXT NOT NULL,
+  monto NUMERIC NOT NULL CHECK (monto >= 0),
+  pagador TEXT CHECK (pagador IN ('brian', 'paula', 'gaston')),
+  de TEXT CHECK (de IN ('brian', 'paula', 'gaston')),
+  para TEXT CHECK (para IN ('brian', 'paula', 'gaston')),
+  moneda TEXT NOT NULL DEFAULT 'UYU' CHECK (moneda IN ('UYU', 'ARS')),
+  imp_brian NUMERIC NOT NULL,
+  imp_paula NUMERIC NOT NULL,
+  imp_gaston NUMERIC NOT NULL,
+  source TEXT NOT NULL DEFAULT 'web',
+  orden INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  cuota_grupo TEXT,
+  CONSTRAINT socio_moves_cero CHECK (abs(imp_brian + imp_paula + imp_gaston) < 0.05)
+);
+
+-- Compras a proveedor y encargos al taller de sublimación. RLS: compras_equipo
+-- (ALL, es_equipo) + compras_sublimacion_lee (SELECT solo tipo='sublimacion'
+-- no-borrador para mi_rol()='sublimacion'). Ídem compra_items vía su compra.
+CREATE TABLE IF NOT EXISTS public.compras (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tipo TEXT NOT NULL DEFAULT 'proveedor' CHECK (tipo IN ('proveedor', 'sublimacion')),
+  proveedor TEXT NOT NULL,
+  referencia TEXT,
+  estado TEXT NOT NULL DEFAULT 'borrador'
+    CHECK (estado IN ('borrador', 'pedido', 'en_proceso', 'en_camino', 'recibido', 'cancelado')),
+  fecha_pedido DATE DEFAULT CURRENT_DATE,
+  fecha_estimada DATE,
+  recibido_at TIMESTAMPTZ,
+  notas TEXT,
+  prenda_base TEXT,
+  mockup_url TEXT,
+  archivos JSONB NOT NULL DEFAULT '[]'::jsonb,
+  comentario_taller TEXT,
+  creado_por TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.compra_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  compra_id UUID NOT NULL REFERENCES compras(id) ON DELETE CASCADE,
+  product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+  descripcion TEXT NOT NULL,
+  variante TEXT,
+  cantidad INTEGER NOT NULL DEFAULT 1 CHECK (cantidad > 0),
+  cantidad_recibida INTEGER NOT NULL DEFAULT 0 CHECK (cantidad_recibida >= 0),
+  costo_unitario NUMERIC,
+  orden INTEGER NOT NULL DEFAULT 0
+);
+
+-- Tareas internas del equipo. RLS: tareas_equipo (ALL, es_equipo).
+CREATE TABLE IF NOT EXISTS public.tareas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  titulo TEXT NOT NULL,
+  detalle TEXT,
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'en_curso', 'hecha')),
+  prioridad TEXT NOT NULL DEFAULT 'normal' CHECK (prioridad IN ('baja', 'normal', 'alta')),
+  asignado_a TEXT,
+  creado_por TEXT,
+  vence_el DATE,
+  completada_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Infraestructura del bot de Telegram. Las 4 con RLS habilitado y CERO
+-- policies A PROPÓSITO: deny-all, solo las toca bot_handle/service_role.
+CREATE TABLE IF NOT EXISTS public.bot_config (
+  key TEXT PRIMARY KEY,   -- p.ej. el secreto que valida bot_handle
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public.bot_users (   -- allowlist de chats registrados
+  chat_id BIGINT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.bot_pending ( -- conversación a medias por chat
+  chat_id BIGINT PRIMARY KEY,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.bot_seen (    -- dedup de updates de Telegram
+  update_id BIGINT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
