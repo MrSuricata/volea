@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt, Trash2 } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput } from '../types';
+import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput, GastoPendiente, GastoPendienteInput } from '../types';
 import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
@@ -25,6 +25,40 @@ const formatFechaCorta = (iso: string) => {
 /** Día calendario (YYYY-MM-DD) de un instante, visto desde Montevideo. */
 const dayInMontevideo = (date: Date) =>
   date.toLocaleDateString('en-CA', { timeZone: TZ });
+
+/**
+ * "5/9" a partir de un YYYY-MM-DD. Se parte el string a mano en vez de usar
+ * new Date(ymd): eso lo lee como UTC y en Montevideo (UTC-3) muestra el día
+ * anterior — un vencimiento del 1 aparecería como 31.
+ */
+const formatDia = (ymd: string) => {
+  const [, m, d] = ymd.split('-');
+  return `${Number(d)}/${Number(m)}`;
+};
+
+type EstadoVenc = 'vencido' | 'hoy' | 'proximo' | 'sinFecha';
+
+/** Compara strings YYYY-MM-DD, que ordenan igual que las fechas. */
+const estadoVencimiento = (venceEl: string | null, hoy: string): EstadoVenc => {
+  if (!venceEl) return 'sinFecha';
+  if (venceEl < hoy) return 'vencido';
+  if (venceEl === hoy) return 'hoy';
+  return 'proximo';
+};
+
+const TEXTO_VENC: Record<EstadoVenc, (v: string) => string> = {
+  vencido: v => `Venció el ${formatDia(v)}`,
+  hoy: () => 'Vence hoy',
+  proximo: v => `Vence el ${formatDia(v)}`,
+  sinFecha: () => 'Sin fecha de vencimiento',
+};
+
+const ESTILO_VENC: Record<EstadoVenc, { borde: string; texto: string; chip: string }> = {
+  vencido: { borde: 'border-red-200', texto: 'text-red-600', chip: 'bg-red-100 text-red-600' },
+  hoy: { borde: 'border-amber-200', texto: 'text-amber-700', chip: 'bg-amber-100 text-amber-700' },
+  proximo: { borde: 'border-gray-200', texto: 'text-gray-400', chip: 'bg-gray-100 text-gray-500' },
+  sinFecha: { borde: 'border-gray-200', texto: 'text-gray-400', chip: 'bg-gray-100 text-gray-500' },
+};
 
 type PeriodFilter = 'hoy' | '7d' | '30d' | 'todo';
 type KindFilter = 'todos' | 'venta' | 'gasto';
@@ -67,7 +101,7 @@ const METODOS_VENTA: { id: VentaCajaInput['payment']; label: string; activo: str
   { id: 'debe', label: 'Debe', activo: 'border-amber-300 bg-amber-50 text-amber-700' },
 ];
 
-export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, socioSugerido, cobrarDeudor }: {
+export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, socioSugerido, cobrarDeudor, loadGastosPendientes, saveGastoPendiente, pagarGastoPendiente, deleteGastoPendiente }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   revertEntry: (id: string) => Promise<{ ok: boolean; stockRestored: boolean; error?: string }>;
@@ -78,6 +112,11 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   /** Socio deducido del admin logueado; null con la cuenta compartida. */
   socioSugerido: SocioName | null;
   cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  /** Gastos que hay que pagar y todavía no salieron de la caja. */
+  loadGastosPendientes: () => Promise<GastoPendiente[] | null>;
+  saveGastoPendiente: (g: GastoPendienteInput) => Promise<{ ok: boolean; error?: string }>;
+  pagarGastoPendiente: (id: string, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  deleteGastoPendiente: (id: string) => Promise<boolean>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +136,10 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [exporting, setExporting] = useState(false);
   const [ventaAbierta, setVentaAbierta] = useState(false);
   const [gastoAbierto, setGastoAbierto] = useState(false);
+  // Gastos pendientes. 'nuevo' abre el modal en blanco; un objeto, en edición.
+  const [pendientes, setPendientes] = useState<GastoPendiente[]>([]);
+  const [pendienteEdit, setPendienteEdit] = useState<GastoPendiente | 'nuevo' | null>(null);
+  const [pendienteAPagar, setPendienteAPagar] = useState<GastoPendiente | null>(null);
 
   // Padrón de jugadores: sugiere el comprador sin duplicar nombres ("Hernán" ≠
   // "Hernan") y permite VINCULAR la venta al jugador (id), que es lo que
@@ -116,8 +159,13 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const refresh = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
-    const data = await loadLedger();
+    // Los pendientes viajan con la caja: casi todo lo que los cambia (pagar un
+    // gasto) toca las dos cosas, y separar los fetches deja la pantalla incoherente.
+    const [data, pend] = await Promise.all([loadLedger(), loadGastosPendientes()]);
     if (seq !== fetchSeq.current) return; // llegó tarde: ya hay un fetch más nuevo
+    // null = falló la lectura: se deja la lista anterior en vez de vaciarla, que
+    // sería decir "no hay nada que pagar" sin saberlo.
+    if (pend !== null) setPendientes(pend);
     if (data === null) {
       setLoadFailed(true);
       toast.error('No se pudo cargar la caja. Verificá tu sesión de admin.');
@@ -127,7 +175,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     }
     setLoading(false);
     setCargandoInicial(false);
-  }, [loadLedger]);
+  }, [loadLedger, loadGastosPendientes]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -222,6 +270,33 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     return { total, count, deudores };
   }, [entries]);
 
+  // Lo que falta pagar. Ordenado por vencimiento (los sin fecha al final) para
+  // que lo urgente quede arriba sin tener que leer todo.
+  const porPagar = useMemo(() => {
+    const hoy = dayInMontevideo(new Date());
+    const abiertos = pendientes.filter(g => g.pagadoAt === null);
+    let total = 0, vencidos = 0;
+    for (const g of abiertos) {
+      total += g.amount;
+      if (g.venceEl && g.venceEl < hoy) vencidos++;
+    }
+    abiertos.sort((a, b) => {
+      if (a.venceEl && b.venceEl) return a.venceEl.localeCompare(b.venceEl);
+      if (a.venceEl) return -1;
+      if (b.venceEl) return 1;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+    return { abiertos, total, vencidos, hoy };
+  }, [pendientes]);
+
+  const handleBorrarPendiente = async (g: GastoPendiente) => {
+    const ok = await deleteGastoPendiente(g.id);
+    if (!ok) { toast.error('No se pudo borrar el gasto'); return; }
+    toast.success('Gasto pendiente borrado');
+    setPendienteEdit(null);
+    refresh();
+  };
+
   const handleRevert = async (entry: LedgerEntry) => {
     if (reverting) return; // ya hay una anulación en curso
     setReverting(entry.id);
@@ -279,6 +354,12 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
             className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 text-red-500 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
           >
             <TrendingDown size={16} /> Gasto
+          </button>
+          <button
+            onClick={() => setPendienteEdit('nuevo')}
+            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
+          >
+            <CalendarClock size={16} /> Por pagar
           </button>
           <button
             onClick={handleExport}
@@ -364,6 +445,58 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
               </p>
             </div>
           </div>
+
+          {/* Por pagar: lo que ya sabemos que hay que pagar y todavía no salió */}
+          {porPagar.abiertos.length > 0 && (
+            <div className="mb-6">
+              <h2 className={`${sectionTitleClass} flex flex-wrap items-center gap-2`}>
+                <span>Por pagar · {formatMoney(porPagar.total)}</span>
+                {porPagar.vencidos > 0 && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold normal-case tracking-normal text-red-600">
+                    {porPagar.vencidos} vencido{porPagar.vencidos === 1 ? '' : 's'}
+                  </span>
+                )}
+              </h2>
+              <div className="space-y-2">
+                {porPagar.abiertos.map(g => {
+                  const est = estadoVencimiento(g.venceEl, porPagar.hoy);
+                  const estilo = ESTILO_VENC[est];
+                  return (
+                    <div key={g.id} className={`flex items-center gap-3 rounded-xl border bg-white px-3 py-2.5 ${estilo.borde}`}>
+                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${estilo.chip}`}>
+                        {est === 'vencido' ? <AlertTriangle size={16} /> : <CalendarClock size={16} />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-display text-sm font-bold text-navy-700">{g.label}</p>
+                        <p className={`truncate text-[11px] ${estilo.texto}`}>
+                          {g.proveedor ? `${g.proveedor} · ` : ''}{TEXTO_VENC[est](g.venceEl || '')}
+                        </p>
+                      </div>
+                      <p className="whitespace-nowrap text-sm font-bold tabular-nums text-navy-700">{formatMoney(g.amount)}</p>
+                      <button
+                        onClick={() => setPendienteAPagar(g)}
+                        className="flex-shrink-0 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-lime-500"
+                      >
+                        Pagar
+                      </button>
+                      <button
+                        onClick={() => setPendienteEdit(g)}
+                        title={`Editar ${g.label}`}
+                        aria-label={`Editar ${g.label}`}
+                        className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[11px] text-gray-400">
+                Estos gastos <b>no</b> entran en los totales de arriba: recién impactan la caja cuando
+                alguno de ustedes lo marca pagado, y ahí se registra quién puso la plata.
+              </p>
+            </div>
+          )}
 
           {/* Deudores */}
           {porCobrar.deudores.length > 0 && (
@@ -611,6 +744,28 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           socioSugerido={socioSugerido}
           onClose={() => setGastoAbierto(false)}
           onDone={() => { setGastoAbierto(false); refresh(); }}
+        />
+      )}
+
+      {/* Alta / edición de un gasto pendiente */}
+      {pendienteEdit !== null && (
+        <GastoPendienteModal
+          gasto={pendienteEdit === 'nuevo' ? null : pendienteEdit}
+          guardar={saveGastoPendiente}
+          borrar={handleBorrarPendiente}
+          onClose={() => setPendienteEdit(null)}
+          onDone={() => { setPendienteEdit(null); refresh(); }}
+        />
+      )}
+
+      {/* Marcar pagado un pendiente: pasa a ser un gasto real de la caja */}
+      {pendienteAPagar && (
+        <PagarPendienteModal
+          gasto={pendienteAPagar}
+          pagar={pagarGastoPendiente}
+          socioSugerido={socioSugerido}
+          onClose={() => setPendienteAPagar(null)}
+          onDone={() => { setPendienteAPagar(null); refresh(); }}
         />
       )}
 
@@ -1348,6 +1503,277 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
 }
 
 /** Gasto rápido: descripción + monto (sin stock ni método de pago). */
+/**
+ * Alta y edicion de un gasto pendiente. Lo unico obligatorio es que es y cuanto:
+ * si se exigiera vencimiento, la mitad de los gastos que no tienen fecha cierta
+ * ("hay que pagarle al taller") no se cargarian nunca.
+ */
+function GastoPendienteModal({ gasto, guardar, borrar, onClose, onDone }: {
+  gasto: GastoPendiente | null;
+  guardar: (g: GastoPendienteInput) => Promise<{ ok: boolean; error?: string }>;
+  borrar: (g: GastoPendiente) => Promise<void>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [descripcion, setDescripcion] = useState(gasto?.label ?? '');
+  const [monto, setMonto] = useState(gasto ? String(gasto.amount) : '');
+  const [vence, setVence] = useState(gasto?.venceEl ?? '');
+  const [proveedor, setProveedor] = useState(gasto?.proveedor ?? '');
+  const [notas, setNotas] = useState(gasto?.notas ?? '');
+  const [guardando, setGuardando] = useState(false);
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
+
+  const montoNum = Number(monto);
+  const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0;
+
+  const handleGuardar = async () => {
+    if (!listo || guardando) return;
+    setGuardando(true);
+    try {
+      const result = await guardar({
+        id: gasto?.id,
+        label: descripcion.trim(),
+        amount: montoNum,
+        venceEl: vence || null,
+        proveedor: proveedor.trim() || null,
+        notas: notas.trim() || null,
+      });
+      if (!result.ok) {
+        toast.error(result.error || 'No se pudo guardar el gasto');
+        return;
+      }
+      toast.success(gasto ? 'Gasto actualizado ✓' : 'Gasto pendiente agregado ✓');
+      onDone();
+    } catch (e) {
+      console.error('Error guardando gasto pendiente:', e);
+      toast.error('No se pudo guardar. Proba de nuevo.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0" onClick={() => !guardando && onClose()} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={gasto ? 'Editar gasto pendiente' : 'Nuevo gasto pendiente'}
+        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">
+            {gasto ? 'Editar pendiente' : 'Gasto por pagar'}
+          </h3>
+          <button
+            onClick={onClose}
+            disabled={guardando}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="pend-descripcion" className={labelClass}>¿Que hay que pagar?</label>
+            <input
+              id="pend-descripcion"
+              type="text"
+              value={descripcion}
+              onChange={e => setDescripcion(e.target.value)}
+              placeholder="Ej: sublimacion de remeras, alquiler de canchas"
+              autoFocus
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pend-monto" className={labelClass}>Monto ($)</label>
+            <input
+              id="pend-monto"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pend-vence" className={labelClass}>¿Para cuando? (opcional)</label>
+            <input
+              id="pend-vence"
+              type="date"
+              value={vence}
+              onChange={e => setVence(e.target.value)}
+              className={inputClass}
+            />
+            <p className="mt-1.5 text-[11px] text-gray-400">
+              Si lo dejas vacio queda como pendiente sin fecha, al final de la lista.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="pend-proveedor" className={labelClass}>¿A quien? (opcional)</label>
+            <input
+              id="pend-proveedor"
+              type="text"
+              value={proveedor}
+              onChange={e => setProveedor(e.target.value)}
+              placeholder="Ej: taller, club, imprenta"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="pend-notas" className={labelClass}>Nota (opcional)</label>
+            <input
+              id="pend-notas"
+              type="text"
+              value={notas}
+              onChange={e => setNotas(e.target.value)}
+              placeholder="Cualquier detalle que convenga recordar"
+              className={inputClass}
+            />
+          </div>
+        </div>
+        <button
+          onClick={handleGuardar}
+          disabled={!listo || guardando}
+          className="mt-5 w-full rounded-lg bg-navy-700 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400"
+        >
+          {guardando ? 'Guardando…' : gasto ? 'Guardar cambios' : 'Agregar a por pagar'}
+        </button>
+        {gasto && (
+          confirmarBorrado ? (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+              <p className="text-xs text-red-700">
+                Se borra de la lista de pendientes. No afecta la caja, porque todavia no se pago.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => borrar(gasto)}
+                  className="flex-1 rounded-lg bg-red-500 py-2 font-display text-xs font-bold text-white transition-colors hover:bg-red-600"
+                >
+                  Si, borrar
+                </button>
+                <button
+                  onClick={() => setConfirmarBorrado(false)}
+                  className="flex-1 rounded-lg border border-gray-200 py-2 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmarBorrado(true)}
+              disabled={guardando}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2 font-display text-xs font-bold text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+            >
+              <Trash2 size={14} /> Borrar este pendiente
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Marca pagado un pendiente. Aca se pide quien puso la plata porque es el dato
+ * que recien existe al pagar, y el que necesita el reparto 50/25/25. El gasto
+ * entra a la caja con la fecha de hoy, no con la del vencimiento.
+ */
+function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
+  gasto: GastoPendiente;
+  pagar: (id: string, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  socioSugerido: SocioName | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [pagador, setPagador] = useState<SocioName | null>(socioSugerido);
+  const [pagando, setPagando] = useState(false);
+
+  const handlePagar = async () => {
+    if (!pagador || pagando) return;
+    setPagando(true);
+    try {
+      const result = await pagar(gasto.id, pagador);
+      if (!result.ok) {
+        toast.error(result.error || 'No se pudo marcar como pagado');
+        return;
+      }
+      toast.success('Pagado ✓ Ya figura como gasto en la caja');
+      onDone();
+    } catch (e) {
+      console.error('Error pagando gasto pendiente:', e);
+      toast.error('No se pudo marcar como pagado. Proba de nuevo.');
+    } finally {
+      setPagando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0" onClick={() => !pagando && onClose()} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Marcar gasto como pagado"
+        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-navy-700">Marcar pagado</h3>
+          <button
+            onClick={onClose}
+            disabled={pagando}
+            aria-label="Cerrar"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="rounded-xl bg-gray-50 px-4 py-3">
+          <p className="font-display text-sm font-bold text-navy-700">{gasto.label}</p>
+          {gasto.proveedor && <p className="text-xs text-gray-500">{gasto.proveedor}</p>}
+          <p className="mt-1 font-display text-2xl font-bold text-red-500">{formatMoney(gasto.amount)}</p>
+        </div>
+        <div className="mt-4">
+          <span className={labelClass}>¿Quien puso la plata?</span>
+          <div className="grid grid-cols-3 gap-2">
+            {SOCIOS.map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setPagador(s)}
+                aria-pressed={pagador === s}
+                className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
+                  pagador === s
+                    ? 'border-navy-700 bg-navy-700 text-white'
+                    : 'border-gray-200 text-navy-700 hover:border-navy-700'
+                }`}
+              >
+                {NOMBRES_SOCIOS[s]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-gray-400">
+            {pagador === null
+              ? 'Elegi de quien salio la plata: define el reparto 50/25/25.'
+              : `Entra a la caja como gasto de hoy, a nombre de ${NOMBRES_SOCIOS[pagador]}.`}
+          </p>
+        </div>
+        <button
+          onClick={handlePagar}
+          disabled={!pagador || pagando}
+          className="mt-5 w-full rounded-lg bg-lime-400 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:bg-gray-200 disabled:text-gray-400"
+        >
+          {pagando ? 'Registrando…' : pagador === null ? 'Elegi quien pago' : 'Confirmar pago'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
   registrar: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
   /** Socio deducido del admin logueado; null con la cuenta compartida ("VOLEA Team"). */

@@ -3,7 +3,7 @@ import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
 import type { JugadorPadron } from '../utils/dupr';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -385,6 +385,79 @@ export const SupabaseService = {
       return { ok: false, error: error.message };
     }
     return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  // ── Gastos pendientes: lo que falta pagar, antes de tocar la caja ─────────
+  /** Trae pendientes y pagados; la UI separa. Solo equipo (owner/admin) vía RLS. */
+  async getGastosPendientes(): Promise<GastoPendiente[] | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    // Misma cautela que la caja: sin sesión, RLS devuelve vacío sin error y
+    // mostraríamos "no hay nada que pagar", que es una mentira peligrosa.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await conReintento(
+      () => conTechoLectura(supabase!.from('gastos_pendientes').select('*')
+        .order('vence_el', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(500)),
+      r => !!r.error,
+    );
+    if (error) { console.error('Error fetching gastos pendientes:', error); return null; }
+    return ((data as Record<string, unknown>[]) || []).map(filaAGastoPendiente);
+  },
+
+  async saveGastoPendiente(g: GastoPendienteInput, createdBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const fila: Record<string, unknown> = {
+      label: g.label.trim(),
+      amount: g.amount,
+      vence_el: g.venceEl || null,
+      proveedor: g.proveedor?.trim() || null,
+      notas: g.notas?.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    // created_by solo en el alta: editar un gasto no cambia quién lo cargó.
+    if (g.id) fila.id = g.id; else fila.created_by = createdBy || 'Web';
+    const { error } = await conTechoEscritura(
+      supabase.from('gastos_pendientes').upsert(fila, { onConflict: 'id' }),
+    );
+    if (error) { console.error('Error guardando gasto pendiente:', error); return { ok: false, error: error.message }; }
+    return { ok: true };
+  },
+
+  async deleteGastoPendiente(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('gastos_pendientes').delete().eq('id', id));
+    if (error) { console.error('Error borrando gasto pendiente:', error); return false; }
+    return true;
+  },
+
+  /**
+   * Lo marca pagado y asienta el gasto real en la caja, en una sola transacción.
+   * `paidBy` es de quién salió la plata: es el dato que recién se conoce al pagar
+   * y el que necesita el reparto 50/25/25.
+   */
+  async pagarGastoPendiente(
+    id: string, paidBy: SocioName, reportedBy: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_pagar_gasto_pendiente', {
+      p_id: id, p_paid_by: paidBy, p_reported_by: reportedBy,
+    }));
+    if (error) { console.error('Error pagando gasto pendiente:', error); return { ok: false, error: error.message }; }
+    const r = data as { ok?: boolean; error?: string } | null;
+    return { ok: r?.ok === true, error: typeof r?.error === 'string' ? r.error : undefined };
+  },
+
+  /** Deshace un pago marcado por error: anula el movimiento y vuelve a pendiente. */
+  async despagarGastoPendiente(id: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(
+      supabase.rpc('admin_despagar_gasto_pendiente', { p_id: id }),
+    );
+    if (error) { console.error('Error deshaciendo pago:', error); return { ok: false, error: error.message }; }
+    const r = data as { ok?: boolean; error?: string } | null;
+    return { ok: r?.ok === true, error: typeof r?.error === 'string' ? r.error : undefined };
   },
 
   // ── Cuentas entre socios (tabla socio_moves, solo admins vía RLS) ──
@@ -1186,6 +1259,22 @@ function filaACompra(row: Record<string, unknown>): Compra {
         orden: Number(it.orden) || 0,
       }))
       .sort((a, b) => a.orden - b.orden),
+  };
+}
+
+function filaAGastoPendiente(row: Record<string, unknown>): GastoPendiente {
+  return {
+    id: row.id as string,
+    label: (row.label as string) || '',
+    amount: Number(row.amount) || 0,
+    venceEl: (row.vence_el as string) ?? null,
+    proveedor: (row.proveedor as string) ?? null,
+    notas: (row.notas as string) ?? null,
+    createdBy: (row.created_by as string) || '',
+    createdAt: (row.created_at as string) || '',
+    pagadoAt: (row.pagado_at as string) ?? null,
+    pagadoPor: (row.pagado_por as GastoPendiente['pagadoPor']) ?? null,
+    ledgerId: (row.ledger_id as string) ?? null,
   };
 }
 

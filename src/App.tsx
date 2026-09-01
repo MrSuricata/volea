@@ -14,7 +14,7 @@ import {
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
 import { marcaVisitaInscripciones } from './utils/inscripciones';
-import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput } from './types';
+import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
   WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
@@ -4016,6 +4016,17 @@ function AdminPage() {
       SupabaseService.registrarGastoCaja(label, amount, cajaReportedBy, paidBy),
     [cajaReportedBy],
   );
+  // Gastos pendientes: quién lo cargó y quién después lo paga salen del admin
+  // logueado, igual que en el resto de la Caja.
+  const guardarGastoPendiente = useCallback(
+    (g: GastoPendienteInput) => SupabaseService.saveGastoPendiente(g, cajaReportedBy),
+    [cajaReportedBy],
+  );
+  const pagarGastoPendiente = useCallback(
+    (id: string, paidBy: SocioName) =>
+      SupabaseService.pagarGastoPendiente(id, paidBy, cajaReportedBy),
+    [cajaReportedBy],
+  );
   // De qué socio salió la plata NO se puede deducir de la cuenta compartida
   // ("VOLEA Team", somosvolea@gmail.com): ahí devolvemos null y la Caja obliga a
   // elegirlo a mano. Antes se adivinaba al liquidar y todo lo no reconocido se le
@@ -5254,6 +5265,10 @@ function AdminPage() {
                 registrarGasto={registrarGasto}
                 socioSugerido={socioSugerido}
                 cobrarDeudor={SupabaseService.cobrarDeudorCaja}
+                loadGastosPendientes={SupabaseService.getGastosPendientes}
+                saveGastoPendiente={guardarGastoPendiente}
+                pagarGastoPendiente={pagarGastoPendiente}
+                deleteGastoPendiente={SupabaseService.deleteGastoPendiente}
               />
             </Suspense>
           </div>

@@ -79,6 +79,40 @@ export interface LedgerEntry {
 }
 
 /**
+ * Gasto que ya sabemos que hay que pagar pero que todavía no salió de la caja.
+ * Vive aparte del ledger a propósito: mientras está pendiente no es plata que
+ * salió, y recién al marcarlo pagado se asienta como gasto real.
+ */
+export interface GastoPendiente {
+  id: string;
+  label: string;
+  amount: number;
+  /** Vencimiento; null = sin fecha, se paga cuando se pueda. */
+  venceEl: string | null;
+  /** A quién hay que pagarle (opcional). */
+  proveedor: string | null;
+  notas: string | null;
+  createdBy: string;
+  createdAt: string;
+  /** Cuándo se pagó; null = sigue pendiente. */
+  pagadoAt: string | null;
+  /** Qué socio puso la plata (define el reparto 50/25/25). */
+  pagadoPor: SocioName | null;
+  /** Movimiento de caja que generó el pago. */
+  ledgerId: string | null;
+}
+
+/** Alta o edición de un gasto pendiente. Sin id = alta nueva. */
+export interface GastoPendienteInput {
+  id?: string;
+  label: string;
+  amount: number;
+  venceEl?: string | null;
+  proveedor?: string | null;
+  notas?: string | null;
+}
+
+/**
  * Alta de venta desde la Caja web (RPC admin_registrar_venta). Con productId,
  * la RPC descuenta stock de la variante como el bot; sin productId es un ítem
  * suelto y el stock no se toca.
