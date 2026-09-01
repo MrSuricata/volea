@@ -10,13 +10,19 @@
 -- Shopify (volea-6996.myshopify.com) es la fuente de verdad del catálogo,
 -- snapshot en src/data/shopify-catalog.json regenerado con scripts/build-catalog.mjs.
 
--- Tabla de admins (allowlist para el login por magic link en /#/admin)
+-- Tabla de admins (allowlist para el login por magic link en /#/admin).
+-- role + activo son la base de mi_rol() / es_equipo() / es_owner() (ver v12 y
+-- v13): 'sublimacion' es una cuenta de acceso acotado que NO integra el equipo
+-- dueño, por eso la plata de los socios se guarda con es_equipo() y no is_admin().
 CREATE TABLE IF NOT EXISTS admins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT NOT NULL UNIQUE,
   name TEXT,
-  role TEXT DEFAULT 'admin' CHECK (role IN ('owner', 'admin')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('owner', 'admin', 'sublimacion')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Baja lógica: mi_rol() devuelve '' si activo = false, así que desactivar a
+  -- alguien lo saca de todas las policies sin borrarle la fila ni el historial.
+  activo BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- Tabla de eventos
@@ -172,6 +178,7 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 -- admin autenticado puede leer solo su propia fila:
 --   CREATE POLICY "admins_self_read" ON admins FOR SELECT TO authenticated
 --     USING (lower(email) = lower(coalesce((auth.jwt() ->> 'email')::text, '')));
+-- Desactualizado: hoy son TRES policies, no una. Ver v13 al final del archivo.
 
 -- events / clubs: lectura pública, escritura solo admins
 CREATE POLICY "events_public_read" ON events FOR SELECT USING (true);
@@ -622,3 +629,50 @@ REVOKE ALL ON FUNCTION public.admin_pagar_gasto_pendiente(uuid, text, text) FROM
 GRANT EXECUTE ON FUNCTION public.admin_pagar_gasto_pendiente(uuid, text, text) TO authenticated;
 REVOKE ALL ON FUNCTION public.admin_despagar_gasto_pendiente(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_despagar_gasto_pendiente(uuid) TO authenticated;
+
+-- ============================================
+-- v13 (2026-09-01): Roles reales de admins (es_owner + las 3 policies)
+-- ============================================
+-- El CREATE TABLE admins de arriba decía role IN ('owner','admin') y no tenía
+-- activo; el v6 documentaba UNA sola policy de lectura propia. Nada de eso es
+-- lo que corre hoy. Esta sección cierra ese hueco: sin ella, recrear el proyecto
+-- desde el repo dejaba mi_rol() sin compilar y la tabla admins sin RLS real.
+
+-- es_owner(): el escalón de arriba de es_equipo(). Solo el owner da de alta o
+-- baja gente del equipo.
+CREATE OR REPLACE FUNCTION public.es_owner()
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  select mi_rol() = 'owner';
+$$;
+
+ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
+
+-- Tres policies, cada una con su motivo:
+--   self_read     : cualquiera autenticado lee SU fila — es lo que necesita el
+--                   login para saber con qué rol entrar (incluye sublimación).
+--   equipo_lee    : owner/admin ven la lista completa del equipo.
+--   owner_gestiona: solo el owner escribe (alta, baja, cambio de rol).
+DROP POLICY IF EXISTS admins_self_read ON public.admins;
+CREATE POLICY admins_self_read ON public.admins
+  FOR SELECT USING (lower(email) = lower(COALESCE((auth.jwt() ->> 'email'), '')));
+
+DROP POLICY IF EXISTS admins_equipo_lee ON public.admins;
+CREATE POLICY admins_equipo_lee ON public.admins
+  FOR SELECT USING (es_equipo());
+
+DROP POLICY IF EXISTS admins_owner_gestiona ON public.admins;
+CREATE POLICY admins_owner_gestiona ON public.admins
+  FOR ALL USING (es_owner()) WITH CHECK (es_owner());
+
+-- mi_rol() / es_equipo() / es_owner() / is_admin() quedan con EXECUTE para anon
+-- a propósito, al revés que las RPC admin_*: las policies se evalúan con el rol
+-- de quien consulta, y sin EXECUTE la policy revienta en vez de dar false.
+-- Verificado con has_function_privilege: anon=true, authenticated=true en las cuatro.
+
+-- Nota de orden: is_admin() (v3, más arriba) sigue existiendo y la usan events,
+-- clubs, announcements, orders e inscripciones. Es a propósito más laxa —
+-- "¿está en la allowlist?" — y por eso NO sirve para la plata: ahí va es_equipo().
