@@ -155,14 +155,22 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Función helper: ¿el usuario autenticado está en la allowlist de admins?
+-- Función helper: ¿el usuario autenticado es admin del panel?
+-- Historia: nacó como allowlist por email a secas; v14 le sumó activo; v15 le
+-- sumó role IN ('owner','admin') para que la cuenta de sublimación no pase
+-- ('sublimacion' nunca fue un admin — que diera true era el bug). Desde v15,
+-- is_admin() ≡ es_equipo() en la práctica; se conserva porque 24 policies
+-- (21 en public + 3 en storage) cuelgan de este nombre.
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.admins
     WHERE lower(email) = lower(coalesce((auth.jwt() ->> 'email')::text, ''))
+      AND activo
+      AND role IN ('owner', 'admin')
   )
 $$;
 
@@ -854,3 +862,49 @@ CREATE TABLE IF NOT EXISTS public.bot_seen (    -- dedup de updates de Telegram
   update_id BIGINT PRIMARY KEY,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+
+-- ============================================
+-- v15 (2026-09-01): El taller solo ve su sector
+-- ============================================
+-- Migración "sectorizar_sublimacion_is_admin_role" aplicada en volea-web.
+-- Decisión de Brian: la cuenta sublimacion@volea.uy solo debe ver su sector.
+--
+-- Cómo: UN solo cambio — is_admin() ahora exige role IN ('owner','admin')
+-- (además del activo del v14). Las 24 policies que cuelgan de ella (21 en
+-- public: announcements, categories, clubs, events, gallery_albums,
+-- inscripciones x4, orders, posts x2, products x2, rk_config, rk_jugadores,
+-- rk_torneos x4, standings; + 3 en storage.objects: product_images_admin_
+-- insert/update/delete) heredan el cierre de una, y cualquier policy futura
+-- escrita con is_admin() nace cerrada.
+--
+-- Lo que el taller CONSERVA (verificado con 3 agentes antes de aplicar):
+--   · login: is_admin_email() NO se tocó (sigue email+activo, sin role) —
+--     endurecerla habría roto el login del taller
+--   · su fila de admins (admins_self_read, por email)
+--   · compras/compra_items tipo sublimacion no-borrador (policies con mi_rol())
+--   · RPC sublimacion_estado (guard mi_rol()='sublimacion')
+--   · mockups/adjuntos: los lee por URL pública del bucket product-images
+--     (public=true + product_images_public_read) — sin auth de por medio
+--   · las lecturas públicas del sitio (products activos, events, posts
+--     publicados, etc.)
+--
+-- Lo que el taller PIERDE (todo intencional — era el leak): escritura total
+-- en announcements/categories/clubs/events/gallery/inscripciones/orders/
+-- posts/products/rk_*/standings, upload al bucket product-images, lectura de
+-- orders, del contador de inscripciones, de products inactivos, posts
+-- borrador y torneos ocultos. El shell del admin que se monta antes del
+-- desvío a SublimacionPanel degrada a vacío/0 sin error (RLS filtra, los
+-- setters chequean null/length) — verificado en App.tsx.
+--
+-- Vecinos intactos: mariel-lá y template-comercio usan sus propias funciones
+-- (mariella_is_admin / demo_is_admin) y tablas de admins propias; racket-point,
+-- pickle-torneos y tengo-cancha no pegan a este proyecto. OJO al provisionar
+-- template-comercio: jamás con prefijo vacío en este proyecto compartido
+-- (generaría un is_admin() sin prefijo que pisaría el de VOLEA).
+--
+-- Verificado post-migración: is_admin con role check; is_admin_email intacta;
+-- 24 policies siguen colgando (ninguna dropeada — se usó CREATE OR REPLACE,
+-- jamás DROP CASCADE); search_path pg_catalog,public; guard del taller intacto.
+-- La definición vigente de is_admin() quedó actualizada arriba, en su bloque
+-- original del v3.
