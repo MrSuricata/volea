@@ -451,3 +451,174 @@ GRANT EXECUTE ON FUNCTION public.admin_registrar_gasto(text, numeric, text, text
 --   product_id NULL (anularla jamás toca stock). Grants: authenticated ✓,
 --   anon/PUBLIC revocados (regla del 2026-08-06). La v1 de 2 args se DROPeó
 --   (quedaba como sobrecarga ambigua para PostgREST).
+
+-- ============================================
+-- v12 (2026-09-01): Gastos por pagar en la Caja
+-- ============================================
+-- Lo que ya sabemos que hay que pagar y todavía no salió de la caja vivía solo
+-- en la cabeza de los tres. Ahora se anota, se ve vencido cuando lo está, y
+-- cualquiera de los tres lo marca pagado.
+--
+-- Los pendientes viven en su PROPIA tabla, no en bot_ledger: mientras no se
+-- pagan no son plata que salió, y meterlos en el ledger torcería totales,
+-- balance y liquidación a socios. Recién al marcarlo pagado se asienta el gasto
+-- real en bot_ledger y se linkean las dos filas en una sola transacción.
+--
+-- Quien lo CARGA (created_by) y quien PONE LA PLATA (pagado_por) se guardan por
+-- separado: el segundo recién se conoce al pagar, y es el que define el reparto
+-- Brian 50 / Paula 25 / Gastón 25 (mismo criterio que bot_ledger.paid_by del v9).
+
+-- Helpers de rol. No estaban documentados en este archivo y son la dependencia
+-- de la RLS de abajo, así que van acá. anon tiene EXECUTE a propósito: las
+-- policies se evalúan con el rol de quien consulta, y sin EXECUTE la policy
+-- rompe en vez de dar false.
+-- OJO: mi_rol() lee admins.activo, una columna que el CREATE TABLE admins de
+-- arriba (v3) todavía no documenta.
+CREATE OR REPLACE FUNCTION public.mi_rol()
+RETURNS text
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  select coalesce((select role from admins
+                   where lower(email) = lower(auth.jwt() ->> 'email') and activo), '');
+$$;
+
+CREATE OR REPLACE FUNCTION public.es_equipo()
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  select mi_rol() in ('owner', 'admin');
+$$;
+
+CREATE TABLE IF NOT EXISTS public.gastos_pendientes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  label       TEXT NOT NULL,
+  amount      NUMERIC NOT NULL CHECK (amount > 0),
+  -- Vencimiento; NULL = sin fecha, se paga cuando se pueda.
+  vence_el    DATE,
+  -- A quién hay que pagarle (opcional).
+  proveedor   TEXT,
+  notas       TEXT,
+  created_by  TEXT NOT NULL DEFAULT 'Web',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- Cuándo se pagó; NULL = sigue pendiente.
+  pagado_at   TIMESTAMPTZ,
+  -- Qué socio puso la plata (define el reparto 50/25/25).
+  pagado_por  TEXT CHECK (pagado_por IN ('brian', 'paula', 'gaston')),
+  -- Movimiento de caja que generó el pago.
+  ledger_id   UUID REFERENCES bot_ledger(id) ON DELETE SET NULL,
+  -- Pagado sin pagador (o al revés) no existe: o están los dos, o ninguno.
+  CONSTRAINT gastos_pendientes_pago_completo CHECK (
+    (pagado_at IS NULL AND pagado_por IS NULL) OR
+    (pagado_at IS NOT NULL AND pagado_por IS NOT NULL)
+  )
+);
+
+-- Índice parcial: la pantalla solo lista los abiertos, ordenados por vencimiento.
+CREATE INDEX IF NOT EXISTS gastos_pendientes_abiertos_idx
+  ON public.gastos_pendientes (vence_el, created_at)
+  WHERE pagado_at IS NULL;
+
+ALTER TABLE public.gastos_pendientes ENABLE ROW LEVEL SECURITY;
+
+-- es_equipo() y NO is_admin(): is_admin() da true para cualquier fila de admins
+-- e incluiría a la cuenta de sublimación, que no tiene por qué ver ni tocar la
+-- plata de los socios.
+DROP POLICY IF EXISTS gastos_pendientes_equipo ON public.gastos_pendientes;
+CREATE POLICY gastos_pendientes_equipo ON public.gastos_pendientes
+  FOR ALL USING (es_equipo()) WITH CHECK (es_equipo());
+
+-- Marcar pagado: asienta el gasto real en bot_ledger y linkea las dos filas.
+CREATE OR REPLACE FUNCTION public.admin_pagar_gasto_pendiente(
+  p_id uuid, p_paid_by text, p_reported_by text DEFAULT NULL::text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $$
+declare
+  v_paid     text := nullif(btrim(lower(coalesce(p_paid_by, ''))), '');
+  v_reported text := coalesce(nullif(btrim(coalesce(p_reported_by, '')), ''), 'Web');
+  v_g        public.gastos_pendientes%rowtype;
+  v_ledger   uuid;
+begin
+  if not es_equipo() then
+    return jsonb_build_object('ok', false, 'error', 'solo el equipo');
+  end if;
+  if v_paid is null or v_paid not in ('brian', 'paula', 'gaston') then
+    return jsonb_build_object('ok', false, 'error', 'falta quien puso la plata');
+  end if;
+
+  -- FOR UPDATE: si dos de los tres tocan "pagar" a la vez, el segundo espera y
+  -- despues ve que ya estaba pagado, en vez de duplicar el gasto en la caja.
+  select * into v_g from public.gastos_pendientes where id = p_id for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'el gasto ya no existe');
+  end if;
+  if v_g.pagado_at is not null then
+    return jsonb_build_object('ok', false, 'error', 'ese gasto ya figura pagado');
+  end if;
+
+  insert into public.bot_ledger
+    (kind, product_id, variant_key, label, qty, amount, reported_by, chat_id,
+     payment_method, debtor_name, paid_by)
+  values
+    ('gasto', null, null, v_g.label, 1, v_g.amount, v_reported, 0,
+     null, null, v_paid)
+  returning id into v_ledger;
+
+  update public.gastos_pendientes
+     set pagado_at = now(), pagado_por = v_paid, ledger_id = v_ledger, updated_at = now()
+   where id = p_id;
+
+  return jsonb_build_object('ok', true, 'ledger_id', v_ledger);
+end;
+$$;
+
+-- Deshacer el pago (me equivoqué de pagador, o no era este gasto).
+CREATE OR REPLACE FUNCTION public.admin_despagar_gasto_pendiente(p_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $$
+declare
+  v_g public.gastos_pendientes%rowtype;
+begin
+  if not es_equipo() then
+    return jsonb_build_object('ok', false, 'error', 'solo el equipo');
+  end if;
+
+  select * into v_g from public.gastos_pendientes where id = p_id for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'el gasto ya no existe');
+  end if;
+  if v_g.pagado_at is null then
+    return jsonb_build_object('ok', false, 'error', 'ese gasto no figura pagado');
+  end if;
+
+  -- El ledger no borra filas: marca reverted, igual que "anular movimiento".
+  if v_g.ledger_id is not null then
+    update public.bot_ledger set reverted = true where id = v_g.ledger_id;
+  end if;
+
+  update public.gastos_pendientes
+     set pagado_at = null, pagado_por = null, ledger_id = null, updated_at = now()
+   where id = p_id;
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+-- Grants: el CREATE FUNCTION deja EXECUTE a PUBLIC (mismo gotcha del v6); se
+-- cierra explícito y solo queda authenticated. es_equipo() es el guard real
+-- adentro de cada función. Verificado con has_function_privilege:
+-- anon=false, authenticated=true en las dos.
+REVOKE ALL ON FUNCTION public.admin_pagar_gasto_pendiente(uuid, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_pagar_gasto_pendiente(uuid, text, text) TO authenticated;
+REVOKE ALL ON FUNCTION public.admin_despagar_gasto_pendiente(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_despagar_gasto_pendiente(uuid) TO authenticated;
