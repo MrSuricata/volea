@@ -428,6 +428,8 @@ export interface MiembroEquipo {
 export type TanteadorLado = 'A' | 'B';
 export type TanteadorCategoria = 'DM' | 'DF';
 export type TanteadorEstado = 'en_juego' | 'final';
+/** 'fijas' = duplas fijas, tabla por pareja · 'rotativas' = americano, tabla individual. */
+export type TanteadorModo = 'fijas' | 'rotativas';
 
 export interface TanteadorSet { a: number; b: number; }
 
@@ -442,8 +444,14 @@ export interface TanteadorPartido {
   /** rk_torneos.id del que salieron las parejas; null = partido suelto. */
   torneoId: string | null;
   categoria: TanteadorCategoria;
+  /** v18: formato del partido — define en qué tabla suma. */
+  modo: TanteadorModo;
   parejaA: string;
   parejaB: string;
+  /** Americano (v17): los 2 jugadores de cada lado, para la tabla individual.
+   *  Partidos viejos sin esto: se derivan partiendo parejaA/B por " / ". */
+  jugadoresA: string[];
+  jugadoresB: string[];
   juez: string | null;
   cancha: string;
   /** Set a N puntos (15 o 21). */

@@ -5,8 +5,11 @@ import {
   crearPartido,
   deshacerPunto,
   ganadorSet,
+  jugadoresDe,
   marcadorActual,
   setsGanados,
+  tablaAmericano,
+  tablaParejas,
   terminarManual,
 } from './tanteador';
 
@@ -135,5 +138,67 @@ describe('terminarManual', () => {
     expect(reabierto.estado).toBe('en_juego');
     expect(reabierto.sets).toEqual([{ a: 15, b: 0 }]);
     expect(marcadorActual(reabierto)).toEqual({ a: 7, b: 4 });
+  });
+});
+
+describe('tablaAmericano', () => {
+  function final(
+    jugadoresA: string[], jugadoresB: string[],
+    sets: { a: number; b: number }[], ganador: 'A' | 'B',
+  ): TanteadorPartido {
+    return {
+      ...crearPartido({ id: Math.random().toString(36), categoria: 'DM', parejaA: jugadoresA.join(' / '), parejaB: jugadoresB.join(' / '), jugadoresA, jugadoresB }),
+      sets, estado: 'final', ganador,
+    };
+  }
+
+  it('acumula por jugador: PG, PF, PC y DIF, orden PG > DIF > PF', () => {
+    const partidos = [
+      // Ronda 1: JUAN+PEDRO 15-10 / 15-8 a LUIS+MARIO
+      final(['JUAN', 'PEDRO'], ['LUIS', 'MARIO'], [{ a: 15, b: 10 }, { a: 15, b: 8 }], 'A'),
+      // Ronda 2 (rotan): JUAN+LUIS 15-13 / 12-15 / 15-11 a PEDRO+MARIO
+      final(['JUAN', 'LUIS'], ['PEDRO', 'MARIO'], [{ a: 15, b: 13 }, { a: 12, b: 15 }, { a: 15, b: 11 }], 'A'),
+    ];
+    const tabla = tablaAmericano(partidos, 'DM');
+    expect(tabla.map((f) => f.nombre)).toEqual(['JUAN', 'PEDRO', 'LUIS', 'MARIO']);
+    const juan = tabla[0];
+    expect(juan).toMatchObject({ pj: 2, pg: 2, pf: 72, pc: 57, dif: 15 });
+    const pedro = tabla[1]; // 1 ganado; dif = (30-18) + (39-42) = +9
+    expect(pedro).toMatchObject({ pj: 2, pg: 1, dif: 9 });
+    const luis = tabla[2]; // 1 ganado; dif = (18-30) + (42-39) = -9
+    expect(luis).toMatchObject({ pj: 2, pg: 1, dif: -9 });
+    expect(tabla[3]).toMatchObject({ nombre: 'MARIO', pg: 0 });
+  });
+
+  it('solo cuenta finalizados de la categoria pedida', () => {
+    const dm = final(['A1', 'A2'], ['B1', 'B2'], [{ a: 15, b: 0 }, { a: 15, b: 0 }], 'A');
+    const df = { ...final(['F1', 'F2'], ['F3', 'F4'], [{ a: 15, b: 3 }, { a: 15, b: 3 }], 'A'), categoria: 'DF' as const };
+    const vivo = { ...final(['A1', 'A2'], ['B1', 'B2'], [{ a: 15, b: 0 }], 'A'), estado: 'en_juego' as const, ganador: null };
+    const tabla = tablaAmericano([dm, df, vivo], 'DM');
+    expect(tabla).toHaveLength(4);
+    expect(tabla[0].pj).toBe(1);
+    expect(tablaAmericano([dm, df, vivo], 'DF')[0].nombre).toBe('F1');
+  });
+
+  it('partidos viejos sin jugadores se parten por el texto de la pareja', () => {
+    const viejo = { ...final([], [], [{ a: 15, b: 10 }, { a: 15, b: 10 }], 'A'), parejaA: 'OLSZTYN / CARDOZO', parejaB: 'RIVERO - HERNANDEZ' };
+    expect(jugadoresDe(viejo, 'A')).toEqual(['OLSZTYN', 'CARDOZO']);
+    expect(jugadoresDe(viejo, 'B')).toEqual(['RIVERO', 'HERNANDEZ']);
+    const tabla = tablaAmericano([viejo], 'DM');
+    expect(tabla.map((f) => f.nombre)).toContain('HERNANDEZ');
+    expect(tabla).toHaveLength(4);
+  });
+});
+
+describe('tablaParejas', () => {
+  it('suma por dupla con el mismo orden PG > DIF > PF', () => {
+    const base = crearPartido({ id: 'x', categoria: 'DM', modo: 'fijas', parejaA: 'D1', parejaB: 'D2' });
+    const p1 = { ...base, id: 'p1', sets: [{ a: 15, b: 10 }, { a: 15, b: 8 }], estado: 'final' as const, ganador: 'A' as const };
+    const p2 = { ...base, id: 'p2', parejaA: 'D1', parejaB: 'D3', sets: [{ a: 10, b: 15 }, { a: 15, b: 13 }, { a: 11, b: 15 }], estado: 'final' as const, ganador: 'B' as const };
+    const tabla = tablaParejas([p1, p2], 'DM');
+    // D3 y D1 tienen 1 ganado cada una; desempata la diferencia (+7 vs +5)
+    expect(tabla[0]).toMatchObject({ nombre: 'D3', pj: 1, pg: 1, dif: 7 });
+    expect(tabla[1]).toMatchObject({ nombre: 'D1', pj: 2, pg: 1, dif: 5 });
+    expect(tabla[2]).toMatchObject({ nombre: 'D2', pj: 1, pg: 0, dif: -12 });
   });
 });

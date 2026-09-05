@@ -956,3 +956,23 @@ REVOKE INSERT, UPDATE, DELETE ON public.tanteador_partidos FROM anon;
 -- Realtime: la lista de partidos se refresca en vivo entre dispositivos, igual
 -- que rk_torneos / rk_en_cancha (canal 'tanteador-partidos' en el componente).
 ALTER PUBLICATION supabase_realtime ADD TABLE public.tanteador_partidos;
+
+-- ============================================
+-- v17 + v18 (2026-09-05): Tanteador americano y formato por partido
+-- ============================================
+-- Migraciones "tanteador_americano_jugadores" y "tanteador_modo_fijas_rotativas"
+-- aplicadas en volea-web. La copa quedo asi (definicion de Brian):
+--   Masculino: 5 duplas FIJAS, todos contra todos (10 partidos, tabla por dupla,
+--     premio a la campeona y subcampeona).
+--   Femenino: 4 jugadoras, duplas ROTATIVAS ida y vuelta (6 partidos, tabla
+--     INDIVIDUAL tipo americano).
+-- Orden de ambas tablas: PG -> DIF -> PF (los partidos al mejor de 3 duran
+-- distinto; la suma cruda de puntos sola seria injusta).
+ALTER TABLE public.tanteador_partidos
+  ADD COLUMN IF NOT EXISTS jugadores_a JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS jugadores_b JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.tanteador_partidos
+  ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'fijas'
+    CHECK (modo IN ('fijas','rotativas'));
+-- Los 16 cruces de la copa quedaron precargados (creado_por 'jarvis (cruces
+-- precargados)'): la web los muestra como "por jugar" (en_juego sin puntos).

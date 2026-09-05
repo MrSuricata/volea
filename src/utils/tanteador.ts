@@ -5,6 +5,7 @@
 import type {
   TanteadorCategoria,
   TanteadorLado,
+  TanteadorModo,
   TanteadorPartido,
   TanteadorSet,
 } from '../types';
@@ -23,8 +24,11 @@ export function reglasPara(obj: 15 | 21): ReglasTanteador {
 export function crearPartido(datos: {
   id: string;
   categoria: TanteadorCategoria;
+  modo?: TanteadorModo;
   parejaA: string;
   parejaB: string;
+  jugadoresA?: string[];
+  jugadoresB?: string[];
   juez?: string;
   cancha?: string;
   obj?: 15 | 21;
@@ -37,8 +41,11 @@ export function crearPartido(datos: {
     id: datos.id,
     torneoId: datos.torneoId ?? null,
     categoria: datos.categoria,
+    modo: datos.modo ?? 'fijas',
     parejaA: datos.parejaA,
     parejaB: datos.parejaB,
+    jugadoresA: datos.jugadoresA ?? [],
+    jugadoresB: datos.jugadoresB ?? [],
     juez: datos.juez || null,
     cancha: datos.cancha || '1',
     ...reglas,
@@ -171,6 +178,99 @@ export function deshacerPunto(p: TanteadorPartido): TanteadorPartido {
  * curso con puntos se guarda parcial; el ganador sale por sets a favor simple
  * (acá un set parcial cuenta para el que va arriba) y puede quedar null si empatan.
  */
+/** Jugadores de un lado; partidos viejos sin jugadoresX se parten por " / " o " - ". */
+export function jugadoresDe(p: TanteadorPartido, lado: TanteadorLado): string[] {
+  const directos = lado === 'A' ? p.jugadoresA : p.jugadoresB;
+  if (directos && directos.length) return directos;
+  const texto = lado === 'A' ? p.parejaA : p.parejaB;
+  return texto.split(/\s*[/\-]\s*/).map((s) => s.trim()).filter(Boolean);
+}
+
+export interface FilaAmericano {
+  nombre: string;
+  pj: number;
+  pg: number;
+  pf: number;
+  pc: number;
+  dif: number;
+}
+
+/**
+ * Tabla INDIVIDUAL del americano (parejas rotativas): cada jugador acumula lo
+ * de los partidos FINALIZADOS de su categoría. Orden: partidos ganados, luego
+ * diferencia de puntos, luego puntos a favor (los partidos al mejor de 3
+ * duran distinto, así que la suma cruda de puntos sola sería injusta).
+ */
+export function tablaAmericano(
+  partidos: TanteadorPartido[],
+  categoria: TanteadorCategoria,
+): FilaAmericano[] {
+  const filas = new Map<string, FilaAmericano>();
+  const fila = (nombre: string): FilaAmericano => {
+    let f = filas.get(nombre);
+    if (!f) { f = { nombre, pj: 0, pg: 0, pf: 0, pc: 0, dif: 0 }; filas.set(nombre, f); }
+    return f;
+  };
+
+  for (const p of partidos) {
+    if (p.estado !== 'final' || p.categoria !== categoria) continue;
+    let pfA = 0;
+    let pfB = 0;
+    for (const s of p.sets) { pfA += s.a; pfB += s.b; }
+    for (const lado of ['A', 'B'] as const) {
+      const propios = lado === 'A' ? pfA : pfB;
+      const rivales = lado === 'A' ? pfB : pfA;
+      for (const nombre of jugadoresDe(p, lado)) {
+        const f = fila(nombre);
+        f.pj++;
+        f.pf += propios;
+        f.pc += rivales;
+        if (p.ganador === lado) f.pg++;
+      }
+    }
+  }
+
+  const lista = [...filas.values()];
+  for (const f of lista) f.dif = f.pf - f.pc;
+  lista.sort((x, y) => y.pg - x.pg || y.dif - x.dif || y.pf - x.pf || x.nombre.localeCompare(y.nombre));
+  return lista;
+}
+
+/**
+ * Tabla por PAREJA (duplas fijas, todos contra todos: el masculino de la copa).
+ * Misma matemática y orden que la individual, pero la unidad es la dupla.
+ */
+export function tablaParejas(
+  partidos: TanteadorPartido[],
+  categoria: TanteadorCategoria,
+): FilaAmericano[] {
+  const filas = new Map<string, FilaAmericano>();
+  const fila = (nombre: string): FilaAmericano => {
+    let f = filas.get(nombre);
+    if (!f) { f = { nombre, pj: 0, pg: 0, pf: 0, pc: 0, dif: 0 }; filas.set(nombre, f); }
+    return f;
+  };
+
+  for (const p of partidos) {
+    if (p.estado !== 'final' || p.categoria !== categoria) continue;
+    let pfA = 0;
+    let pfB = 0;
+    for (const s of p.sets) { pfA += s.a; pfB += s.b; }
+    for (const lado of ['A', 'B'] as const) {
+      const f = fila(lado === 'A' ? p.parejaA : p.parejaB);
+      f.pj++;
+      f.pf += lado === 'A' ? pfA : pfB;
+      f.pc += lado === 'A' ? pfB : pfA;
+      if (p.ganador === lado) f.pg++;
+    }
+  }
+
+  const lista = [...filas.values()];
+  for (const f of lista) f.dif = f.pf - f.pc;
+  lista.sort((x, y) => y.pg - x.pg || y.dif - x.dif || y.pf - x.pf || x.nombre.localeCompare(y.nombre));
+  return lista;
+}
+
 export function terminarManual(p: TanteadorPartido): TanteadorPartido {
   if (p.estado === 'final') return p;
   const s = marcadorActual(p);
