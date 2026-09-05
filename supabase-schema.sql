@@ -908,3 +908,51 @@ CREATE TABLE IF NOT EXISTS public.bot_seen (    -- dedup de updates de Telegram
 -- jamás DROP CASCADE); search_path pg_catalog,public; guard del taller intacto.
 -- La definición vigente de is_admin() quedó actualizada arriba, en su bloque
 -- original del v3.
+
+-- ============================================
+-- v16 (2026-09-05): Tanteador de badminton dobles
+-- ============================================
+-- Migracion "tanteador_badminton" aplicada en volea-web. Soporta la pestania
+-- Tanteador del admin (Copa Badminton 06/09): marcador tactil punto a punto,
+-- sets a 15 (desde 14-14 por 2, tope 21) o a 21 (tope 30), mejor de 3.
+--
+-- Tabla PROPIA a proposito: NO escribe en rk_torneos — el sync local-first de
+-- torneos upsertea el documento entero y un write externo genera conflicto o
+-- se pisa (incidente del 9/8 documentado en src/torneos/sync.ts). El resultado
+-- se carga al torneo a mano como siempre (PasoFaseGrupos).
+CREATE TABLE IF NOT EXISTS public.tanteador_partidos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  torneo_id TEXT,          -- rk_torneos.id del que salieron las parejas (referencia blanda)
+  categoria TEXT NOT NULL DEFAULT 'DM' CHECK (categoria IN ('DM','DF')),
+  pareja_a TEXT NOT NULL,
+  pareja_b TEXT NOT NULL,
+  juez TEXT,
+  cancha TEXT NOT NULL DEFAULT '1',
+  obj INTEGER NOT NULL DEFAULT 15,        -- set a N puntos
+  cap INTEGER NOT NULL DEFAULT 21,        -- tope de la extension
+  cambio_en INTEGER NOT NULL DEFAULT 8,   -- cambio de lado del 3er set
+  sets JSONB NOT NULL DEFAULT '[]'::jsonb,    -- sets cerrados [{a,b}]
+  hist JSONB NOT NULL DEFAULT '[[]]'::jsonb,  -- puntos por set [['A','B',...],...]
+  estado TEXT NOT NULL DEFAULT 'en_juego' CHECK (estado IN ('en_juego','final')),
+  ganador TEXT CHECK (ganador IN ('A','B')),
+  invertido BOOLEAN NOT NULL DEFAULT FALSE,
+  avisos JSONB NOT NULL DEFAULT '{}'::jsonb,
+  creado_por TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  terminado_at TIMESTAMPTZ
+);
+
+-- Solo el equipo (owner/admin activo). El taller no tiene por que ver esto.
+ALTER TABLE public.tanteador_partidos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tanteador_equipo ON public.tanteador_partidos;
+CREATE POLICY tanteador_equipo ON public.tanteador_partidos
+  FOR ALL USING (es_equipo()) WITH CHECK (es_equipo());
+
+-- Convenciones v14: TRUNCATE fuera (no pasa por RLS) y anon sin DML.
+REVOKE TRUNCATE ON public.tanteador_partidos FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.tanteador_partidos FROM anon;
+
+-- Realtime: la lista de partidos se refresca en vivo entre dispositivos, igual
+-- que rk_torneos / rk_en_cancha (canal 'tanteador-partidos' en el componente).
+ALTER PUBLICATION supabase_realtime ADD TABLE public.tanteador_partidos;

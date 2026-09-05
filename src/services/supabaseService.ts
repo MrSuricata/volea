@@ -3,7 +3,7 @@ import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
 import type { JugadorPadron } from '../utils/dupr';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput } from '../types';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -1198,6 +1198,77 @@ export const SupabaseService = {
     return true;
   },
 
+  // ─── Tanteador (bádminton dobles) ─────────────────────────────────────────
+  async getTanteadorPartidos(): Promise<TanteadorPartido[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('tanteador_partidos').select('*').order('created_at', { ascending: false }),
+    );
+    if (error) { console.error('Error fetching tanteador:', error); return null; }
+    return ((data as Record<string, unknown>[]) || []).map(filaATanteadorPartido);
+  },
+
+  async saveTanteadorPartido(p: TanteadorPartido): Promise<boolean> {
+    if (!supabase) return false;
+    const fila: Record<string, unknown> = {
+      id: p.id,
+      torneo_id: p.torneoId,
+      categoria: p.categoria,
+      pareja_a: p.parejaA,
+      pareja_b: p.parejaB,
+      juez: p.juez || null,
+      cancha: p.cancha,
+      obj: p.obj,
+      cap: p.cap,
+      cambio_en: p.cambioEn,
+      sets: p.sets,
+      hist: p.hist,
+      estado: p.estado,
+      ganador: p.ganador,
+      invertido: p.invertido,
+      avisos: p.avisos,
+      creado_por: p.creadoPor,
+      updated_at: new Date().toISOString(),
+      terminado_at: p.terminadoAt,
+    };
+    const { error } = await conTechoEscritura(
+      supabase.from('tanteador_partidos').upsert(fila, { onConflict: 'id' }),
+    );
+    if (error) { console.error('Error guardando partido del tanteador:', error); return false; }
+    return true;
+  },
+
+  async deleteTanteadorPartido(id: string): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(
+      supabase.from('tanteador_partidos').delete().eq('id', id),
+    );
+    if (error) { console.error('Error borrando partido del tanteador:', error); return false; }
+    return true;
+  },
+
+  /**
+   * Parejas ya cargadas en los torneos activos (rk_torneos), para armar
+   * partidos con un toque. Solo lectura: el tanteador jamás escribe rk_torneos.
+   */
+  async getTanteadorSugerencias(): Promise<{ torneoId: string; torneo: string; parejas: string[] }[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(
+      supabase.from('rk_torneos').select('id, nombre, fase, data'),
+    );
+    if (error) { console.error('Error fetching sugerencias del tanteador:', error); return null; }
+    return ((data as Record<string, unknown>[]) || [])
+      .filter((r) => (r.fase as string) !== 'terminado')
+      .map((r) => {
+        const d = (r.data as Record<string, unknown>) || {};
+        const parejas = (Array.isArray(d.parejas) ? d.parejas : [])
+          .map((x) => ((x as Record<string, unknown>)?.nombre as string) || '')
+          .filter(Boolean);
+        return { torneoId: r.id as string, torneo: (r.nombre as string) || '', parejas };
+      })
+      .filter((t) => t.parejas.length > 0);
+  },
+
   // ─── Equipo ───────────────────────────────────────────────────────────────
   async getEquipo(): Promise<MiembroEquipo[] | null> {
     if (!supabase) return null;
@@ -1275,6 +1346,32 @@ function filaAGastoPendiente(row: Record<string, unknown>): GastoPendiente {
     pagadoAt: (row.pagado_at as string) ?? null,
     pagadoPor: (row.pagado_por as GastoPendiente['pagadoPor']) ?? null,
     ledgerId: (row.ledger_id as string) ?? null,
+  };
+}
+
+function filaATanteadorPartido(row: Record<string, unknown>): TanteadorPartido {
+  const hist = Array.isArray(row.hist) ? (row.hist as TanteadorPartido['hist']) : [[]];
+  return {
+    id: row.id as string,
+    torneoId: (row.torneo_id as string) ?? null,
+    categoria: (row.categoria as TanteadorPartido['categoria']) || 'DM',
+    parejaA: (row.pareja_a as string) || '',
+    parejaB: (row.pareja_b as string) || '',
+    juez: (row.juez as string) ?? null,
+    cancha: (row.cancha as string) || '1',
+    obj: (row.obj as number) || 15,
+    cap: (row.cap as number) || 21,
+    cambioEn: (row.cambio_en as number) || 8,
+    sets: Array.isArray(row.sets) ? (row.sets as TanteadorPartido['sets']) : [],
+    hist: hist.length ? hist : [[]],
+    estado: (row.estado as TanteadorPartido['estado']) || 'en_juego',
+    ganador: (row.ganador as TanteadorPartido['ganador']) ?? null,
+    invertido: !!row.invertido,
+    avisos: (row.avisos as Record<string, boolean>) || {},
+    creadoPor: (row.creado_por as string) || '',
+    createdAt: (row.created_at as string) || '',
+    updatedAt: (row.updated_at as string) || '',
+    terminadoAt: (row.terminado_at as string) ?? null,
   };
 }
 

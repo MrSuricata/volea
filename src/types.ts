@@ -423,3 +423,47 @@ export interface MiembroEquipo {
   role: RolAdmin;
   activo: boolean;
 }
+
+// ─── Tanteador (bádminton dobles) ────────────────────────────────────────────
+export type TanteadorLado = 'A' | 'B';
+export type TanteadorCategoria = 'DM' | 'DF';
+export type TanteadorEstado = 'en_juego' | 'final';
+
+export interface TanteadorSet { a: number; b: number; }
+
+/**
+ * Un partido del tanteador. Vive en su tabla propia (tanteador_partidos, v16)
+ * a propósito: NO escribe en rk_torneos — el sync local-first de torneos
+ * upsertea el documento entero y un write externo lo pisa o conflictúa.
+ * El resultado se carga al torneo a mano, como siempre.
+ */
+export interface TanteadorPartido {
+  id: string;
+  /** rk_torneos.id del que salieron las parejas; null = partido suelto. */
+  torneoId: string | null;
+  categoria: TanteadorCategoria;
+  parejaA: string;
+  parejaB: string;
+  juez: string | null;
+  cancha: string;
+  /** Set a N puntos (15 o 21). */
+  obj: number;
+  /** Tope de la extensión: desde obj-1 iguales se define por 2, hasta acá. */
+  cap: number;
+  /** Cambio de lado del 3er set cuando alguien llega a este puntaje. */
+  cambioEn: number;
+  /** Sets cerrados. */
+  sets: TanteadorSet[];
+  /** Historial punto a punto por set; el último array es el set en curso. */
+  hist: TanteadorLado[][];
+  estado: TanteadorEstado;
+  ganador: TanteadorLado | null;
+  /** Lados invertidos en pantalla (cambio de cancha). */
+  invertido: boolean;
+  /** Avisos ya mostrados (p.ej. cambio3), para no repetirlos. */
+  avisos: Record<string, boolean>;
+  creadoPor: string;
+  createdAt: string;
+  updatedAt: string;
+  terminadoAt: string | null;
+}

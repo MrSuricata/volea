@@ -9,7 +9,7 @@ import {
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList, UserRound,
-  Truck, ListChecks, UserCog,
+  Truck, ListChecks, UserCog, Swords,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
@@ -84,6 +84,7 @@ const AdminInscripcionesTab = lazyConRecarga(() => import('./components/AdminIns
 const AdminJugadoresTab = lazyConRecarga(() => import('./components/AdminJugadoresTab'));
 const AdminPedidosTab = lazyConRecarga(() => import('./components/AdminPedidosTab'));
 const AdminTareasTab = lazyConRecarga(() => import('./components/AdminTareasTab'));
+const AdminTanteadorTab = lazyConRecarga(() => import('./components/AdminTanteadorTab'));
 const AdminEquipoTab = lazyConRecarga(() => import('./components/AdminEquipoTab'));
 const SublimacionPanel = lazyConRecarga(() => import('./components/SublimacionPanel'));
 const AdminSociosTab = lazyConRecarga(() =>
@@ -4340,6 +4341,7 @@ function AdminPage() {
       id: 'g-torneos', label: 'Torneos', icon: <Trophy size={18} />,
       items: [
         { id: 'torneos', label: 'Torneos', icon: <Trophy size={16} /> },
+        { id: 'tanteador', label: 'Tanteador', icon: <Swords size={16} /> },
         { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
         { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
         { id: 'events', label: 'Eventos', icon: <CalendarDays size={16} /> },
@@ -5351,6 +5353,14 @@ function AdminPage() {
           <div className="fade-in">
             <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando tareas…</div>}>
               <AdminTareasTab adminEmail={currentAdmin?.email || ''} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 'tanteador' && (
+          <div className="fade-in">
+            <Suspense fallback={<div className="text-navy-500 text-sm py-8 text-center">Cargando tanteador…</div>}>
+              <AdminTanteadorTab adminEmail={currentAdmin?.email || ''} />
             </Suspense>
           </div>
         )}
