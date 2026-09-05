@@ -63,7 +63,6 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const [fB, setFB] = useState('');
   const [fJuez, setFJuez] = useState('');
   const [fCancha, setFCancha] = useState('1');
-  const [fObj, setFObj] = useState<15 | 21>(15);
   const [fTorneoId, setFTorneoId] = useState<string | null>(null);
 
   const vistaRef = useRef(vista);
@@ -209,7 +208,9 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
       parejaB: fB.trim().toUpperCase(),
       juez: fJuez.trim(),
       cancha: fCancha,
-      obj: fObj,
+      // Formato fijo de la copa (decisión de Brian 05/09): todos los partidos
+      // a 15 (tope 21), al mejor de 3. reglasPara(21) queda para el futuro.
+      obj: 15,
       torneoId: fTorneoId,
       creadoPor: adminEmail,
     });
@@ -369,18 +370,9 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
               </div>
             </div>
 
-            <label className="mt-4 block text-xs font-bold uppercase tracking-widest text-navy-500">Sets</label>
-            <div className="mt-1.5 grid grid-cols-2 gap-2">
-              {([15, 21] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setFObj(n)}
-                  className={`rounded-lg border px-3 py-2.5 text-sm font-semibold ${fObj === n ? 'border-lime-400 bg-lime-400 text-navy-700' : 'border-gray-200 bg-white text-navy-700 hover:border-navy-700'}`}
-                >
-                  A {n} (tope {n === 15 ? 21 : 30})
-                </button>
-              ))}
-            </div>
+            <p className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-xs font-semibold text-navy-500">
+              Formato de la copa: sets a 15 (desde 14-14 por 2, tope 21) · al mejor de 3.
+            </p>
 
             <div className="mt-5 grid grid-cols-3 gap-2">
               <button
