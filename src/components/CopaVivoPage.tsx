@@ -51,10 +51,6 @@ export default function CopaVivoPage() {
   const vivos = (partidos || []).filter((p) => p.estado === 'en_juego');
   const puntosDe = (p: TanteadorPartido) => p.hist.reduce((n, h) => n + h.length, 0);
   const enJuego = vivos.filter((p) => puntosDe(p) > 0);
-  const porJugar = vivos.filter((p) => puntosDe(p) === 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const finales = (partidos || [])
-    .filter((p) => p.estado === 'final')
-    .sort((a, b) => (b.terminadoAt || '').localeCompare(a.terminadoAt || ''));
 
   const deCat = (cat: 'DM' | 'DF') => (partidos || []).filter((p) => p.categoria === cat);
   const tablas: { titulo: string; unidad: string; filas: FilaAmericano[] }[] = [
@@ -176,48 +172,52 @@ export default function CopaVivoPage() {
           ))}
         </div>
 
-        {/* próximos y últimos */}
+        {/* programación completa del día, por cancha */}
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div>
-            <h2 className="mb-2 font-display text-lg font-black tracking-wide text-white">PRÓXIMOS CRUCES</h2>
-            {porJugar.length === 0 ? (
-              <p className="text-sm text-navy-300">No quedan cruces por jugar.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {porJugar.slice(0, 6).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-sm">
-                    <span className="min-w-0 truncate font-semibold">{p.parejaA} <span className="text-navy-300">vs</span> {p.parejaB}</span>
-                    <span className="whitespace-nowrap text-xs font-bold text-navy-200">
-                      {p.categoria === 'DM' ? 'M' : 'F'} · C{p.cancha}
-                    </span>
-                  </div>
-                ))}
-                {porJugar.length > 6 && (
-                  <p className="text-xs text-navy-300">…y {porJugar.length - 6} más</p>
-                )}
+          {(['1', '2'] as const).map((c) => {
+            const lista = (partidos || [])
+              .filter((p) => p.cancha === c)
+              .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+            if (!lista.length) return null;
+            const cats = new Set(lista.map((p) => p.categoria));
+            const rotulo = cats.size === 1 ? (cats.has('DM') ? ' — MASCULINO' : ' — FEMENINO') : '';
+            return (
+              <div key={c}>
+                <h2 className="mb-2 font-display text-lg font-black tracking-wide text-white">
+                  PROGRAMACIÓN · CANCHA {c}{rotulo}
+                </h2>
+                <div className="space-y-1.5">
+                  {lista.map((p, i) => {
+                    const vivo = p.estado === 'en_juego' && puntosDe(p) > 0;
+                    const s = vivo ? marcadorActual(p) : null;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm ${
+                          vivo ? 'border-lime-400 bg-navy-800'
+                          : p.estado === 'final' ? 'border-navy-700 bg-navy-800/50 text-navy-200'
+                          : 'border-navy-700 bg-navy-800'
+                        }`}
+                      >
+                        <span className="min-w-0 truncate">
+                          <span className="mr-2 font-display text-xs font-bold text-navy-400">{i + 1}</span>
+                          {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
+                          <span className={`font-semibold ${p.ganador === 'A' ? 'font-bold text-lime-400' : ''}`}>{p.parejaA}</span>
+                          <span className="text-navy-400"> vs </span>
+                          <span className={`font-semibold ${p.ganador === 'B' ? 'font-bold text-lime-400' : ''}`}>{p.parejaB}</span>
+                        </span>
+                        <span className="whitespace-nowrap font-display text-xs font-bold">
+                          {p.estado === 'final' ? <span className="text-navy-100">✓ {resumenSets(p)}</span>
+                            : vivo && s ? <span className="text-lime-400">EN VIVO {s.a}-{s.b}</span>
+                            : <span className="text-navy-400">por jugar</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            )}
-          </div>
-          <div>
-            <h2 className="mb-2 font-display text-lg font-black tracking-wide text-white">ÚLTIMOS RESULTADOS</h2>
-            {finales.length === 0 ? (
-              <p className="text-sm text-navy-300">Todavía no hay resultados.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {finales.slice(0, 6).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-sm">
-                    <span className="min-w-0 truncate">
-                      {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
-                      <span className={`font-bold ${p.ganador === 'A' ? 'text-lime-400' : ''}`}>{p.parejaA}</span>
-                      <span className="text-navy-300"> vs </span>
-                      <span className={`font-bold ${p.ganador === 'B' ? 'text-lime-400' : ''}`}>{p.parejaB}</span>
-                    </span>
-                    <span className="whitespace-nowrap font-display text-xs font-bold">{resumenSets(p)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            );
+          })}
         </div>
 
         <p className="mt-8 text-center text-[11px] text-navy-400">
