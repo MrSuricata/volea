@@ -19,12 +19,14 @@ import {
   reiniciarPartido,
   marcadorActual,
   marcadorDe,
+  propuestasLlave,
   resumenSets,
   setsGanados,
   tablaAmericano,
   tablaParejas,
   terminarManual,
   type AvisoPunto,
+  type PropuestaLlave,
 } from '../utils/tanteador';
 
 const ESPEJO_KEY = 'volea_tanteador_espejo';
@@ -60,6 +62,7 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const [actual, setActual] = useState<TanteadorPartido | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [corregir, setCorregir] = useState<{ a: string; b: string } | null>(null);
+  const [llaveDe, setLlaveDe] = useState<{ cat: TanteadorCategoria; modo: TanteadorModo } | null>(null);
   const [sugerencias, setSugerencias] = useState<Sugerencia[]>([]);
   const [espejo, setEspejo] = useState<TanteadorPartido | null>(() => espejoLeer());
 
@@ -186,6 +189,32 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
     if (!r.ok) { toast.error(r.error); return; }
     persistir(r.partido);
     setCorregir(null);
+  };
+
+  const crearLlave = (prop: PropuestaLlave) => {
+    if (!llaveDe) return;
+    const nuevos = prop.partidos.map((m, i) =>
+      crearPartido({
+        id: crypto.randomUUID(),
+        categoria: llaveDe.cat,
+        modo: llaveDe.modo,
+        fase: 'llave',
+        titulo: m.titulo,
+        parejaA: m.parejaA,
+        parejaB: m.parejaB,
+        jugadoresA: m.jugadoresA,
+        jugadoresB: m.jugadoresB,
+        cancha: String(i + 1),
+        creadoPor: adminEmail,
+      }),
+    );
+    setLlaveDe(null);
+    setPartidos((prev) => [...nuevos, ...(prev || [])]);
+    void Promise.all(nuevos.map((p) => SupabaseService.saveTanteadorPartido(p))).then((oks) => {
+      if (oks.every(Boolean)) toast.success(nuevos.length === 1 ? `${nuevos[0].titulo} creada` : 'Semifinales creadas');
+      else toast.error('No se pudo guardar la llave en la nube — reintentá.');
+      void cargar();
+    });
   };
 
   const pedirReinicio = () => {
@@ -396,10 +425,10 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           {(['DM', 'DF'] as const).flatMap((cat) => {
             const deCat = (partidos || []).filter((p) => p.categoria === cat);
             const bloques = [
-              { clave: `${cat}-duplas`, titulo: 'de duplas', unidad: 'Dupla', filas: tablaParejas(deCat.filter((p) => p.modo === 'fijas'), cat) },
-              { clave: `${cat}-ind`, titulo: 'individual', unidad: 'Jugador', filas: tablaAmericano(deCat.filter((p) => p.modo === 'rotativas'), cat) },
+              { clave: `${cat}-duplas`, titulo: 'de duplas', unidad: 'Dupla', modo: 'fijas' as const, filas: tablaParejas(deCat.filter((p) => p.modo === 'fijas'), cat) },
+              { clave: `${cat}-ind`, titulo: 'individual', unidad: 'Jugador', modo: 'rotativas' as const, filas: tablaAmericano(deCat.filter((p) => p.modo === 'rotativas'), cat) },
             ].filter((b) => b.filas.length > 0);
-            return bloques.map(({ clave, titulo, unidad, filas: tabla }) => (
+            return bloques.map(({ clave, titulo, unidad, modo, filas: tabla }) => (
               <div key={clave}>
                 <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-widest text-navy-500">
                   Tabla {titulo} — {cat === 'DM' ? 'Masculino' : 'Femenino'}
@@ -438,8 +467,16 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
                   </table>
                 </div>
                 <p className="mt-1 px-1 text-[10px] text-navy-400">
-                  Orden: partidos ganados → diferencia de puntos → puntos a favor. Solo partidos terminados.
+                  Orden: partidos ganados → diferencia de puntos → puntos a favor. Solo fase de grupos terminada (la llave no suma acá).
                 </p>
+                {propuestasLlave(partidos || [], cat, modo).length > 0 && (
+                  <button
+                    onClick={() => setLlaveDe({ cat, modo })}
+                    className="mt-2 w-full rounded-lg bg-navy-700 px-4 py-2.5 font-display text-sm font-bold text-lime-400 hover:bg-navy-800"
+                  >
+                    ⚡ Armar llave — {cat === 'DM' ? 'Masculino' : 'Femenino'}
+                  </button>
+                )}
               </div>
             ));
           })}
@@ -626,6 +663,49 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
         />
       )}
 
+      {/* ============ ARMAR LLAVE ============ */}
+      {llaveDe && (() => {
+        const props = propuestasLlave(partidos || [], llaveDe.cat, llaveDe.modo);
+        const pendientes = (partidos || []).filter(
+          (p) => p.categoria === llaveDe.cat && p.modo === llaveDe.modo && p.fase === 'grupos' && p.estado === 'en_juego',
+        ).length;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-6">
+            <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+              <p className="font-display text-lg font-bold text-navy-700">
+                Armar llave — {llaveDe.cat === 'DM' ? 'Masculino' : 'Femenino'}
+              </p>
+              {pendientes > 0 && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                  ⚠️ Quedan {pendientes} cruce{pendientes > 1 ? 's' : ''} de grupo sin terminar. La siembra usa la tabla como está AHORA.
+                </p>
+              )}
+              <div className="mt-3 space-y-2">
+                {props.map((prop) => (
+                  <button
+                    key={prop.id}
+                    onClick={() => crearLlave(prop)}
+                    className="w-full rounded-xl border border-gray-200 bg-white p-3 text-left hover:border-navy-700"
+                  >
+                    <p className="font-display text-sm font-bold text-navy-700">{prop.etiqueta}</p>
+                    <p className="mt-0.5 text-xs text-navy-500">{prop.detalle}</p>
+                  </button>
+                ))}
+                {props.length === 0 && (
+                  <p className="text-sm text-navy-500">Nada para armar: o la llave ya está creada, o las semis siguen en juego.</p>
+                )}
+              </div>
+              <button
+                onClick={() => setLlaveDe(null)}
+                className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-navy-700"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ============ CORREGIR MARCADOR ============ */}
       {corregir && actual && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-6">
@@ -733,6 +813,11 @@ function Card({ p, onAbrir, onBorrar }: {
         </p>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-navy-500">
+        {p.fase === 'llave' && (
+          <span className="rounded-full bg-lime-400 px-2 py-0.5 font-display font-black text-navy-800">
+            {p.titulo || 'LLAVE'}
+          </span>
+        )}
         <span className={`rounded-full border px-2 py-0.5 font-semibold ${p.categoria === 'DM' ? 'border-navy-200 text-navy-600' : 'border-pink-200 text-pink-600'}`}>
           {p.categoria === 'DM' ? 'Masculino' : 'Femenino'}
         </span>

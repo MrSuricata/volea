@@ -85,6 +85,25 @@ export default function CopaVivoPage() {
           <p className="py-16 text-center text-lg text-navy-200">Cargando la copa…</p>
         )}
 
+        {/* campeones (cuando la FINAL de una categoría está jugada) */}
+        {(['DM', 'DF'] as const).map((cat) => {
+          const f = (partidos || []).find(
+            (p) => p.categoria === cat && p.fase === 'llave' && (p.titulo || '').toUpperCase() === 'FINAL' && p.estado === 'final' && p.ganador,
+          );
+          if (!f) return null;
+          return (
+            <div key={cat} className="mt-6 rounded-2xl bg-lime-400 p-4 text-center sm:p-6">
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-navy-800">
+                {cat === 'DM' ? 'Campeones — Masculino' : 'Campeonas — Femenino'} 🏆
+              </p>
+              <p className="mt-1 font-display text-3xl font-black text-navy-900 sm:text-5xl">
+                {f.ganador === 'A' ? f.parejaA : f.parejaB}
+              </p>
+              <p className="mt-1 font-display text-sm font-bold text-navy-800">{resumenSets(f)}</p>
+            </div>
+          );
+        })}
+
         {/* en juego */}
         {enJuego.length > 0 && (
           <div className={`mt-6 grid gap-4 ${enJuego.length > 1 ? 'lg:grid-cols-2' : ''}`}>
@@ -94,7 +113,10 @@ export default function CopaVivoPage() {
               return (
                 <div key={p.id} className="rounded-2xl border-2 border-lime-400 bg-navy-800 p-4 sm:p-6">
                   <div className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-widest text-navy-200">
-                    <span>{p.categoria === 'DM' ? 'Masculino' : 'Femenino'} · Cancha {p.cancha}</span>
+                    <span>
+                      {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1.5 py-0.5 font-display font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
+                      {p.categoria === 'DM' ? 'Masculino' : 'Femenino'} · Cancha {p.cancha}
+                    </span>
                     <span className="text-lime-400">Set {p.sets.length + 1}</span>
                   </div>
                   {([['A', p.parejaA, s.a, sg.A], ['B', p.parejaB, s.b, sg.B]] as const).map(([lado, nombre, pts, sets]) => (
@@ -185,6 +207,7 @@ export default function CopaVivoPage() {
                 {finales.slice(0, 6).map((p) => (
                   <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-sm">
                     <span className="min-w-0 truncate">
+                      {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
                       <span className={`font-bold ${p.ganador === 'A' ? 'text-lime-400' : ''}`}>{p.parejaA}</span>
                       <span className="text-navy-300"> vs </span>
                       <span className={`font-bold ${p.ganador === 'B' ? 'text-lime-400' : ''}`}>{p.parejaB}</span>

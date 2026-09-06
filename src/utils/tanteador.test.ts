@@ -8,6 +8,7 @@ import {
   ganadorSet,
   jugadoresDe,
   marcadorActual,
+  propuestasLlave,
   reiniciarPartido,
   setsGanados,
   tablaAmericano,
@@ -229,5 +230,70 @@ describe('reiniciarPartido y corregirMarcadorActual', () => {
     expect(corregirMarcadorActual(p, -1, 0).ok).toBe(false);
     expect(corregirMarcadorActual(p, 22, 0).ok).toBe(false);
     expect(corregirMarcadorActual(p, 14, 13).ok).toBe(true);
+  });
+});
+
+describe('fase llave y propuestasLlave', () => {
+  function finalizado(pa: string, pb: string, ganador: 'A' | 'B', extra?: Partial<TanteadorPartido>): TanteadorPartido {
+    return {
+      ...crearPartido({ id: Math.random().toString(36), categoria: 'DM', modo: 'fijas', parejaA: pa, parejaB: pb }),
+      sets: ganador === 'A' ? [{ a: 15, b: 5 }, { a: 15, b: 5 }] : [{ a: 5, b: 15 }, { a: 5, b: 15 }],
+      estado: 'final', ganador, ...extra,
+    };
+  }
+
+  // Grupo: D1 le gana a todos, D2 gana 2, D3 gana 1, D4 gana 0
+  const grupo = [
+    finalizado('D1', 'D2', 'A'), finalizado('D1', 'D3', 'A'), finalizado('D1', 'D4', 'A'),
+    finalizado('D2', 'D3', 'A'), finalizado('D2', 'D4', 'A'), finalizado('D3', 'D4', 'A'),
+  ];
+
+  it('los partidos de llave no suman en la tabla de grupos', () => {
+    const llaveFinal = finalizado('D1', 'D2', 'B', { fase: 'llave', titulo: 'FINAL' });
+    const tabla = tablaParejas([...grupo, llaveFinal], 'DM');
+    expect(tabla[0]).toMatchObject({ nombre: 'D1', pg: 3, pj: 3 }); // la final no le agrega pj
+  });
+
+  it('sin llave propone semis 1v4 / 2v3 y final directa 1v2', () => {
+    const props = propuestasLlave(grupo, 'DM', 'fijas');
+    const semis = props.find((x) => x.id === 'semis');
+    expect(semis?.partidos.map((p) => `${p.parejaA}-${p.parejaB}`)).toEqual(['D1-D4', 'D2-D3']);
+    const fd = props.find((x) => x.id === 'final-directa');
+    expect(fd?.partidos[0]).toMatchObject({ parejaA: 'D1', parejaB: 'D2', titulo: 'FINAL' });
+  });
+
+  it('con semis jugadas propone la final entre ganadores; con final creada, nada', () => {
+    const s1 = finalizado('D1', 'D4', 'A', { fase: 'llave', titulo: 'SEMIFINAL 1' });
+    const s2 = finalizado('D2', 'D3', 'B', { fase: 'llave', titulo: 'SEMIFINAL 2' });
+    const props = propuestasLlave([...grupo, s1, s2], 'DM', 'fijas');
+    expect(props).toHaveLength(1);
+    expect(props[0].partidos[0]).toMatchObject({ titulo: 'FINAL', parejaA: 'D1', parejaB: 'D3' });
+    // semis sin terminar: no propone nada
+    const s2vivo = { ...s2, estado: 'en_juego' as const, ganador: null };
+    expect(propuestasLlave([...grupo, s1, s2vivo], 'DM', 'fijas')).toHaveLength(0);
+    // final ya creada: nada
+    const f = finalizado('D1', 'D3', 'A', { fase: 'llave', titulo: 'FINAL' });
+    expect(propuestasLlave([...grupo, s1, s2, f], 'DM', 'fijas')).toHaveLength(0);
+  });
+
+  it('rotativas propone final americana 1+4 vs 2+3', () => {
+    const df = (ja: string[], jb: string[], g: 'A' | 'B') => ({
+      ...crearPartido({ id: Math.random().toString(36), categoria: 'DF' as const, modo: 'rotativas' as const, parejaA: ja.join(' / '), parejaB: jb.join(' / '), jugadoresA: ja, jugadoresB: jb }),
+      sets: g === 'A' ? [{ a: 15, b: 5 }, { a: 15, b: 5 }] : [{ a: 5, b: 15 }, { a: 5, b: 15 }],
+      estado: 'final' as const, ganador: g,
+    });
+    // J1 gana sus dos, J4 pierde todo
+    const partidos = [
+      df(['J1', 'J2'], ['J3', 'J4'], 'A'),
+      df(['J1', 'J3'], ['J2', 'J4'], 'A'),
+      df(['J1', 'J4'], ['J2', 'J3'], 'B'),
+    ];
+    const props = propuestasLlave(partidos, 'DF', 'rotativas');
+    expect(props).toHaveLength(1);
+    const f = props[0].partidos[0];
+    expect(f.titulo).toBe('FINAL');
+    expect(f.jugadoresA).toContain('J1');
+    expect(f.jugadoresA).toHaveLength(2);
+    expect([...f.jugadoresA, ...f.jugadoresB].sort()).toEqual(['J1', 'J2', 'J3', 'J4']);
   });
 });

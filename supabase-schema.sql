@@ -976,3 +976,22 @@ ALTER TABLE public.tanteador_partidos
     CHECK (modo IN ('fijas','rotativas'));
 -- Los 16 cruces de la copa quedaron precargados (creado_por 'jarvis (cruces
 -- precargados)'): la web los muestra como "por jugar" (en_juego sin puntos).
+
+-- ============================================
+-- v19 + v20 (2026-09-05): TV en vivo y llave del tanteador
+-- ============================================
+-- v19 "tanteador_lectura_publica": SELECT publico sobre tanteador_partidos
+-- para la pantalla /#/copa (una TV en Pickleball City). Solo lectura; la
+-- escritura sigue gateada por tanteador_equipo (es_equipo).
+DROP POLICY IF EXISTS tanteador_public_read ON public.tanteador_partidos;
+CREATE POLICY tanteador_public_read ON public.tanteador_partidos
+  FOR SELECT USING (true);
+-- v20 "tanteador_fase_llave": fase de definicion. Los partidos de llave
+-- (semis/final, con titulo) NO suman en las tablas de grupos; el boton
+-- "Armar llave" del admin los crea sembrados desde la tabla (1v4/2v3, final
+-- directa, final entre ganadores de semis, o final americana 1+4 vs 2+3 en
+-- rotativas). El campeon sale de la FINAL y la TV lo muestra en banner.
+ALTER TABLE public.tanteador_partidos
+  ADD COLUMN IF NOT EXISTS fase TEXT NOT NULL DEFAULT 'grupos'
+    CHECK (fase IN ('grupos','llave')),
+  ADD COLUMN IF NOT EXISTS titulo TEXT;

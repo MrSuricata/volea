@@ -25,6 +25,8 @@ export function crearPartido(datos: {
   id: string;
   categoria: TanteadorCategoria;
   modo?: TanteadorModo;
+  fase?: 'grupos' | 'llave';
+  titulo?: string | null;
   parejaA: string;
   parejaB: string;
   jugadoresA?: string[];
@@ -42,6 +44,8 @@ export function crearPartido(datos: {
     torneoId: datos.torneoId ?? null,
     categoria: datos.categoria,
     modo: datos.modo ?? 'fijas',
+    fase: datos.fase ?? 'grupos',
+    titulo: datos.titulo ?? null,
     parejaA: datos.parejaA,
     parejaB: datos.parejaB,
     jugadoresA: datos.jugadoresA ?? [],
@@ -213,7 +217,7 @@ export function tablaAmericano(
   };
 
   for (const p of partidos) {
-    if (p.estado !== 'final' || p.categoria !== categoria) continue;
+    if (p.estado !== 'final' || p.categoria !== categoria || p.fase === 'llave') continue;
     let pfA = 0;
     let pfB = 0;
     for (const s of p.sets) { pfA += s.a; pfB += s.b; }
@@ -252,7 +256,7 @@ export function tablaParejas(
   };
 
   for (const p of partidos) {
-    if (p.estado !== 'final' || p.categoria !== categoria) continue;
+    if (p.estado !== 'final' || p.categoria !== categoria || p.fase === 'llave') continue;
     let pfA = 0;
     let pfB = 0;
     for (const s of p.sets) { pfA += s.a; pfB += s.b; }
@@ -269,6 +273,110 @@ export function tablaParejas(
   for (const f of lista) f.dif = f.pf - f.pc;
   lista.sort((x, y) => y.pg - x.pg || y.dif - x.dif || y.pf - x.pf || x.nombre.localeCompare(y.nombre));
   return lista;
+}
+
+/* ───────── armado de llave (definición) ───────── */
+
+export interface PartidoLlavePropuesto {
+  titulo: string;
+  parejaA: string;
+  parejaB: string;
+  jugadoresA: string[];
+  jugadoresB: string[];
+}
+
+export interface PropuestaLlave {
+  id: string;
+  etiqueta: string;
+  detalle: string;
+  partidos: PartidoLlavePropuesto[];
+}
+
+function jugadoresDePareja(partidos: TanteadorPartido[], nombre: string): string[] {
+  for (const p of partidos) {
+    if (p.parejaA === nombre) return jugadoresDe(p, 'A');
+    if (p.parejaB === nombre) return jugadoresDe(p, 'B');
+  }
+  return nombre.split(/\s*[/\-]\s*/).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Qué se puede armar AHORA para cerrar una categoría, según lo ya jugado:
+ * sin llave → semis (1°v4°, 2°v3°) o final directa (1°v2°) desde la tabla de
+ * grupos; con semis terminadas → la FINAL entre sus ganadores; en rotativas
+ * (americano) → final americana 1ª+4ª vs 2ª+3ª. Con la FINAL creada, nada más.
+ */
+export function propuestasLlave(
+  partidos: TanteadorPartido[],
+  categoria: TanteadorCategoria,
+  modo: TanteadorModo,
+): PropuestaLlave[] {
+  const deCat = partidos.filter((p) => p.categoria === categoria && p.modo === modo);
+  const llave = deCat.filter((p) => p.fase === 'llave');
+  const semis = llave
+    .filter((p) => (p.titulo || '').toUpperCase().startsWith('SEMIFINAL'))
+    .sort((a, b) => (a.titulo || '').localeCompare(b.titulo || ''));
+  const final = llave.find((p) => (p.titulo || '').toUpperCase() === 'FINAL');
+  if (final) return [];
+
+  if (semis.length >= 2) {
+    const [s1, s2] = semis;
+    if (s1.estado !== 'final' || s2.estado !== 'final' || !s1.ganador || !s2.ganador) return [];
+    const gan = (p: TanteadorPartido) => ({
+      nombre: p.ganador === 'A' ? p.parejaA : p.parejaB,
+      jugadores: jugadoresDe(p, p.ganador as TanteadorLado),
+    });
+    const a = gan(s1);
+    const b = gan(s2);
+    return [{
+      id: 'final-semis',
+      etiqueta: 'Armar la FINAL',
+      detalle: `${a.nombre} vs ${b.nombre} (ganadores de las semis)`,
+      partidos: [{ titulo: 'FINAL', parejaA: a.nombre, parejaB: b.nombre, jugadoresA: a.jugadores, jugadoresB: b.jugadores }],
+    }];
+  }
+  if (llave.length > 0) return []; // llave a medio armar de otra forma: no ensuciar
+
+  const props: PropuestaLlave[] = [];
+  if (modo === 'fijas') {
+    const t = tablaParejas(deCat, categoria);
+    if (t.length >= 4) {
+      props.push({
+        id: 'semis',
+        etiqueta: 'Semifinales (clasifican 4)',
+        detalle: `S1: ${t[0].nombre} vs ${t[3].nombre} · S2: ${t[1].nombre} vs ${t[2].nombre}`,
+        partidos: [
+          { titulo: 'SEMIFINAL 1', parejaA: t[0].nombre, parejaB: t[3].nombre, jugadoresA: jugadoresDePareja(deCat, t[0].nombre), jugadoresB: jugadoresDePareja(deCat, t[3].nombre) },
+          { titulo: 'SEMIFINAL 2', parejaA: t[1].nombre, parejaB: t[2].nombre, jugadoresA: jugadoresDePareja(deCat, t[1].nombre), jugadoresB: jugadoresDePareja(deCat, t[2].nombre) },
+        ],
+      });
+    }
+    if (t.length >= 2) {
+      props.push({
+        id: 'final-directa',
+        etiqueta: 'Final directa (clasifican 2)',
+        detalle: `${t[0].nombre} vs ${t[1].nombre}`,
+        partidos: [{ titulo: 'FINAL', parejaA: t[0].nombre, parejaB: t[1].nombre, jugadoresA: jugadoresDePareja(deCat, t[0].nombre), jugadoresB: jugadoresDePareja(deCat, t[1].nombre) }],
+      });
+    }
+  } else {
+    const t = tablaAmericano(deCat, categoria);
+    if (t.length >= 4) {
+      props.push({
+        id: 'final-americana',
+        etiqueta: 'Final americana (1ª y 4ª vs 2ª y 3ª)',
+        detalle: `${t[0].nombre} + ${t[3].nombre} vs ${t[1].nombre} + ${t[2].nombre}`,
+        partidos: [{
+          titulo: 'FINAL',
+          parejaA: `${t[0].nombre} / ${t[3].nombre}`,
+          parejaB: `${t[1].nombre} / ${t[2].nombre}`,
+          jugadoresA: [t[0].nombre, t[3].nombre],
+          jugadoresB: [t[1].nombre, t[2].nombre],
+        }],
+      });
+    }
+  }
+  return props;
 }
 
 /** Vuelve el partido a 0-0: borra sets y puntos, queda listo para arrancar. */

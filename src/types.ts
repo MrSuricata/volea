@@ -446,6 +446,10 @@ export interface TanteadorPartido {
   categoria: TanteadorCategoria;
   /** v18: formato del partido — define en qué tabla suma. */
   modo: TanteadorModo;
+  /** v20: 'grupos' suma en la tabla; 'llave' es definición (semis/final) y no suma. */
+  fase: 'grupos' | 'llave';
+  /** Etiqueta de los partidos de llave: 'SEMIFINAL 1', 'FINAL'... null en grupos. */
+  titulo: string | null;
   parejaA: string;
   parejaB: string;
   /** Americano (v17): los 2 jugadores de cada lado, para la tabla individual.
