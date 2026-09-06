@@ -16,12 +16,12 @@ import {
   type FilaAmericano,
 } from '../utils/tanteador';
 
-/** Los 2 nombres de un lado, apilados uno por línea (legible desde lejos). */
+/** Los 2 nombres de un lado, apilados uno por línea, completos (sin cortar). */
 function Nombres({ p, lado, resaltar }: { p: TanteadorPartido; lado: 'A' | 'B'; resaltar?: boolean }) {
   return (
     <>
       {jugadoresDe(p, lado).map((n) => (
-        <p key={n} className={`truncate leading-tight ${resaltar ? 'text-lime-400' : ''}`}>{n}</p>
+        <p key={n} className={`break-words leading-tight ${resaltar ? 'text-lime-400' : ''}`}>{n}</p>
       ))}
     </>
   );
