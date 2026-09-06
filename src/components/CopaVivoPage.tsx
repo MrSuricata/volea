@@ -51,6 +51,9 @@ export default function CopaVivoPage() {
   const vivos = (partidos || []).filter((p) => p.estado === 'en_juego');
   const puntosDe = (p: TanteadorPartido) => p.hist.reduce((n, h) => n + h.length, 0);
   const enJuego = vivos.filter((p) => puntosDe(p) > 0);
+  const finales = (partidos || [])
+    .filter((p) => p.estado === 'final')
+    .sort((a, b) => (b.terminadoAt || b.updatedAt || '').localeCompare(a.terminadoAt || a.updatedAt || ''));
 
   const deCat = (cat: 'DM' | 'DF') => (partidos || []).filter((p) => p.categoria === cat);
   const tablas: { titulo: string; unidad: string; filas: FilaAmericano[] }[] = [
@@ -130,6 +133,26 @@ export default function CopaVivoPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* últimos resultados — van cayendo acá a medida que terminan */}
+        {finales.length > 0 && (
+          <div className="mt-8">
+            <h2 className="mb-2 font-display text-lg font-black tracking-wide text-lime-400 sm:text-xl">ÚLTIMOS RESULTADOS</h2>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {finales.slice(0, 8).map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2.5 text-sm sm:text-base">
+                  <span className="min-w-0 truncate">
+                    {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
+                    <span className={`font-bold ${p.ganador === 'A' ? 'text-lime-400' : ''}`}>{p.parejaA}</span>
+                    <span className="text-navy-300"> vs </span>
+                    <span className={`font-bold ${p.ganador === 'B' ? 'text-lime-400' : ''}`}>{p.parejaB}</span>
+                  </span>
+                  <span className="whitespace-nowrap font-display text-sm font-bold">{resumenSets(p)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
