@@ -995,3 +995,13 @@ ALTER TABLE public.tanteador_partidos
   ADD COLUMN IF NOT EXISTS fase TEXT NOT NULL DEFAULT 'grupos'
     CHECK (fase IN ('grupos','llave')),
   ADD COLUMN IF NOT EXISTS titulo TEXT;
+
+-- ============================================
+-- v21 (2026-09-06): Largar a la cancha
+-- ============================================
+-- Migracion "tanteador_llamado_a_cancha": llamado_at marca que el partido fue
+-- "largado" desde el panel — la TV lo muestra como A LA CANCHA para que la
+-- gente sepa donde pararse; al entrar puntos pasa a EN VIVO. Ademas la carga
+-- manual de resultados (de la hoja) vive en la app (cargarResultadoManual).
+ALTER TABLE public.tanteador_partidos
+  ADD COLUMN IF NOT EXISTS llamado_at TIMESTAMPTZ;

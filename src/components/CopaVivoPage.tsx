@@ -7,6 +7,7 @@ import { supabase } from '../services/supabaseClient';
 import { SupabaseService } from '../services/supabaseService';
 import type { TanteadorPartido } from '../types';
 import {
+  jugadoresDe,
   marcadorActual,
   resumenSets,
   setsGanados,
@@ -14,6 +15,17 @@ import {
   tablaParejas,
   type FilaAmericano,
 } from '../utils/tanteador';
+
+/** Los 2 nombres de un lado, apilados uno por línea (legible desde lejos). */
+function Nombres({ p, lado, resaltar }: { p: TanteadorPartido; lado: 'A' | 'B'; resaltar?: boolean }) {
+  return (
+    <>
+      {jugadoresDe(p, lado).map((n) => (
+        <p key={n} className={`truncate leading-tight ${resaltar ? 'text-lime-400' : ''}`}>{n}</p>
+      ))}
+    </>
+  );
+}
 
 export default function CopaVivoPage() {
   const [partidos, setPartidos] = useState<TanteadorPartido[] | null>(null);
@@ -51,6 +63,9 @@ export default function CopaVivoPage() {
   const vivos = (partidos || []).filter((p) => p.estado === 'en_juego');
   const puntosDe = (p: TanteadorPartido) => p.hist.reduce((n, h) => n + h.length, 0);
   const enJuego = vivos.filter((p) => puntosDe(p) > 0);
+  const llamados = vivos
+    .filter((p) => puntosDe(p) === 0 && p.llamadoAt)
+    .sort((a, b) => (a.llamadoAt || '').localeCompare(b.llamadoAt || ''));
   const finales = (partidos || [])
     .filter((p) => p.estado === 'final')
     .sort((a, b) => (b.terminadoAt || b.updatedAt || '').localeCompare(a.terminadoAt || a.updatedAt || ''));
@@ -103,6 +118,25 @@ export default function CopaVivoPage() {
           );
         })}
 
+        {/* llamados a la cancha (largados desde el panel) */}
+        {llamados.length > 0 && (
+          <div className={`mt-6 grid gap-4 ${llamados.length > 1 ? 'lg:grid-cols-2' : ''}`}>
+            {llamados.map((p) => (
+              <div key={p.id} className="rounded-2xl border-2 border-lime-400 bg-lime-400/10 p-4 sm:p-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="animate-pulse text-sm font-bold uppercase tracking-widest text-lime-400">🔔 A la cancha</span>
+                  <span className="font-display text-2xl font-black text-white sm:text-3xl">CANCHA {p.cancha}</span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-lg font-bold sm:text-2xl">
+                  <div className="min-w-0 text-lime-400"><Nombres p={p} lado="A" /></div>
+                  <span className="text-sm font-semibold text-navy-300">vs</span>
+                  <div className="min-w-0 text-right text-[#ff5fb1]"><Nombres p={p} lado="B" /></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* en juego */}
         {enJuego.length > 0 && (
           <div className={`mt-6 grid gap-4 ${enJuego.length > 1 ? 'lg:grid-cols-2' : ''}`}>
@@ -118,13 +152,13 @@ export default function CopaVivoPage() {
                     </span>
                     <span className="text-lime-400">Set {p.sets.length + 1}</span>
                   </div>
-                  {([['A', p.parejaA, s.a, sg.A], ['B', p.parejaB, s.b, sg.B]] as const).map(([lado, nombre, pts, sets]) => (
+                  {([['A', s.a, sg.A], ['B', s.b, sg.B]] as const).map(([lado, pts, sets]) => (
                     <div key={lado} className="flex items-center justify-between gap-3 py-1.5">
-                      <p className={`min-w-0 truncate font-body text-lg font-bold sm:text-2xl ${lado === 'A' ? 'text-lime-400' : 'text-[#ff5fb1]'}`}>
-                        {nombre}
-                        <span className="ml-2 align-middle text-xs font-semibold text-navy-300">({sets})</span>
-                      </p>
-                      <p className="font-display text-5xl font-black leading-none sm:text-7xl">{pts}</p>
+                      <div className={`min-w-0 font-body text-xl font-bold sm:text-3xl ${lado === 'A' ? 'text-lime-400' : 'text-[#ff5fb1]'}`}>
+                        <Nombres p={p} lado={lado} />
+                        <p className="text-xs font-semibold text-navy-300">Sets: {sets}</p>
+                      </div>
+                      <p className="font-display text-6xl font-black leading-none sm:text-8xl">{pts}</p>
                     </div>
                   ))}
                   {p.sets.length > 0 && (
@@ -142,14 +176,14 @@ export default function CopaVivoPage() {
             <h2 className="mb-2 font-display text-lg font-black tracking-wide text-lime-400 sm:text-xl">ÚLTIMOS RESULTADOS</h2>
             <div className="grid gap-1.5 sm:grid-cols-2">
               {finales.slice(0, 8).map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2.5 text-sm sm:text-base">
-                  <span className="min-w-0 truncate">
-                    {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
-                    <span className={`font-bold ${p.ganador === 'A' ? 'text-lime-400' : ''}`}>{p.parejaA}</span>
-                    <span className="text-navy-300"> vs </span>
-                    <span className={`font-bold ${p.ganador === 'B' ? 'text-lime-400' : ''}`}>{p.parejaB}</span>
-                  </span>
-                  <span className="whitespace-nowrap font-display text-sm font-bold">{resumenSets(p)}</span>
+                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2.5">
+                  <div className="min-w-0 text-base font-bold sm:text-lg">
+                    {p.fase === 'llave' && <span className="mb-1 inline-block rounded bg-lime-400 px-1.5 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
+                    <Nombres p={p} lado="A" resaltar={p.ganador === 'A'} />
+                    <p className="my-0.5 text-xs font-semibold text-navy-400">vs</p>
+                    <Nombres p={p} lado="B" resaltar={p.ganador === 'B'} />
+                  </div>
+                  <span className="whitespace-nowrap font-display text-lg font-bold sm:text-xl">{resumenSets(p)}</span>
                 </div>
               ))}
             </div>
@@ -222,18 +256,21 @@ export default function CopaVivoPage() {
                           : 'border-navy-700 bg-navy-800'
                         }`}
                       >
-                        <span className="min-w-0 truncate">
-                          <span className="mr-2 font-display text-xs font-bold text-navy-400">{i + 1}</span>
-                          {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
-                          <span className={`font-semibold ${p.ganador === 'A' ? 'font-bold text-lime-400' : ''}`}>{p.parejaA}</span>
-                          <span className="text-navy-400"> vs </span>
-                          <span className={`font-semibold ${p.ganador === 'B' ? 'font-bold text-lime-400' : ''}`}>{p.parejaB}</span>
-                        </span>
-                        <span className="whitespace-nowrap font-display text-xs font-bold">
+                        <div className="flex min-w-0 gap-2.5">
+                          <span className="pt-0.5 font-display text-sm font-bold text-navy-400">{i + 1}</span>
+                          <div className="min-w-0 text-base font-semibold sm:text-lg">
+                            {p.fase === 'llave' && <span className="mb-1 inline-block rounded bg-lime-400 px-1.5 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
+                            <Nombres p={p} lado="A" resaltar={p.ganador === 'A'} />
+                            <p className="my-0.5 text-xs font-semibold text-navy-400">vs</p>
+                            <Nombres p={p} lado="B" resaltar={p.ganador === 'B'} />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end justify-center whitespace-nowrap font-display text-sm font-bold sm:text-base">
                           {p.estado === 'final' ? <span className="text-navy-100">✓ {resumenSets(p)}</span>
                             : vivo && s ? <span className="text-lime-400">EN VIVO {s.a}-{s.b}</span>
+                            : p.llamadoAt ? <span className="animate-pulse text-lime-400">🔔 EN CANCHA</span>
                             : <span className="text-navy-400">por jugar</span>}
-                        </span>
+                        </div>
                       </div>
                     );
                   })}

@@ -474,6 +474,8 @@ export interface TanteadorPartido {
   invertido: boolean;
   /** Avisos ya mostrados (p.ej. cambio3), para no repetirlos. */
   avisos: Record<string, boolean>;
+  /** v21: cuándo se lo llamó a la cancha ("largar"); null = sin llamar. */
+  llamadoAt: string | null;
   creadoPor: string;
   createdAt: string;
   updatedAt: string;

@@ -59,6 +59,7 @@ export function crearPartido(datos: {
     ganador: null,
     invertido: false,
     avisos: {},
+    llamadoAt: null,
     creadoPor: datos.creadoPor || '',
     createdAt: ahora,
     updatedAt: ahora,
@@ -377,6 +378,44 @@ export function propuestasLlave(
     }
   }
   return props;
+}
+
+/**
+ * Carga de una vez el resultado anotado en papel: los sets del partido, ya
+ * jugados. Valida que cada set esté cerrado según las reglas, que alguien
+ * llegue a 2 y que el último set sea del ganador. Reconstruye el historial
+ * (el orden exacto de los puntos no se conoce y no afecta nada).
+ */
+export function cargarResultadoManual(
+  p: TanteadorPartido,
+  sets: TanteadorSet[],
+): { ok: true; partido: TanteadorPartido } | { ok: false; error: string } {
+  if (sets.length < 2) return { ok: false, error: 'Cargá al menos 2 sets (es al mejor de 3).' };
+  if (sets.length > 3) return { ok: false, error: 'Máximo 3 sets.' };
+  const g = { A: 0, B: 0 };
+  for (const [i, s] of sets.entries()) {
+    if (!Number.isInteger(s.a) || !Number.isInteger(s.b) || s.a < 0 || s.b < 0) {
+      return { ok: false, error: `Set ${i + 1}: puntos inválidos.` };
+    }
+    const w = ganadorSet(s, p.obj, p.cap);
+    if (!w) {
+      return { ok: false, error: `Set ${i + 1}: ${s.a}-${s.b} no es un set terminado (a ${p.obj}, desde ${p.obj - 1} iguales por 2, tope ${p.cap}).` };
+    }
+    g[w]++;
+  }
+  if (g.A < 2 && g.B < 2) return { ok: false, error: 'Nadie llegó a 2 sets ganados: falta un set.' };
+  const ganador: TanteadorLado = g.A >= 2 ? 'A' : 'B';
+  if (ganadorSet(sets[sets.length - 1], p.obj, p.cap) !== ganador) {
+    return { ok: false, error: 'El último set tiene que ser del ganador del partido (¿sobra un set?).' };
+  }
+  const hist = sets.map((s) => [
+    ...Array.from({ length: s.a }, () => 'A' as const),
+    ...Array.from({ length: s.b }, () => 'B' as const),
+  ]);
+  return {
+    ok: true,
+    partido: { ...p, sets: [...sets], hist, estado: 'final', ganador, terminadoAt: new Date().toISOString() },
+  };
 }
 
 /** Vuelve el partido a 0-0: borra sets y puntos, queda listo para arrancar. */

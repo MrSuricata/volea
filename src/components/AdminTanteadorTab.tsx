@@ -4,7 +4,7 @@
 // punto a punto en tanteador_partidos (Realtime refresca la lista en vivo entre
 // dispositivos). Espejo en localStorage por si se corta la señal en la cancha.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { ArrowLeftRight, ClipboardEdit, Megaphone, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { SupabaseService } from '../services/supabaseService';
@@ -12,6 +12,7 @@ import type { TanteadorCategoria, TanteadorLado, TanteadorModo, TanteadorPartido
 import { fechaHumana } from '../utils/fechas';
 import {
   anotarPunto,
+  cargarResultadoManual,
   corregirMarcadorActual,
   crearPartido,
   deshacerPunto,
@@ -63,6 +64,8 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [corregir, setCorregir] = useState<{ a: string; b: string } | null>(null);
   const [llaveDe, setLlaveDe] = useState<{ cat: TanteadorCategoria; modo: TanteadorModo } | null>(null);
+  const [resDe, setResDe] = useState<TanteadorPartido | null>(null);
+  const [resSets, setResSets] = useState<string[][]>([['', ''], ['', ''], ['', '']]);
   const [sugerencias, setSugerencias] = useState<Sugerencia[]>([]);
   const [espejo, setEspejo] = useState<TanteadorPartido | null>(() => espejoLeer());
 
@@ -189,6 +192,33 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
     if (!r.ok) { toast.error(r.error); return; }
     persistir(r.partido);
     setCorregir(null);
+  };
+
+  /** Guarda un partido SIN convertirlo en el activo (largar, resultado manual). */
+  const guardarSuelto = useCallback((p: TanteadorPartido) => {
+    const conFecha = { ...p, updatedAt: new Date().toISOString() };
+    setPartidos((prev) => [conFecha, ...(prev || []).filter((x) => x.id !== p.id)]);
+    void SupabaseService.saveTanteadorPartido(conFecha).then((ok) => {
+      if (!ok) toast.error('Sin conexión: no se guardó, reintentá.');
+      void cargar();
+    });
+  }, [cargar]);
+
+  const largar = (p: TanteadorPartido) => {
+    guardarSuelto({ ...p, llamadoAt: new Date().toISOString() });
+    toast.success(`📣 A la cancha ${p.cancha}: ${p.parejaA} vs ${p.parejaB}`);
+  };
+
+  const guardarResultado = () => {
+    if (!resDe) return;
+    const sets = resSets
+      .filter(([a, b]) => a.trim() !== '' && b.trim() !== '')
+      .map(([a, b]) => ({ a: parseInt(a, 10), b: parseInt(b, 10) }));
+    const r = cargarResultadoManual(resDe, sets);
+    if (!r.ok) { toast.error(r.error); return; }
+    guardarSuelto(r.partido);
+    setResDe(null);
+    toast.success(`Resultado cargado: ${r.partido.ganador === 'A' ? r.partido.parejaA : r.partido.parejaB} gana`);
   };
 
   const crearLlave = (prop: PropuestaLlave) => {
@@ -361,7 +391,10 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const puntosDe = (p: TanteadorPartido) => p.hist.reduce((n, h) => n + h.length, 0);
   const enJuego = vivos.filter((p) => puntosDe(p) > 0);
   // Los cruces precargados: en juego sin puntos = todavía no arrancaron.
-  const porJugar = vivos.filter((p) => puntosDe(p) === 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Los "largados" (llamados a cancha) van primero.
+  const porJugar = vivos.filter((p) => puntosDe(p) === 0).sort(
+    (a, b) => (b.llamadoAt ? 1 : 0) - (a.llamadoAt ? 1 : 0) || a.createdAt.localeCompare(b.createdAt),
+  );
   const finales = (partidos || []).filter((p) => p.estado === 'final');
   const espejoPendiente = espejo && espejo.estado === 'en_juego' && !vivos.some((p) => p.id === espejo.id)
     ? espejo : null;
@@ -413,13 +446,13 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           {enJuego.length > 0 && (
             <>
               <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-widest text-navy-500">En juego</p>
-              <div className="space-y-2">{enJuego.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} />)}</div>
+              <div className="space-y-2">{enJuego.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} onLargar={largar} onAnularLlamado={(x) => guardarSuelto({ ...x, llamadoAt: null })} onResultado={(x) => { setResSets([['', ''], ['', ''], ['', '']]); setResDe(x); }} />)}</div>
             </>
           )}
           {porJugar.length > 0 && (
             <>
               <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-widest text-navy-500">Cruces por jugar ({porJugar.length})</p>
-              <div className="space-y-2">{porJugar.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} />)}</div>
+              <div className="space-y-2">{porJugar.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} onLargar={largar} onAnularLlamado={(x) => guardarSuelto({ ...x, llamadoAt: null })} onResultado={(x) => { setResSets([['', ''], ['', ''], ['', '']]); setResDe(x); }} />)}</div>
             </>
           )}
           {(['DM', 'DF'] as const).flatMap((cat) => {
@@ -484,7 +517,7 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           {finales.length > 0 && (
             <>
               <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-widest text-navy-500">Finalizados</p>
-              <div className="space-y-2">{finales.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} />)}</div>
+              <div className="space-y-2">{finales.map((p) => <Card key={p.id} p={p} onAbrir={abrir} onBorrar={borrar} onLargar={largar} onAnularLlamado={(x) => guardarSuelto({ ...x, llamadoAt: null })} onResultado={(x) => { setResSets([['', ''], ['', ''], ['', '']]); setResDe(x); }} />)}</div>
             </>
           )}
           {partidos !== null && !vivos.length && !finales.length && (
@@ -663,6 +696,49 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
         />
       )}
 
+      {/* ============ RESULTADO MANUAL (de la hoja) ============ */}
+      {resDe && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
+            <p className="font-display text-lg font-bold text-navy-700">Cargar resultado</p>
+            <p className="mt-0.5 text-xs text-navy-500">De la hoja al sistema. El 3er set solo si se jugó.</p>
+            <div className="mt-3 grid grid-cols-[auto_1fr_1fr] items-center gap-x-2 gap-y-1 text-xs font-bold text-navy-500">
+              <span />
+              <span className="truncate text-lime-600">{resDe.parejaA}</span>
+              <span className="truncate text-[#E91E8C]">{resDe.parejaB}</span>
+              {resSets.map((fila, i) => (
+                [
+                  <span key={`l${i}`} className="font-display">Set {i + 1}</span>,
+                  ...([0, 1] as const).map((j) => (
+                    <input
+                      key={`s${i}${j}`}
+                      type="number" inputMode="numeric" min={0} max={resDe.cap}
+                      value={fila[j]}
+                      onChange={(e) => setResSets(resSets.map((f, k) => (k === i ? f.map((v, l) => (l === j ? e.target.value : v)) : f)))}
+                      className="w-full rounded-lg border-2 border-gray-200 px-2 py-2 text-center font-display text-xl font-bold text-navy-700 focus:border-lime-400 focus:outline-none"
+                    />
+                  )),
+                ]
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setResDe(null)}
+                className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-navy-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={guardarResultado}
+                className="rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ============ ARMAR LLAVE ============ */}
       {llaveDe && (() => {
         const props = propuestasLlave(partidos || [], llaveDe.cat, llaveDe.modo);
@@ -784,17 +860,22 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
 }
 
 /* ───────── tarjeta de la lista ───────── */
-function Card({ p, onAbrir, onBorrar }: {
+function Card({ p, onAbrir, onBorrar, onLargar, onAnularLlamado, onResultado }: {
   p: TanteadorPartido;
   onAbrir: (p: TanteadorPartido) => void;
   onBorrar: (p: TanteadorPartido) => void;
+  onLargar: (p: TanteadorPartido) => void;
+  onAnularLlamado: (p: TanteadorPartido) => void;
+  onResultado: (p: TanteadorPartido) => void;
 }) {
   const vivo = p.estado === 'en_juego';
   const s = vivo ? marcadorActual(p) : null;
+  const pts = p.hist.reduce((n, h) => n + h.length, 0);
+  const llamado = vivo && pts === 0 && !!p.llamadoAt;
   return (
     <div
       onClick={() => onAbrir(p)}
-      className="cursor-pointer rounded-xl border border-gray-100 bg-white p-3 shadow-sm hover:border-navy-700 sm:p-4"
+      className={`cursor-pointer rounded-xl border bg-white p-3 shadow-sm hover:border-navy-700 sm:p-4 ${llamado ? 'border-lime-500' : 'border-gray-100'}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 text-sm">
@@ -826,6 +907,30 @@ function Card({ p, onAbrir, onBorrar }: {
           : <span className="rounded-full border border-gray-200 px-2 py-0.5 font-semibold">FINAL</span>}
         <span>Cancha {p.cancha}{p.juez ? ` · Juez: ${p.juez}` : ''}</span>
         <span>{fechaHumana(p.createdAt, Date.now())}</span>
+        {vivo && pts === 0 && !p.llamadoAt && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onLargar(p); }}
+            className="flex items-center gap-1 rounded-full bg-navy-700 px-2.5 py-1 font-display font-bold text-lime-400"
+          >
+            <Megaphone size={11} /> Largar
+          </button>
+        )}
+        {llamado && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAnularLlamado(p); }}
+            className="rounded-full border border-lime-500 px-2.5 py-1 font-bold text-lime-600"
+          >
+            🔔 En cancha · anular
+          </button>
+        )}
+        {vivo && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onResultado(p); }}
+            className="flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 font-semibold text-navy-600 hover:border-navy-700"
+          >
+            <ClipboardEdit size={11} /> Resultado
+          </button>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onBorrar(p); }}
           className="ml-auto rounded p-1 text-gray-300 hover:text-red-500"

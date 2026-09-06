@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TanteadorLado, TanteadorPartido } from '../types';
 import {
   anotarPunto,
+  cargarResultadoManual,
   corregirMarcadorActual,
   crearPartido,
   deshacerPunto,
@@ -295,5 +296,23 @@ describe('fase llave y propuestasLlave', () => {
     expect(f.jugadoresA).toContain('J1');
     expect(f.jugadoresA).toHaveLength(2);
     expect([...f.jugadoresA, ...f.jugadoresB].sort()).toEqual(['J1', 'J2', 'J3', 'J4']);
+  });
+});
+
+describe('cargarResultadoManual', () => {
+  it('carga un 2-0 y un 2-1 validos', () => {
+    const r1 = cargarResultadoManual(partido(), [{ a: 15, b: 9 }, { a: 16, b: 14 }]);
+    if (!r1.ok) throw new Error(r1.error);
+    expect(r1.partido).toMatchObject({ estado: 'final', ganador: 'A' });
+    expect(r1.partido.hist[1]).toHaveLength(30);
+    const r2 = cargarResultadoManual(partido(), [{ a: 15, b: 9 }, { a: 12, b: 15 }, { a: 10, b: 15 }]);
+    if (!r2.ok) throw new Error(r2.error);
+    expect(r2.partido.ganador).toBe('B');
+  });
+
+  it('rechaza set abierto, partido incompleto y ultimo set ajeno al ganador', () => {
+    expect(cargarResultadoManual(partido(), [{ a: 15, b: 14 }, { a: 15, b: 0 }]).ok).toBe(false); // 15-14 no cierra
+    expect(cargarResultadoManual(partido(), [{ a: 15, b: 9 }]).ok).toBe(false); // falta set
+    expect(cargarResultadoManual(partido(), [{ a: 15, b: 9 }, { a: 15, b: 9 }, { a: 0, b: 15 }]).ok).toBe(false); // sobra set
   });
 });
