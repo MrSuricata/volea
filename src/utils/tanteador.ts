@@ -271,6 +271,38 @@ export function tablaParejas(
   return lista;
 }
 
+/** Vuelve el partido a 0-0: borra sets y puntos, queda listo para arrancar. */
+export function reiniciarPartido(p: TanteadorPartido): TanteadorPartido {
+  return { ...p, sets: [], hist: [[]], estado: 'en_juego', ganador: null, avisos: {}, terminadoAt: null };
+}
+
+/**
+ * Corrige a mano el marcador del set EN CURSO (me comí un punto, marqué de más).
+ * Reconstruye el historial del set como a puntos de A y b de B — se pierde el
+ * orden exacto (solo afecta el indicador de saque). Rechaza marcadores que ya
+ * cerrarían el set: ese último punto se anota con el botón, para que dispare
+ * el cierre y los avisos como corresponde.
+ */
+export function corregirMarcadorActual(
+  p: TanteadorPartido,
+  a: number,
+  b: number,
+): { ok: true; partido: TanteadorPartido } | { ok: false; error: string } {
+  if (p.estado !== 'en_juego') return { ok: false, error: 'El partido ya terminó.' };
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > p.cap || b > p.cap) {
+    return { ok: false, error: `Los puntos van de 0 a ${p.cap}.` };
+  }
+  if (ganadorSet({ a, b }, p.obj, p.cap)) {
+    return { ok: false, error: 'Ese marcador cerraría el set: cargá un punto menos y anotá el último con el botón.' };
+  }
+  const hist = p.hist.map((h) => [...h]);
+  hist[hist.length - 1] = [
+    ...Array.from({ length: a }, () => 'A' as const),
+    ...Array.from({ length: b }, () => 'B' as const),
+  ];
+  return { ok: true, partido: { ...p, hist } };
+}
+
 export function terminarManual(p: TanteadorPartido): TanteadorPartido {
   if (p.estado === 'final') return p;
   const s = marcadorActual(p);

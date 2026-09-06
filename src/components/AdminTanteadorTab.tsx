@@ -4,7 +4,7 @@
 // punto a punto en tanteador_partidos (Realtime refresca la lista en vivo entre
 // dispositivos). Espejo en localStorage por si se corta la señal en la cancha.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Plus, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { SupabaseService } from '../services/supabaseService';
@@ -12,9 +12,11 @@ import type { TanteadorCategoria, TanteadorLado, TanteadorModo, TanteadorPartido
 import { fechaHumana } from '../utils/fechas';
 import {
   anotarPunto,
+  corregirMarcadorActual,
   crearPartido,
   deshacerPunto,
   jugadoresDe,
+  reiniciarPartido,
   marcadorActual,
   marcadorDe,
   resumenSets,
@@ -57,6 +59,7 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const [vista, setVista] = useState<Vista>('lista');
   const [actual, setActual] = useState<TanteadorPartido | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [corregir, setCorregir] = useState<{ a: string; b: string } | null>(null);
   const [sugerencias, setSugerencias] = useState<Sugerencia[]>([]);
   const [espejo, setEspejo] = useState<TanteadorPartido | null>(() => espejoLeer());
 
@@ -99,9 +102,14 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
     const sondeo = window.setInterval(() => {
       if (vistaRef.current === 'lista') void cargar();
     }, 60000);
+    // En celular la pestaña se duerme y el canal Realtime muere: al volver
+    // a la app, refetch para no mostrar datos viejos.
+    const alVolver = () => { if (document.visibilityState === 'visible') void cargar(); };
+    document.addEventListener('visibilitychange', alVolver);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(sondeo);
+      document.removeEventListener('visibilitychange', alVolver);
       void sb.removeChannel(canal);
     };
   }, [cargar]);
@@ -164,6 +172,32 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const deshacer = () => {
     if (!actual) return;
     persistir(deshacerPunto(actual));
+  };
+
+  const abrirCorregir = () => {
+    if (!actual || actual.estado !== 'en_juego') return;
+    const s = marcadorActual(actual);
+    setCorregir({ a: String(s.a), b: String(s.b) });
+  };
+
+  const guardarCorreccion = () => {
+    if (!actual || !corregir) return;
+    const r = corregirMarcadorActual(actual, parseInt(corregir.a, 10), parseInt(corregir.b, 10));
+    if (!r.ok) { toast.error(r.error); return; }
+    persistir(r.partido);
+    setCorregir(null);
+  };
+
+  const pedirReinicio = () => {
+    if (!actual) return;
+    setCorregir(null);
+    setAviso({
+      titulo: '¿Reiniciar el partido?',
+      detalle: `${actual.parejaA} vs ${actual.parejaB} vuelve a 0-0: se borran todos los sets y puntos.`,
+      boton: 'Sí, reiniciar',
+      cancelable: true,
+      onOk: () => persistir(reiniciarPartido(actual)),
+    });
   };
 
   const terminar = () => {
@@ -326,12 +360,21 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           </button>
 
           {espejoPendiente && (
-            <button
-              onClick={() => abrir(espejoPendiente)}
-              className="mt-3 w-full rounded-xl border border-lime-400 bg-white p-3 text-left text-sm font-semibold text-navy-700"
-            >
-              ▶ Retomar partido en curso: {espejoPendiente.parejaA} vs {espejoPendiente.parejaB}
-            </button>
+            <div className="mt-3 flex items-stretch gap-2">
+              <button
+                onClick={() => abrir(espejoPendiente)}
+                className="min-w-0 flex-1 rounded-xl border border-lime-400 bg-white p-3 text-left text-sm font-semibold text-navy-700"
+              >
+                ▶ Retomar partido en curso: {espejoPendiente.parejaA} vs {espejoPendiente.parejaB}
+              </button>
+              <button
+                onClick={() => { espejoGuardar(null); setEspejo(null); }}
+                className="rounded-xl border border-gray-200 bg-white px-3 text-gray-400 hover:text-red-500"
+                aria-label="Descartar el partido guardado en este dispositivo"
+              >
+                <X size={16} />
+              </button>
+            </div>
           )}
 
           {partidos === null && (
@@ -577,9 +620,60 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           onTocar={tocar}
           onDeshacer={deshacer}
           onInvertir={() => persistir({ ...actual, invertido: !actual.invertido })}
+          onCorregir={abrirCorregir}
           onTerminar={terminar}
           onVolver={() => setVista('lista')}
         />
+      )}
+
+      {/* ============ CORREGIR MARCADOR ============ */}
+      {corregir && actual && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
+            <p className="font-display text-lg font-bold text-navy-700">Corregir marcador</p>
+            <p className="mt-0.5 text-xs text-navy-500">Set {actual.sets.length + 1} en curso. Los sets ya cerrados no se tocan (para eso está Deshacer).</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <label className="block truncate text-xs font-bold text-lime-600">{actual.parejaA}</label>
+                <input
+                  type="number" inputMode="numeric" min={0} max={actual.cap}
+                  value={corregir.a}
+                  onChange={(e) => setCorregir({ ...corregir, a: e.target.value })}
+                  className="mt-1 w-full rounded-lg border-2 border-lime-400/70 px-3 py-2.5 text-center font-display text-2xl font-bold text-navy-700 focus:border-lime-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block truncate text-xs font-bold text-[#E91E8C]">{actual.parejaB}</label>
+                <input
+                  type="number" inputMode="numeric" min={0} max={actual.cap}
+                  value={corregir.b}
+                  onChange={(e) => setCorregir({ ...corregir, b: e.target.value })}
+                  className="mt-1 w-full rounded-lg border-2 border-[#E91E8C]/40 px-3 py-2.5 text-center font-display text-2xl font-bold text-navy-700 focus:border-[#E91E8C] focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setCorregir(null)}
+                className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-navy-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={guardarCorreccion}
+                className="rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 hover:bg-lime-300"
+              >
+                Guardar
+              </button>
+            </div>
+            <button
+              onClick={pedirReinicio}
+              className="mt-2 w-full rounded-lg border border-red-200 px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-50"
+            >
+              Reiniciar partido a 0-0 (borra todos los tantos)
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ============ OVERLAY ============ */}
@@ -660,11 +754,12 @@ function Card({ p, onAbrir, onBorrar }: {
 }
 
 /* ───────── pantalla de juego ───────── */
-function Juego({ p, onTocar, onDeshacer, onInvertir, onTerminar, onVolver }: {
+function Juego({ p, onTocar, onDeshacer, onInvertir, onCorregir, onTerminar, onVolver }: {
   p: TanteadorPartido;
   onTocar: (lado: 'izq' | 'der') => void;
   onDeshacer: () => void;
   onInvertir: () => void;
+  onCorregir: () => void;
   onTerminar: () => void;
   onVolver: () => void;
 }) {
@@ -735,23 +830,30 @@ function Juego({ p, onTocar, onDeshacer, onInvertir, onTerminar, onVolver }: {
         {zona('der')}
       </div>
 
-      <div className="mt-2.5 grid grid-cols-3 gap-2">
+      <div className="mt-2.5 grid grid-cols-4 gap-2">
         <button
           onClick={onDeshacer}
           disabled={!puedeDeshacer}
-          className="flex items-center justify-center gap-1.5 rounded-xl border border-navy-600 bg-navy-900 px-2 py-3 text-xs font-bold text-white disabled:opacity-40"
+          className="flex items-center justify-center gap-1 rounded-xl border border-navy-600 bg-navy-900 px-1 py-3 text-xs font-bold text-white disabled:opacity-40"
         >
           <Undo2 size={14} /> Deshacer
         </button>
         <button
           onClick={onInvertir}
-          className="flex items-center justify-center gap-1.5 rounded-xl border border-navy-600 bg-navy-900 px-2 py-3 text-xs font-bold text-white"
+          className="flex items-center justify-center gap-1 rounded-xl border border-navy-600 bg-navy-900 px-1 py-3 text-xs font-bold text-white"
         >
           <ArrowLeftRight size={14} /> Lados
         </button>
         <button
+          onClick={onCorregir}
+          disabled={p.estado !== 'en_juego'}
+          className="flex items-center justify-center gap-1 rounded-xl border border-navy-600 bg-navy-900 px-1 py-3 text-xs font-bold text-white disabled:opacity-40"
+        >
+          <Pencil size={14} /> Corregir
+        </button>
+        <button
           onClick={onTerminar}
-          className="rounded-xl border border-navy-600 bg-navy-900 px-2 py-3 text-xs font-bold text-white"
+          className="rounded-xl border border-navy-600 bg-navy-900 px-1 py-3 text-xs font-bold text-white"
         >
           {p.estado === 'final' ? 'Volver' : 'Terminar'}
         </button>

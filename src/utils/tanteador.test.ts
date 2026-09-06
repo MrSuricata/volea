@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { TanteadorLado, TanteadorPartido } from '../types';
 import {
   anotarPunto,
+  corregirMarcadorActual,
   crearPartido,
   deshacerPunto,
   ganadorSet,
   jugadoresDe,
   marcadorActual,
+  reiniciarPartido,
   setsGanados,
   tablaAmericano,
   tablaParejas,
@@ -200,5 +202,32 @@ describe('tablaParejas', () => {
     expect(tabla[0]).toMatchObject({ nombre: 'D3', pj: 1, pg: 1, dif: 7 });
     expect(tabla[1]).toMatchObject({ nombre: 'D1', pj: 2, pg: 1, dif: 5 });
     expect(tabla[2]).toMatchObject({ nombre: 'D2', pj: 1, pg: 0, dif: -12 });
+  });
+});
+
+describe('reiniciarPartido y corregirMarcadorActual', () => {
+  it('reiniciar vuelve todo a cero', () => {
+    const jugado = anotar(partido(), [...racha('A', 15), ...racha('B', 7)]);
+    const limpio = reiniciarPartido(jugado);
+    expect(limpio.sets).toEqual([]);
+    expect(limpio.hist).toEqual([[]]);
+    expect(limpio.estado).toBe('en_juego');
+    expect(limpio.ganador).toBeNull();
+  });
+
+  it('corregir reescribe el set en curso sin tocar los cerrados', () => {
+    const jugado = anotar(partido(), [...racha('A', 15), 'A', 'B', 'B']);
+    const r = corregirMarcadorActual(jugado, 5, 2);
+    if (!r.ok) throw new Error(r.error);
+    expect(marcadorActual(r.partido)).toEqual({ a: 5, b: 2 });
+    expect(r.partido.sets).toEqual([{ a: 15, b: 0 }]);
+  });
+
+  it('rechaza un marcador que cerraria el set y valores invalidos', () => {
+    const p = anotar(partido(), ['A', 'B']);
+    expect(corregirMarcadorActual(p, 15, 3).ok).toBe(false);
+    expect(corregirMarcadorActual(p, -1, 0).ok).toBe(false);
+    expect(corregirMarcadorActual(p, 22, 0).ok).toBe(false);
+    expect(corregirMarcadorActual(p, 14, 13).ok).toBe(true);
   });
 });
