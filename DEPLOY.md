@@ -99,7 +99,7 @@ Env vars (ya configuradas en Vercel y `.env.local`): `VITE_SUPABASE_URL`, `VITE_
 ---
 
 ## 6. WhatsApp Business
-Todos los pedidos se envían por WhatsApp al `+598 99 511 196` y quedan registrados en la tabla `orders` (visibles en el admin). El pago se coordina por WhatsApp: transferencia, efectivo o lo que acuerden.
+Todos los pedidos se envían por WhatsApp al `+598 92 103 276` (constante `WHATSAPP_NUMBER` en `src/constants.ts`) y quedan registrados en la tabla `orders` (visibles en el admin). El pago se coordina por WhatsApp: transferencia, efectivo o lo que acuerden.
 
 ---
 

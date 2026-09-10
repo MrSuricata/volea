@@ -17,7 +17,7 @@ import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import {
-  WHATSAPP_NUMBER, INSTAGRAM_HANDLE,
+  WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
 } from './constants';
 import { StorageService } from './services/storageService';
@@ -2958,7 +2958,7 @@ function ContactPage() {
             </div>
             <div>
               <h3 className="font-display font-semibold text-navy-700">WhatsApp</h3>
-              <p className="text-gray-500 text-sm group-hover:text-green-600 transition-colors">+598 99 511 196</p>
+              <p className="text-gray-500 text-sm group-hover:text-green-600 transition-colors">{WHATSAPP_DISPLAY}</p>
             </div>
           </a>
           <a
@@ -6229,7 +6229,7 @@ function Footer() {
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
                 >
-                  <Phone size={16} /> +598 99 511 196
+                  <Phone size={16} /> {WHATSAPP_DISPLAY}
                 </a>
               </li>
               <li>

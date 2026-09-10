@@ -1,6 +1,10 @@
 import type { Product, Event, Category, Club, Announcement } from './types';
 
-export const WHATSAPP_NUMBER = '59899511196';
+export const WHATSAPP_NUMBER = '59892103276';
+// El número que se muestra en pantalla sale del mismo lugar que el link: antes
+// estaba escrito a mano en el contacto y en el footer, y al cambiar de número
+// quedaban mostrando el viejo.
+export const WHATSAPP_DISPLAY = '+598 92 103 276';
 export const INSTAGRAM_HANDLE = 'volea.uy';
 // ADMIN_PASSWORD eliminada (2026-08-06): el login real es Supabase Auth; una contraseña
 // hardcodeada acá viajaba en el bundle público — un footgun de seguridad.
