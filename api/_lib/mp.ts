@@ -287,9 +287,10 @@ export interface ParamsRetornoMP {
   payment_id?: string;
 }
 
-// La vuelta de MP no puede aterrizar directo en una ruta con `#` (los query
-// params y el HashRouter se pisan — mismo drama que los magic links), así que
-// el handler de retorno traduce a la URL hash final con esta función.
+// El handler de retorno traduce los parámetros de MP (status, collection_status,
+// external_reference…) a los de /pago/resultado. Desde el 23/09 el sitio usa rutas
+// reales (BrowserRouter): la URL va sin "#". Un navegador con la URL vieja "/#/…"
+// en caché igual llega bien por el traductor del <head> de index.html.
 export function armarUrlRetorno(baseUrl: string, p: ParamsRetornoMP): string {
   const st = (p.status || p.collection_status || '').toLowerCase();
   const estado =
@@ -300,7 +301,7 @@ export function armarUrlRetorno(baseUrl: string, p: ParamsRetornoMP): string {
   const q = new URLSearchParams({ estado });
   if (p.external_reference) q.set('pedido', p.external_reference);
   if (p.payment_id) q.set('pago', p.payment_id);
-  return `${baseUrl}/#/pago/resultado?${q.toString()}`;
+  return `${baseUrl}/pago/resultado?${q.toString()}`;
 }
 
 // ── Webhook: qué escribir en el pedido ───────────────────────────────────

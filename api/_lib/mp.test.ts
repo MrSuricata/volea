@@ -502,7 +502,7 @@ describe('armarUrlRetorno', () => {
   const BASE = 'https://volea.vercel.app';
   it('mapea approved → aprobado con pedido y pago', () => {
     expect(armarUrlRetorno(BASE, { status: 'approved', external_reference: 'VO-ABC', payment_id: '99' }))
-      .toBe('https://volea.vercel.app/#/pago/resultado?estado=aprobado&pedido=VO-ABC&pago=99');
+      .toBe('https://volea.vercel.app/pago/resultado?estado=aprobado&pedido=VO-ABC&pago=99');
   });
   it('mapea pending/in_process → pendiente', () => {
     expect(armarUrlRetorno(BASE, { status: 'pending', external_reference: 'VO-ABC' })).toContain('estado=pendiente');
@@ -513,7 +513,7 @@ describe('armarUrlRetorno', () => {
     expect(armarUrlRetorno(BASE, { collection_status: 'approved' })).toContain('estado=aprobado');
   });
   it('sin datos → desconocido, sin params extra', () => {
-    expect(armarUrlRetorno(BASE, {})).toBe('https://volea.vercel.app/#/pago/resultado?estado=desconocido');
+    expect(armarUrlRetorno(BASE, {})).toBe('https://volea.vercel.app/pago/resultado?estado=desconocido');
   });
 
   it('escapa external_reference para que no inyecte params extra', () => {
