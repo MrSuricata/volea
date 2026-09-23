@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { BrowserRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MotionConfig, motion, useScroll, useTransform, type Variants } from 'framer-motion';
+import { LazyMotion, MotionConfig, m, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -17,6 +17,7 @@ import { lazyConRecarga, cargandoTab } from './lib/lazyConRecarga';
 import { formatPrice, TZ_UY, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
 import { FALLBACK_IMG, handleImgError, errorFoto } from './lib/fotos';
 import { ATAJO_TAB_ADMIN } from './lib/atajoAdmin';
+import { cargarFeaturesMotion } from './lib/animaciones';
 import { srcsetImagen, urlImagen } from './utils/imagenes';
 import { cargarLeaflet } from './utils/leaflet';
 import {
@@ -215,7 +216,7 @@ function usePageMeta({ title, description, image }: PageMeta) {
 
 function Reveal({ children, className = '', delay = 0, y = 40 }: { children: React.ReactNode; className?: string; delay?: number; y?: number }) {
   return (
-    <motion.div
+    <m.div
       className={className}
       initial={{ opacity: 0, y }}
       whileInView={{ opacity: 1, y: 0 }}
@@ -223,7 +224,7 @@ function Reveal({ children, className = '', delay = 0, y = 40 }: { children: Rea
       transition={{ duration: 0.7, delay: delay / 1000, ease: [0.16, 1, 0.3, 1] }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -243,7 +244,7 @@ const STAGGER_ITEM: Variants = {
 
 function StaggerGrid({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <motion.div
+    <m.div
       className={className}
       variants={STAGGER_CONTAINER}
       initial="hidden"
@@ -251,29 +252,29 @@ function StaggerGrid({ children, className = '' }: { children: React.ReactNode; 
       viewport={{ once: true, margin: '-80px' }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
 function StaggerItem({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <motion.div variants={STAGGER_ITEM} className={className}>
+    <m.div variants={STAGGER_ITEM} className={className}>
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
 // Page transition wrapper — fades + subtle slide
 function PageTransition({ children }: { children: React.ReactNode }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -1470,7 +1471,7 @@ function HomePage() {
 
       {/* ── 1. Hero ─────────────────────────────────────────────────────── */}
       <section className="relative min-h-screen flex items-center overflow-hidden">
-        <motion.div
+        <m.div
           aria-hidden
           className="absolute inset-0 -top-20 -bottom-20"
           style={{
@@ -1486,7 +1487,7 @@ function HomePage() {
           style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }}
         />
 
-        <motion.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-24 w-full">
+        <m.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-24 w-full">
           <div className="max-w-3xl">
             <p className="hero-enter hero-enter-1 opacity-0 text-lime-400 font-display font-bold text-sm md:text-base uppercase tracking-[0.3em] mb-6">
               La primera marca de pickleball de Uruguay
@@ -1610,7 +1611,7 @@ function HomePage() {
             </Link>
             </div>
           )}
-        </motion.div>
+        </m.div>
 
         {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
@@ -4282,6 +4283,11 @@ export default function App() {
     <BrowserRouter>
       {/* "user": si el sistema pide reducir movimiento, framer-motion salta las
           animaciones de aparición, parallax y transición entre páginas. */}
+      {/* LazyMotion + m.div en vez de motion.div: motion.div mete TODAS las features de
+          framer-motion en el JS de entrada; así el entry lleva solo el componente base y
+          las features bajan en su propio chunk al arrancar (ver lib/animaciones.ts).
+          strict: si alguien vuelve a usar motion.div, tira error en vez de engordar el entry. */}
+      <LazyMotion features={cargarFeaturesMotion} strict>
       <MotionConfig reducedMotion="user">
       <StoreProvider>
         <ScrollToTop />
@@ -4310,6 +4316,7 @@ export default function App() {
         </div>
       </StoreProvider>
       </MotionConfig>
+      </LazyMotion>
     </BrowserRouter>
   );
 }
