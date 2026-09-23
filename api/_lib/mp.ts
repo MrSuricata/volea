@@ -23,13 +23,26 @@ export interface FirmaInput {
   xRequestId: string | undefined;  // cabecera x-request-id
   dataId: string | undefined;      // query param data.id de la notificación
   secreto: string;                 // MP_WEBHOOK_SECRET
-  ahoraMs?: number;                // inyectable en tests
-  toleranciaMs?: number;           // default 10 minutos
 }
 
 // Validación de firma según el esquema de MP: HMAC-SHA256 en hex del manifest
 // `id:<data.id en minúscula>;request-id:<x-request-id>;ts:<ts>;`. No usa el
 // body crudo. El ts puede venir en segundos o milisegundos según la versión.
+//
+// SIN ventana de tiempo sobre el ts, a propósito (antes se rechazaba un ts de
+// más de 10 minutos). Motivos, verificados el 23/09/2026:
+//  · MP reintenta la notificación que no recibió 200 a los 15 min, 30 min,
+//    6 h, 48 h y 96 h (doc "Notificaciones de pagos" de Checkout Pro). La doc
+//    no dice si el reintento se re-firma con un ts nuevo: si conserva el
+//    original, la ventana de 10 min le daba 401 a TODOS los reintentos y un
+//    pago aprobado durante una caída de Supabase no se acreditaba nunca.
+//  · El SDK oficial de Node (mercadopago 3.6.1, WebhookSignatureValidator)
+//    no mira el ts salvo que se le pase `toleranceSeconds` (opcional), y los
+//    ejemplos oficiales lo llaman sin tolerancia.
+//  · Un replay de una notificación legítima no escribe nada falso: el handler
+//    relee el pago REAL de la API de MP y la escritura es idempotente.
+// El ts igual tiene que ser un entero (como exige el SDK): va dentro del HMAC.
+//
 // TODO: cuando Brian tenga credenciales de sandbox, capturar una tripleta real
 // x-signature/x-request-id/data.id de un webhook de prueba y fijarla como
 // fixture: hoy el test arma el manifest con la misma lógica que esta función,
@@ -45,13 +58,7 @@ export function validarFirmaWebhook(i: FirmaInput): { ok: boolean; motivo?: stri
   const ts = partes['ts'];
   const v1 = partes['v1'];
   if (!ts || !v1) return { ok: false, motivo: 'x-signature malformada' };
-
-  const tsNum = Number(ts);
-  if (!Number.isFinite(tsNum)) return { ok: false, motivo: 'ts no numérico' };
-  const tsMs = tsNum > 1e12 ? tsNum : tsNum * 1000;
-  const ahora = i.ahoraMs ?? Date.now();
-  const tolerancia = i.toleranciaMs ?? 10 * 60 * 1000;
-  if (Math.abs(ahora - tsMs) > tolerancia) return { ok: false, motivo: 'ts fuera de ventana' };
+  if (!/^\d+$/.test(ts)) return { ok: false, motivo: 'ts no numérico' };
 
   const manifest = `id:${i.dataId.toLowerCase()};request-id:${i.xRequestId};ts:${ts};`;
   const esperado = createHmac('sha256', i.secreto).update(manifest).digest('hex');

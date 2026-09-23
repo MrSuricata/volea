@@ -71,7 +71,6 @@ describe('validarFirmaWebhook', () => {
       xRequestId: 'req-1',
       dataId: '12345',
       secreto: SECRETO,
-      ahoraMs: ts * 1000 + 60_000,
     });
     expect(r.ok).toBe(true);
   });
@@ -85,7 +84,6 @@ describe('validarFirmaWebhook', () => {
       xRequestId: 'req-1',
       dataId: '12345',
       secreto: SECRETO,
-      ahoraMs: tsMs + 60_000,
     });
     expect(r.ok).toBe(true);
   });
@@ -97,21 +95,43 @@ describe('validarFirmaWebhook', () => {
       xRequestId: 'req-1',
       dataId: '12345',
       secreto: SECRETO,
-      ahoraMs: ts * 1000,
     });
     expect(r.ok).toBe(false);
   });
 
-  it('rechaza ts fuera de la ventana de tolerancia', () => {
+  // Reintentos de MP: 15 min, 30 min, 6 h, 48 h, 96 h después. Si el reintento
+  // conserva el ts original, una ventana corta los rechazaba a todos (401 para
+  // siempre) y el pago aprobado no se acreditaba nunca.
+  it('acepta un reintento con ts de hace días (sin ventana de tiempo)', () => {
     const ts = 1754400000;
     const r = validarFirmaWebhook({
       xSignature: firmar('12345', 'req-1', ts),
       xRequestId: 'req-1',
       dataId: '12345',
       secreto: SECRETO,
-      ahoraMs: ts * 1000 + 11 * 60_000, // 11 min después (tolerancia: 10)
+    });
+    expect(r.ok).toBe(true);
+    // Mismo reintento con ts en milisegundos (MP manda ambos formatos).
+    const tsMs = 1754400000000;
+    const v1 = createHmac('sha256', SECRETO).update(`id:12345;request-id:req-1;ts:${tsMs};`).digest('hex');
+    expect(validarFirmaWebhook({ xSignature: `ts=${tsMs},v1=${v1}`, xRequestId: 'req-1', dataId: '12345', secreto: SECRETO }).ok).toBe(true);
+  });
+
+  it('un ts viejo NO habilita reusar la firma con otro pago', () => {
+    const ts = 1754400000;
+    const r = validarFirmaWebhook({
+      xSignature: firmar('12345', 'req-1', ts),
+      xRequestId: 'req-1',
+      dataId: '99999', // la firma era para el pago 12345
+      secreto: SECRETO,
     });
     expect(r.ok).toBe(false);
+  });
+
+  it('rechaza un ts que no es un entero', () => {
+    const v1 = createHmac('sha256', SECRETO).update('id:12345;request-id:req-1;ts:1e9;').digest('hex');
+    expect(validarFirmaWebhook({ xSignature: `ts=1e9,v1=${v1}`, xRequestId: 'req-1', dataId: '12345', secreto: SECRETO }))
+      .toEqual({ ok: false, motivo: 'ts no numérico' });
   });
 
   it('rechaza cabeceras faltantes o malformadas', () => {
@@ -127,19 +147,6 @@ describe('validarFirmaWebhook', () => {
       xRequestId: 'req-1',
       dataId: '12345',
       secreto: SECRETO,
-      ahoraMs: ts * 1000,
-    });
-    expect(r.ok).toBe(false);
-  });
-
-  it('rechaza ts en el futuro fuera de la ventana de tolerancia', () => {
-    const ts = 1754400000;
-    const r = validarFirmaWebhook({
-      xSignature: firmar('12345', 'req-1', ts),
-      xRequestId: 'req-1',
-      dataId: '12345',
-      secreto: SECRETO,
-      ahoraMs: ts * 1000 - 11 * 60_000, // el ts queda 11 min en el futuro respecto a "ahora"
     });
     expect(r.ok).toBe(false);
   });
@@ -153,7 +160,6 @@ describe('validarFirmaWebhook', () => {
       xRequestId: 'req-1',
       dataId: 'ORD01ABC',
       secreto: SECRETO,
-      ahoraMs: ts * 1000,
     });
     expect(r.ok).toBe(true);
   });
