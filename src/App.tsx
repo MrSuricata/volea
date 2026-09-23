@@ -14,6 +14,7 @@ import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/
 import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
+import { FOTO_HERO_HOME } from './lib/precarga';
 import { lazyConRecarga, cargandoTab } from './lib/lazyConRecarga';
 import { formatPrice, TZ_UY, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
 import { FALLBACK_IMG, handleImgError, errorFoto } from './lib/fotos';
@@ -1448,7 +1449,7 @@ function HomePage() {
           className="absolute inset-0 -top-20 -bottom-20"
           style={{
             y: heroBgY,
-            backgroundImage: 'url(/products/lifestyle-sunset-back.jpg)',
+            backgroundImage: `url(${FOTO_HERO_HOME})`, // la precarga en main.tsx pide esta misma
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
