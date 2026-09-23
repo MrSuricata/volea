@@ -1005,3 +1005,433 @@ ALTER TABLE public.tanteador_partidos
 -- manual de resultados (de la hoja) vive en la app (cargarResultadoManual).
 ALTER TABLE public.tanteador_partidos
   ADD COLUMN IF NOT EXISTS llamado_at TIMESTAMPTZ;
+
+-- ============================================
+-- v22 (2026-09-23): inscripciones que no se pisan, TV solo del equipo y
+-- alta publica de pedidos acotada
+-- ============================================
+-- Migracion "v22_inscripciones_cancha_pedidos" (aplicada el 23/09 y probada en
+-- produccion con una transaccion que se deshace: checkout normal entra, status
+-- forzado a pending, source falso y pedidos vacios rechazados, anon sin
+-- escritura en rk_en_cancha ni borrado de pedidos, Racket Roll cerrado).
+--
+-- Tres agujeros:
+--
+-- (1) RPC inscribir_evento (anon, SECURITY DEFINER). Si los dígitos del
+--     celular coincidían con una inscripción no-baja, hacía UPDATE de nombre,
+--     categorías, parejas, email, dupr y notas SIN mirar estado ni pago_at:
+--       · un jugador que pagó 1 categoría reenviaba con 3 y jugaba 3;
+--       · cualquiera que tipeara el celular de otro le cambiaba la inscripción.
+--     Además solo miraba inscripciones_abiertas, no la fecha: el Racket Roll
+--     (22-24/08) sigue con inscripciones_abiertas=true y acepta altas.
+-- (2) rk_en_cancha: la policy "en_cancha escribe admin" era TO authenticated
+--     USING (true): cualquier usuario logueado (la cuenta del taller, usuarios
+--     de los otros sitios del proyecto) cambiaba qué partido muestra la TV en
+--     cada cancha. Y anon tenía INSERT/UPDATE/DELETE/TRUNCATE grantados.
+-- (3) orders: orders_anon_insert es WITH CHECK (true) y orders_clamp_pago solo
+--     limpia campos de pago. Un anónimo insertaba pedidos 'delivered', con
+--     totales inventados, source 'telegram', created_at en el pasado o items
+--     de varios MB.
+--
+-- Qué NO toca (a propósito): rk_torneos (jamás se escribe desde fuera de la
+-- app), is_admin_email (endurecerla rompe el login del taller), is_admin /
+-- es_equipo / mi_rol, orders_clamp_pago, orders_anon_insert, las policies de
+-- inscripciones/events, y nada de los otros sitios del proyecto.
+
+-- --------------------------------------------
+-- 0. Pre-chequeo: el catálogo es el que se leyó para escribir esto.
+-- --------------------------------------------
+DO $pre$
+BEGIN
+  IF to_regprocedure('public.inscribir_evento(text,text,text,text,text,text,text,text,jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'v22: no está inscribir_evento con la firma de 9 argumentos';
+  END IF;
+  IF to_regprocedure('public.es_equipo()') IS NULL THEN
+    RAISE EXCEPTION 'v22: falta es_equipo()';
+  END IF;
+  IF to_regclass('public.rk_en_cancha') IS NULL OR to_regclass('public.orders') IS NULL THEN
+    RAISE EXCEPTION 'v22: faltan rk_en_cancha u orders';
+  END IF;
+  -- Columnas de events/inscripciones que usa la nueva inscribir_evento.
+  IF (SELECT count(*) FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND ((table_name = 'events' AND column_name IN ('date', 'end_date', 'inscripciones_abiertas'))
+           OR (table_name = 'inscripciones' AND column_name IN ('nombre', 'estado', 'pago_at')))) <> 6 THEN
+    RAISE EXCEPTION 'v22: cambió el esquema de events/inscripciones';
+  END IF;
+  -- Columnas de orders que toca el trigger nuevo.
+  IF (SELECT count(*) FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'orders'
+         AND column_name IN ('id', 'customer_name', 'customer_phone', 'customer_email',
+                             'customer_address', 'customer_city', 'customer_department',
+                             'customer_notes', 'items', 'total', 'status', 'source',
+                             'shopify_order_gid', 'created_at', 'updated_at',
+                             'payment_provider', 'mp_preference_id')) <> 17 THEN
+    RAISE EXCEPTION 'v22: cambió el esquema de orders';
+  END IF;
+END
+$pre$;
+
+-- --------------------------------------------
+-- 1. inscribir_evento: no pisar lo pago/confirmado ni a otra persona, y
+--    cerrar sola cuando el evento ya pasó.
+-- --------------------------------------------
+-- Reescrita COMPLETA desde su pg_get_functiondef actual. Firma, defaults,
+-- retorno jsonb {ok, id, actualizada | error}, SECURITY DEFINER, search_path,
+-- las validaciones de largo/celular/parejas, el chequeo "mismo nombre, otro
+-- celular" y el INSERT quedan idénticos. Cambios, todos marcados "v22":
+--
+--   a) Fecha: además de inscripciones_abiertas, cierra si
+--      coalesce(end_date, date) < hoy en America/Montevideo. events.date y
+--      events.end_date son DATE en la base (no text), la comparación es
+--      directa. El día del evento (o el último, si es de varios días) todavía
+--      se puede anotar; al día siguiente no. Mismo mensaje que el cierre manual.
+--   b) La fila encontrada por celular se lee con FOR UPDATE: admin_pago_inscripcion
+--      también la bloquea (FOR UPDATE), así que si el equipo registra el pago
+--      mientras el jugador reenvía, el reenvío espera y ve el pago_at nuevo en
+--      vez de pisarlo.
+--   c) Si la fila encontrada es de OTRO nombre → error, no UPDATE. "Normalizado"
+--      = la MISMA expresión que ya usa esta función en "mismo nombre, otro
+--      celular" y la RPC inscripcion_existe: btrim + colapsar espacios + sacar
+--      tildes/diéresis/ñ (ÁÉÍÓÚÜÑ) + minúsculas. Es el equivalente SQL de
+--      normalizar() de src/utils/nombres.ts para nombres en español.
+--      Va ANTES que el chequeo de pago a propósito: a quien tipea un celular
+--      ajeno no le contamos si esa inscripción está paga. El mensaje tampoco
+--      revela el nombre que figura.
+--   d) Si la fila tiene pago_at o estado 'confirmada' → error y no se toca.
+--      (admin_pago_inscripcion siempre pone las dos cosas juntas; se miran por
+--      separado por si el equipo confirma a mano sin pago o al revés.)
+CREATE OR REPLACE FUNCTION public.inscribir_evento(p_event_id text, p_nombre text, p_celular text, p_categorias text, p_email text DEFAULT ''::text, p_pareja text DEFAULT ''::text, p_dupr_id text DEFAULT ''::text, p_notas text DEFAULT ''::text, p_parejas jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public'
+AS $function$
+DECLARE
+  v_nombre text := btrim(COALESCE(p_nombre, ''));
+  v_celular text := btrim(COALESCE(p_celular, ''));
+  v_categorias text := btrim(COALESCE(p_categorias, ''));
+  v_parejas jsonb := COALESCE(p_parejas, '{}'::jsonb);
+  v_abierto boolean;
+  v_ultimo_dia date;        -- v22: end_date, o date si el evento es de un día
+  v_id uuid;
+  v_nombre_actual text;     -- v22: nombre de la inscripción que ya tiene ese celular
+  v_estado text;            -- v22
+  v_pago_at timestamptz;    -- v22
+BEGIN
+  IF v_nombre = '' OR length(v_nombre) > 120 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Poné tu nombre completo');
+  END IF;
+  IF v_celular = '' OR length(v_celular) > 40
+     OR length(regexp_replace(v_celular, '\D', '', 'g')) < 6 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Poné un celular válido');
+  END IF;
+  IF v_categorias = '' OR length(v_categorias) > 400 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Elegí al menos una categoría');
+  END IF;
+  IF length(COALESCE(p_email, '')) > 200 OR length(COALESCE(p_pareja, '')) > 200
+     OR length(COALESCE(p_dupr_id, '')) > 40 OR length(COALESCE(p_notas, '')) > 600 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Alguno de los campos es demasiado largo');
+  END IF;
+  IF jsonb_typeof(v_parejas) <> 'object' OR length(v_parejas::text) > 2000 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Parejas inválidas');
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_each(v_parejas) AS kv(k, v)
+    WHERE jsonb_typeof(kv.v) <> 'string' OR length(kv.k) > 120 OR length(kv.v #>> '{}') > 120
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Parejas inválidas');
+  END IF;
+
+  SELECT inscripciones_abiertas, COALESCE(end_date, date)
+    INTO v_abierto, v_ultimo_dia
+    FROM events WHERE id = p_event_id;
+  IF v_abierto IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'El evento no existe');
+  END IF;
+  -- v22: el switch del admin Y la fecha. Un evento que ya terminó no acepta
+  -- inscripciones aunque alguien se haya olvidado de apagar el switch.
+  IF NOT v_abierto
+     OR v_ultimo_dia < (now() AT TIME ZONE 'America/Montevideo')::date THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'Las inscripciones de este evento están cerradas');
+  END IF;
+
+  -- v22: además del id trae nombre/estado/pago y bloquea la fila (FOR UPDATE),
+  -- igual que admin_pago_inscripcion: pago y reenvío no se pisan.
+  SELECT id, nombre, estado, pago_at
+    INTO v_id, v_nombre_actual, v_estado, v_pago_at
+    FROM inscripciones
+   WHERE event_id = p_event_id
+     AND regexp_replace(celular, '\D', '', 'g') = regexp_replace(v_celular, '\D', '', 'g')
+     AND estado <> 'baja'
+   LIMIT 1
+   FOR UPDATE;
+  IF v_id IS NOT NULL THEN
+    -- v22: el celular es de una inscripción a OTRO nombre → no se pisa.
+    IF lower(translate(regexp_replace(btrim(v_nombre_actual), '\s+', ' ', 'g'),'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNaeiouun'))
+       <> lower(translate(regexp_replace(v_nombre, '\s+', ' ', 'g'),'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNaeiouun')) THEN
+      RETURN jsonb_build_object('ok', false, 'error',
+        'Ese celular ya está inscripto a nombre de otra persona. Si querés anotar a alguien más usá su propio celular, o escribinos por WhatsApp.');
+    END IF;
+    -- v22: lo pago o confirmado lo cambia solo el equipo.
+    IF v_pago_at IS NOT NULL THEN
+      RETURN jsonb_build_object('ok', false, 'error',
+        'Tu inscripción ya está paga: para cambiarla escribinos por WhatsApp');
+    END IF;
+    IF v_estado = 'confirmada' THEN
+      RETURN jsonb_build_object('ok', false, 'error',
+        'Tu inscripción ya está confirmada: para cambiarla escribinos por WhatsApp');
+    END IF;
+    UPDATE inscripciones SET
+      nombre = v_nombre,
+      categorias = v_categorias,
+      email = btrim(COALESCE(p_email, '')),
+      pareja = btrim(COALESCE(p_pareja, '')),
+      parejas = v_parejas,
+      dupr_id = btrim(COALESCE(p_dupr_id, '')),
+      notas = btrim(COALESCE(p_notas, ''))
+    WHERE id = v_id;
+    RETURN jsonb_build_object('ok', true, 'id', v_id, 'actualizada', true);
+  END IF;
+
+  -- Mismo nombre, otro celular: NO crear otra fila.
+  IF EXISTS (
+    SELECT 1 FROM inscripciones
+    WHERE event_id = p_event_id AND estado <> 'baja'
+      AND lower(translate(regexp_replace(btrim(nombre), '\s+', ' ', 'g'),'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNaeiouun'))
+        = lower(translate(regexp_replace(v_nombre, '\s+', ' ', 'g'),'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNaeiouun'))
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error',
+      'Ya hay una inscripción a tu nombre. Escribinos por WhatsApp para modificarla o si sos otra persona con el mismo nombre.');
+  END IF;
+
+  INSERT INTO inscripciones (event_id, nombre, celular, email, categorias, pareja, parejas, dupr_id, notas)
+  VALUES (p_event_id, v_nombre, v_celular, btrim(COALESCE(p_email, '')), v_categorias,
+          btrim(COALESCE(p_pareja, '')), v_parejas, btrim(COALESCE(p_dupr_id, '')), btrim(COALESCE(p_notas, '')))
+  RETURNING id INTO v_id;
+  RETURN jsonb_build_object('ok', true, 'id', v_id, 'actualizada', false);
+END;
+$function$;
+
+-- Grants: CREATE OR REPLACE conserva los que ya tiene (sin PUBLIC; EXECUTE a
+-- anon, authenticated y service_role). anon lo NECESITA: es el form público.
+-- No se re-grantea nada.
+
+-- --------------------------------------------
+-- 2. rk_en_cancha: solo el equipo cambia lo que muestra la TV.
+-- --------------------------------------------
+-- La escribe ProgramacionPage (src/torneos/publico) con la sesión del admin;
+-- el mismo flujo ya escribe rk_torneos, que exige is_admin() (≡ owner/admin
+-- activo desde v15), así que quien hoy la usa de verdad es el equipo. La TV
+-- (/programación, Realtime) lee como anon: "en_cancha lectura publica"
+-- (SELECT true) y el grant SELECT de anon quedan intactos.
+--
+-- Renombrada al cambiar el guard (convención v14: ledger_admin_read ->
+-- ledger_equipo_read). Sigue TO authenticated: anon nunca es equipo.
+DROP POLICY IF EXISTS "en_cancha escribe admin" ON public.rk_en_cancha;
+DROP POLICY IF EXISTS "en_cancha escribe equipo" ON public.rk_en_cancha;
+CREATE POLICY "en_cancha escribe equipo" ON public.rk_en_cancha
+  AS PERMISSIVE FOR ALL TO authenticated
+  USING (es_equipo()) WITH CHECK (es_equipo());
+
+-- Convenciones v14: anon sin DML y TRUNCATE fuera (TRUNCATE no pasa por RLS).
+-- Antes: anon y authenticated con DELETE,INSERT,REFERENCES,SELECT,TRIGGER,
+-- TRUNCATE,UPDATE. Quedan: anon SELECT (+REFERENCES/TRIGGER, sin efecto
+-- práctico); authenticated sin TRUNCATE (el DML lo filtra la policy).
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.rk_en_cancha FROM anon;
+REVOKE TRUNCATE ON public.rk_en_cancha FROM authenticated;
+
+-- --------------------------------------------
+-- 3. orders: el alta pública solo puede crear un pedido NUEVO y razonable.
+-- --------------------------------------------
+-- Quién inserta en orders hoy (verificado en código y catálogo):
+--   · checkout web (anon, src/services/supabaseService.ts addOrder): INSERT
+--     plano con orderToRow + source 'whatsapp' (o 'web' + payment_status
+--     'iniciado' + payment_provider 'mp' si paga con Mercado Pago), status
+--     'pending', id 'VO-<base36>'. items = CartItem[] con el producto entero
+--     (hoy ~1,6 KB por renglón; el producto más pesado ~2,2 KB).
+--   · admin (AdminOrderModal → addOrder; setOrders hace upsert) con sesión
+--     de equipo: puede poner cualquier total/estado → NO se valida.
+--   · bot de Telegram: bot_create_pedido (SECURITY DEFINER, owner postgres),
+--     source 'telegram', llamado desde bot_handle, que es anon-callable. OJO:
+--     ahí auth.role() da 'anon' pero current_user es postgres. Por eso el
+--     filtro es current_user y NO auth.role() (con auth.role() este trigger
+--     rechazaría todos los pedidos del bot por source='telegram').
+--   · api/mp/preferencia.ts y api/mp/webhook.ts: service_role, solo UPDATE.
+--
+-- El trigger corre para current_user IN ('anon','authenticated') que NO sea
+-- es_equipo(): el público y cualquier usuario logueado ajeno al equipo (el
+-- taller, usuarios de otros sitios). service_role, postgres y las funciones
+-- SECURITY DEFINER quedan afuera. Para ellos:
+--   · fuerza status 'pending', created_at/updated_at = now(),
+--     shopify_order_gid NULL, mp_preference_id NULL (lo escribe preferencia.ts
+--     con service_role), payment_provider NULL o 'mp';
+--   · source solo 'whatsapp' o 'web' (NULL → 'whatsapp', el default);
+--   · id: 1-40 caracteres [A-Za-z0-9_-] (el checkout genera VO-XXXXXXXX);
+--   · items: array de 1 a 30 objetos y < 100.000 bytes;
+--   · total entre 0 y 1.000.000 (NaN/Infinity quedan afuera por comparación);
+--   · textos: nombre obligatorio ≤120, teléfono ≤40, email ≤200,
+--     dirección ≤300, ciudad ≤120, departamento ≤120, notas ≤1000.
+-- Lo que NO puede validar: que el total coincida con los precios. Mercado
+-- Pago igual cobra lo que recalcula preferencia.ts desde products; en
+-- WhatsApp el equipo cobra mirando el pedido.
+--
+-- Rechaza con ERRCODE check_violation (23514 → HTTP 400 en PostgREST): addOrder
+-- devuelve false y el flujo MP muestra "No pudimos registrar el pedido".
+-- Convive con orders_clamp_pago_insert (limpia pago): los triggers BEFORE de la
+-- misma tabla corren por orden alfabético (clamp primero) y no tocan los mismos
+-- campos. Upsert (INSERT … ON CONFLICT): el BEFORE INSERT también corre, pero
+-- el único que hace upsert es setOrders del admin (es_equipo → no se valida).
+CREATE OR REPLACE FUNCTION public.orders_validar_alta_publica()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'pg_catalog', 'public'
+AS $function$
+DECLARE
+  v_items int;
+BEGIN
+  -- Solo el alta pública. current_user (no auth.role()): ver comentario arriba.
+  IF current_user NOT IN ('anon', 'authenticated') OR es_equipo() THEN
+    RETURN NEW;
+  END IF;
+
+  -- Lo que el público no decide.
+  NEW.status := 'pending';
+  NEW.created_at := now();
+  NEW.updated_at := now();
+  NEW.shopify_order_gid := NULL;
+  NEW.mp_preference_id := NULL;
+  IF NEW.payment_provider IS NOT NULL THEN
+    NEW.payment_provider := 'mp';
+  END IF;
+
+  NEW.source := COALESCE(NEW.source, 'whatsapp');
+  IF NEW.source NOT IN ('whatsapp', 'web') THEN
+    RAISE EXCEPTION 'Pedido rechazado: origen no permitido' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.id IS NULL OR NEW.id !~ '^[A-Za-z0-9_-]{1,40}$' THEN
+    RAISE EXCEPTION 'Pedido rechazado: referencia inválida' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- IFs anidados a propósito: jsonb_array_length revienta si no es array, y
+  -- SQL no garantiza cortocircuito en un OR.
+  IF COALESCE(jsonb_typeof(NEW.items), '') <> 'array' THEN
+    RAISE EXCEPTION 'Pedido rechazado: items inválidos' USING ERRCODE = 'check_violation';
+  END IF;
+  v_items := jsonb_array_length(NEW.items);
+  IF v_items < 1 OR v_items > 30 THEN
+    RAISE EXCEPTION 'Pedido rechazado: el pedido tiene que tener entre 1 y 30 productos' USING ERRCODE = 'check_violation';
+  END IF;
+  IF octet_length(NEW.items::text) >= 100000 THEN
+    RAISE EXCEPTION 'Pedido rechazado: pedido demasiado grande' USING ERRCODE = 'check_violation';
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(NEW.items) AS e(v) WHERE jsonb_typeof(e.v) <> 'object') THEN
+    RAISE EXCEPTION 'Pedido rechazado: items inválidos' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.total IS NULL OR NEW.total < 0 OR NEW.total > 1000000 THEN
+    RAISE EXCEPTION 'Pedido rechazado: total fuera de rango' USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF btrim(COALESCE(NEW.customer_name, '')) = ''
+     OR length(NEW.customer_name) > 120
+     OR length(COALESCE(NEW.customer_phone, '')) > 40
+     OR length(COALESCE(NEW.customer_email, '')) > 200
+     OR length(COALESCE(NEW.customer_address, '')) > 300
+     OR length(COALESCE(NEW.customer_city, '')) > 120
+     OR length(COALESCE(NEW.customer_department, '')) > 120
+     OR length(COALESCE(NEW.customer_notes, '')) > 1000 THEN
+    RAISE EXCEPTION 'Pedido rechazado: datos del cliente vacíos o demasiado largos' USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END
+$function$;
+
+-- Sin REVOKE a propósito, igual que orders_clamp_pago: una función que
+-- devuelve trigger no se puede invocar por RPC, y quitarle EXECUTE no suma
+-- nada y arriesga romper el checkout si el alta pasara a chequearlo.
+
+DROP TRIGGER IF EXISTS orders_validar_alta_publica_insert ON public.orders;
+CREATE TRIGGER orders_validar_alta_publica_insert
+  BEFORE INSERT ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.orders_validar_alta_publica();
+
+-- --------------------------------------------
+-- 4. orders: grants (convenciones v14).
+-- --------------------------------------------
+-- anon conserva INSERT (checkout) y SELECT (no lo usa: el insert va con
+-- return=minimal; se deja para no arriesgar). Pierde UPDATE/DELETE, que igual
+-- bloqueaba la RLS (orders_admin_all exige is_admin) y ningún flujo anónimo
+-- usa: preferencia.ts/webhook.ts actualizan con service_role y addOrder NO hace
+-- upsert. TRUNCATE fuera para anon y authenticated. Bloque separable: si lo
+-- querés en otra migración, borrá estas dos líneas y su post-chequeo.
+REVOKE UPDATE, DELETE, TRUNCATE ON public.orders FROM anon;
+REVOKE TRUNCATE ON public.orders FROM authenticated;
+
+-- --------------------------------------------
+-- 5. Post-chequeo contra el catálogo (si algo no quedó, aborta todo).
+-- --------------------------------------------
+DO $post$
+DECLARE
+  v_fn regprocedure := 'public.inscribir_evento(text,text,text,text,text,text,text,text,jsonb)'::regprocedure;
+BEGIN
+  -- 1. inscribir_evento
+  IF pg_get_functiondef(v_fn) NOT LIKE '%America/Montevideo%'
+     OR pg_get_functiondef(v_fn) NOT LIKE '%FOR UPDATE%' THEN
+    RAISE EXCEPTION 'v22 post: inscribir_evento no quedó con los cambios';
+  END IF;
+  IF NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_fn)
+     OR (SELECT proconfig FROM pg_proc WHERE oid = v_fn) IS DISTINCT FROM ARRAY['search_path=pg_catalog, public'] THEN
+    RAISE EXCEPTION 'v22 post: inscribir_evento perdió SECURITY DEFINER o search_path';
+  END IF;
+  IF NOT has_function_privilege('anon', v_fn, 'EXECUTE') THEN
+    RAISE EXCEPTION 'v22 post: anon perdió EXECUTE en inscribir_evento (rompe el form público)';
+  END IF;
+
+  -- 2. rk_en_cancha
+  IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'rk_en_cancha'
+               AND policyname = 'en_cancha escribe admin') THEN
+    RAISE EXCEPTION 'v22 post: sigue la policy vieja de rk_en_cancha';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'rk_en_cancha'
+                   AND policyname = 'en_cancha escribe equipo' AND cmd = 'ALL'
+                   AND qual = 'es_equipo()' AND with_check = 'es_equipo()') THEN
+    RAISE EXCEPTION 'v22 post: falta "en_cancha escribe equipo" con es_equipo()';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'rk_en_cancha'
+               AND cmd <> 'SELECT' AND (qual = 'true' OR with_check = 'true')) THEN
+    RAISE EXCEPTION 'v22 post: queda una policy de escritura abierta en rk_en_cancha';
+  END IF;
+  IF has_table_privilege('anon', 'public.rk_en_cancha', 'INSERT')
+     OR has_table_privilege('anon', 'public.rk_en_cancha', 'UPDATE')
+     OR has_table_privilege('anon', 'public.rk_en_cancha', 'DELETE')
+     OR has_table_privilege('anon', 'public.rk_en_cancha', 'TRUNCATE')
+     OR has_table_privilege('authenticated', 'public.rk_en_cancha', 'TRUNCATE') THEN
+    RAISE EXCEPTION 'v22 post: quedaron grants de escritura en rk_en_cancha';
+  END IF;
+  IF NOT has_table_privilege('anon', 'public.rk_en_cancha', 'SELECT') THEN
+    RAISE EXCEPTION 'v22 post: anon perdió SELECT en rk_en_cancha (la TV quedaría vacía)';
+  END IF;
+
+  -- 3 y 4. orders
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.orders'::regclass
+                   AND tgname = 'orders_validar_alta_publica_insert' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'v22 post: falta el trigger orders_validar_alta_publica_insert';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.orders'::regclass
+                   AND tgname = 'orders_clamp_pago_insert' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'v22 post: se perdió orders_clamp_pago_insert';
+  END IF;
+  IF NOT has_table_privilege('anon', 'public.orders', 'INSERT') THEN
+    RAISE EXCEPTION 'v22 post: anon perdió INSERT en orders (rompe el checkout)';
+  END IF;
+  IF has_table_privilege('anon', 'public.orders', 'UPDATE')
+     OR has_table_privilege('anon', 'public.orders', 'DELETE')
+     OR has_table_privilege('anon', 'public.orders', 'TRUNCATE')
+     OR has_table_privilege('authenticated', 'public.orders', 'TRUNCATE') THEN
+    RAISE EXCEPTION 'v22 post: quedaron grants de más en orders';
+  END IF;
+END
+$post$;
