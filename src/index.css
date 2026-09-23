@@ -2,6 +2,19 @@
    Las clases propias (.reveal, .product-card, .promo-*, etc.) siguen en el <style>
    inline de index.html: Vite inserta el <link> de este CSS después, así las
    utilidades le siguen ganando a esas clases como pasaba con el CDN. */
+/* Fuentes servidas desde el propio sitio (antes Google Fonts): el <link> a
+   fonts.googleapis.com bloqueaba el primer dibujado ~0,8 s en celular (Lighthouse)
+   y sumaba dos conexiones a otros dominios. Mismos pesos que se usaban: Lexend
+   400/600/700/900 y Montserrat 400/600/700, con font-display: swap. Cada archivo
+   trae todos los alfabetos con unicode-range: el navegador baja solo el latino. */
+@import '@fontsource/lexend/400.css';
+@import '@fontsource/lexend/600.css';
+@import '@fontsource/lexend/700.css';
+@import '@fontsource/lexend/900.css';
+@import '@fontsource/montserrat/400.css';
+@import '@fontsource/montserrat/600.css';
+@import '@fontsource/montserrat/700.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
