@@ -23,6 +23,9 @@ describe('Content-Security-Policy', () => {
       .filter((m) => !/ld\+json/.test(m[1])); // JSON-LD no se ejecuta: la CSP no lo mira
     expect(inline.length).toBeGreaterThan(0);
     for (const m of inline) {
+      // En una sola línea: con saltos, el checkout de Windows (CRLF) y el build de
+      // Vercel (LF) darían hashes distintos y el test pasaría acá pero no allá.
+      expect(m[2]).not.toMatch(/[\r\n]/);
       const hash = createHash('sha256').update(m[2]).digest('base64');
       expect(politica).toContain(`'sha256-${hash}'`);
     }

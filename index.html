@@ -2,22 +2,15 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <script>
-      // Links viejos con "#/…" (Instagram, WhatsApp, QR, la TV en /#/copa, el link
-      // mágico del admin, la vuelta de Mercado Pago) → misma ruta sin "#". Corre
-      // antes que la app y en ES5 porque la TV del club tiene un Chromium viejo.
-      (function () {
-        var h = location.hash;
-        if (h.indexOf('#/') !== 0) return;
-        var resto = h.slice(1);                    // "/producto/x?y=1" o "/admin#access_token=…"
-        var i = resto.indexOf('#');
-        var frag = i >= 0 ? resto.slice(i) : '';   // tokens del link mágico: Supabase los lee de acá
-        var ruta = i >= 0 ? resto.slice(0, i) : resto;
-        var extra = location.search.slice(1);      // ?fbclid=… que Instagram agrega antes del "#"
-        if (extra) ruta += (ruta.indexOf('?') >= 0 ? '&' : '?') + extra;
-        history.replaceState(null, '', ruta + frag);
-      })();
-    </script>
+    <!-- Links viejos con "#/…" (Instagram, WhatsApp, QR, la TV en /#/copa, el link mágico del admin,
+         la vuelta de Mercado Pago) → misma ruta sin "#". Corre antes que la app y en ES5 porque la TV
+         del club tiene un Chromium viejo. "resto" es "/producto/x?y=1" o "/admin#access_token=…": el
+         fragmento son los tokens del link mágico (Supabase los lee de ahí) y location.search trae el
+         ?fbclid=… que Instagram agrega antes del "#".
+         Va en UNA línea a propósito: la CSP de vercel.json lo permite por su hash, y con saltos de línea
+         el hash cambia entre Windows (CRLF) y el build de Vercel (LF). Si lo tocás, actualizá el hash
+         (src/utils/csp.test.ts te dice cuál). -->
+    <script>(function(){var h=location.hash;if(h.indexOf('#/')!==0)return;var resto=h.slice(1);var i=resto.indexOf('#');var frag=i>=0?resto.slice(i):'';var ruta=i>=0?resto.slice(0,i):resto;var extra=location.search.slice(1);if(extra)ruta+=(ruta.indexOf('?')>=0?'&':'?')+extra;history.replaceState(null,'',ruta+frag);})();</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VOLEA | La Primera Marca de Pickleball en Uruguay</title>
     <meta name="description" content="VOLEA - Indumentaria y accesorios de pickleball. La primera marca de pickleball en Uruguay. Remeras, polos, shorts, gorros y más." />
