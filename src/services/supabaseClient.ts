@@ -30,13 +30,14 @@ function rescueHashTokens(): { access_token: string; refresh_token: string } | n
   return { access_token, refresh_token };
 }
 
-// Links vencidos o ya usados vuelven como "#/admin#error=...": limpiar la ruta
-// para que el formulario de login quede utilizable.
+// Links vencidos o ya usados vuelven como "#/admin#error=..." (HashRouter) o,
+// desde las rutas sin "#", como "/admin#error=...": limpiar la URL para que el
+// formulario de login quede utilizable.
 function stripHashError(): void {
   if (typeof window === 'undefined') return;
   const hash = window.location.hash;
   const i = hash.indexOf('#error');
-  if (i > 0) {
+  if (i >= 0) {
     console.warn('Magic link rechazado por Supabase:', hash.slice(i + 1));
     window.history.replaceState(null, '', window.location.pathname + window.location.search + hash.slice(0, i));
   }

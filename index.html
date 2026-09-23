@@ -2,6 +2,22 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Links viejos con "#/…" (Instagram, WhatsApp, QR, la TV en /#/copa, el link
+      // mágico del admin, la vuelta de Mercado Pago) → misma ruta sin "#". Corre
+      // antes que la app y en ES5 porque la TV del club tiene un Chromium viejo.
+      (function () {
+        var h = location.hash;
+        if (h.indexOf('#/') !== 0) return;
+        var resto = h.slice(1);                    // "/producto/x?y=1" o "/admin#access_token=…"
+        var i = resto.indexOf('#');
+        var frag = i >= 0 ? resto.slice(i) : '';   // tokens del link mágico: Supabase los lee de acá
+        var ruta = i >= 0 ? resto.slice(0, i) : resto;
+        var extra = location.search.slice(1);      // ?fbclid=… que Instagram agrega antes del "#"
+        if (extra) ruta += (ruta.indexOf('?') >= 0 ? '&' : '?') + extra;
+        history.replaceState(null, '', ruta + frag);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VOLEA | La Primera Marca de Pickleball en Uruguay</title>
     <meta name="description" content="VOLEA - Indumentaria y accesorios de pickleball. La primera marca de pickleball en Uruguay. Remeras, polos, shorts, gorros y más." />
@@ -9,7 +25,6 @@
     <meta property="og:title" content="VOLEA | Pickleball Uruguay" />
     <meta property="og:description" content="La primera marca de pickleball en Uruguay. Indumentaria y accesorios de alto rendimiento." />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://volea.vercel.app/" />
     <meta property="og:image" content="https://volea.vercel.app/og-cover.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />

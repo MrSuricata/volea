@@ -1,6 +1,6 @@
 ﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MotionConfig, motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram,
@@ -294,6 +294,17 @@ function usePageMeta({ title, description, image }: PageMeta) {
     setMetaTag('name', 'twitter:title', fullTitle);
     setMetaTag('name', 'twitter:description', desc);
     setMetaTag('name', 'twitter:image', img);
+    // URL canónica de cada página (sin query ni hash): con og:url fijo en la home,
+    // Facebook juntaba cualquier link compartido con la home.
+    const url = 'https://volea.vercel.app' + window.location.pathname;
+    setMetaTag('property', 'og:url', url);
+    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.appendChild(canonical);
+    }
+    canonical.href = url;
   }, [title, description, image]);
 }
 
@@ -1739,8 +1750,8 @@ function HomePage() {
                   {/* El flyer, si lo subieron. Se muestra completo (object-contain):
                       recortarlo se comería las categorías y el precio. */}
                   {torneoDestacado.imageUrl && (
-                    <a
-                      href="#/eventos"
+                    <Link
+                      to="/eventos"
                       className="mx-auto w-full max-w-[220px] flex-shrink-0 lg:mx-0"
                       aria-label={`Ver ${torneoDestacado.name}`}
                     >
@@ -1752,7 +1763,7 @@ function HomePage() {
                         className="w-full rounded-xl border border-navy-600 object-contain shadow-lg"
                         onError={handleImgError}
                       />
-                    </a>
+                    </Link>
                   )}
                   <div className="min-w-0 flex-1">
                     {/* Etiqueta según lo que sea (torneo/clínica/social) y según
@@ -3763,6 +3774,7 @@ function CheckoutPage() {
               <label htmlFor="co-nombre" className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
               <input
                 id="co-nombre"
+                maxLength={120}
                 type="text"
                 required
                 autoComplete="name"
@@ -3776,6 +3788,7 @@ function CheckoutPage() {
                 <label htmlFor="co-telefono" className="block text-sm font-semibold text-navy-700 mb-1">Celular (WhatsApp) *</label>
                 <input
                   id="co-telefono"
+                  maxLength={40}
                   type="tel"
                   inputMode="tel"
                   required
@@ -3789,6 +3802,7 @@ function CheckoutPage() {
                 <label htmlFor="co-email" className="block text-sm font-semibold text-navy-700 mb-1">Email (opcional)</label>
                 <input
                   id="co-email"
+                  maxLength={200}
                   type="email"
                   autoComplete="email"
                   value={customer.email}
@@ -3829,6 +3843,7 @@ function CheckoutPage() {
                   <label htmlFor="co-direccion" className="block text-sm font-semibold text-navy-700 mb-1">Dirección *</label>
                   <input
                     id="co-direccion"
+                    maxLength={300}
                     type="text"
                     required
                     autoComplete="street-address"
@@ -3842,6 +3857,7 @@ function CheckoutPage() {
                     <label htmlFor="co-ciudad" className="block text-sm font-semibold text-navy-700 mb-1">Ciudad *</label>
                     <input
                       id="co-ciudad"
+                      maxLength={120}
                       type="text"
                       required
                       autoComplete="address-level2"
@@ -3872,6 +3888,7 @@ function CheckoutPage() {
               <label htmlFor="co-notas" className="block text-sm font-semibold text-navy-700 mb-1">Notas (opcional)</label>
               <textarea
                 id="co-notas"
+                maxLength={1000}
                 rows={3}
                 value={customer.notes}
                 onChange={e => setCustomer({ ...customer, notes: e.target.value })}
@@ -4753,9 +4770,9 @@ function AdminPage() {
             <div className="mb-8">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-display text-lg font-bold text-navy-700">Torneos</h2>
-                <a href="#/torneos" className="text-sm font-semibold text-navy-500 hover:text-navy-700">
+                <Link to="/torneos" className="text-sm font-semibold text-navy-500 hover:text-navy-700">
                   Ver página pública →
-                </a>
+                </Link>
               </div>
               {eventosDash === null ? (
                 <p className="text-sm text-gray-400">Cargando torneos…</p>
@@ -4764,9 +4781,9 @@ function AdminPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {eventosDash.slice(0, 6).map(ev => (
-                    <a
+                    <Link
                       key={ev.nombre}
-                      href="#/torneos"
+                      to="/torneos"
                       className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:border-lime-400 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -4785,7 +4802,7 @@ function AdminPage() {
                           : `${ev.torneos.length} categorías`}
                         {' · '}{new Date(ev.ultimaFecha).toLocaleDateString('es-UY')}
                       </p>
-                    </a>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -6651,7 +6668,7 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
       {/* "user": si el sistema pide reducir movimiento, framer-motion salta las
           animaciones de aparición, parallax y transición entre páginas. */}
       <MotionConfig reducedMotion="user">
@@ -6682,6 +6699,6 @@ export default function App() {
         </div>
       </StoreProvider>
       </MotionConfig>
-    </HashRouter>
+    </BrowserRouter>
   );
 }

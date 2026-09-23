@@ -194,7 +194,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const nCobrados = activos.filter(i => estadoPagoDe(i) === 'cobrados').length;
   const nDeudores = activos.filter(i => estadoPagoDe(i) === 'deudores').length;
   const esNueva = (i: Inscripcion) => i.createdAt > marcaVisitaPrevia();
-  const linkPublico = evt ? `volea.vercel.app/#/inscripcion/${evt.id}` : '';
+  const linkPublico = evt ? `volea.vercel.app/inscripcion/${evt.id}` : '';
 
   const parejasDeFila = (i: Inscripcion): { categoria: string; pareja: string }[] =>
     categoriasDe(i)
