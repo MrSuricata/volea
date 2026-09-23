@@ -1,7 +1,7 @@
 ﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { HashRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
+import { MotionConfig, motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram,
   MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Edit, Package,
@@ -9,7 +9,7 @@ import {
   SortAsc, ExternalLink, Check, AlertCircle, Home, Store, CalendarDays, Settings,
   LogOut, ChevronDown, Upload, Image as ImageIcon, Save, XCircle, Map, Megaphone,
   Globe, Navigation, Newspaper, Wallet, Loader2, Images, CreditCard, EyeOff, ClipboardList, UserRound,
-  Truck, ListChecks, UserCog, Swords,
+  Truck, ListChecks, UserCog, Swords, Share2,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
@@ -18,7 +18,7 @@ import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductCo
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
 import {
-  WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE,
+  WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE, EMAIL_CONTACTO,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
 } from './constants';
 import { StorageService } from './services/storageService';
@@ -155,6 +155,11 @@ const fechaTorneo = (iso: string): string => {
     .toUpperCase();
 };
 
+/** Nombre del torneo para el cartel neón, sin el "VOLEA" que el cartel ya muestra arriba. */
+function nombreCartel(nombre: string): string {
+  return nombre.replace(/^\s*volea\s+/i, '').trim() || nombre;
+}
+
 /** "22·23·24 AGO" — los días sueltos para el cartel neón del hero. */
 const diasCortos = (desde: string, hasta?: string): string => {
   const d1 = new Date(`${desde}T12:00:00Z`);
@@ -213,6 +218,19 @@ const getTotalStock = (product: Product): number =>
   Object.values(product.stockBySize).reduce((sum, qty) => sum + qty, 0);
 
 // Los productos guardan el id de categoría (ej: 'remeras'); esto resuelve el nombre visible.
+/** Escapa texto para meterlo dentro de un string de HTML (popups de Leaflet). */
+const escaparHtml = (s: unknown): string =>
+  String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Categorías con al menos un producto activo, ordenadas: una vacía ("CAMPERAS")
+ *  llevaba a una página sin nada. Mientras no cargaron los productos, van todas. */
+const categoriasConProductos = (categories: Category[], products: Product[]): Category[] => {
+  const ordenadas = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  if (products.length === 0) return ordenadas;
+  const usadas = new Set(products.filter(p => p.active).map(p => p.category));
+  return ordenadas.filter(c => usadas.has(c.id));
+};
+
 const categoryLabel = (categories: Category[], id: string): string =>
   categories.find(c => c.id === id)?.name || id;
 
@@ -566,15 +584,18 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
           _setProducts(loadedProducts);
           _setCategories(c);
         }
-        _setEvents(e.length ? e : INITIAL_EVENTS);
+        // Con la nube conectada, lo que viene de la base es la verdad aunque venga
+        // vacío: el respaldo de demo mostraba anuncios de abril ("Torneo Apertura")
+        // y, re-subido por el admin, terminó metiendo eventos de demo en la base.
+        _setEvents(e);
         // Pedidos: acá va solo lo que haya en este dispositivo (el comprador ve los suyos).
         // La query real a Supabase se dispara recién cuando se confirma un admin (ver el
         // useEffect de auth de arriba): para un anónimo siempre daba [] por RLS. Set
         // funcional a propósito: si la carga del admin llegó ANTES que este Promise.all
         // (una query sola vs siete), no hay que pisarle los pedidos de la nube.
         _setOrders(prev => (prev.length ? prev : StorageService.getOrders()));
-        _setClubs(cl.length ? cl : INITIAL_CLUBS);
-        _setAnnouncements(an.length ? an : INITIAL_ANNOUNCEMENTS);
+        _setClubs(cl);
+        _setAnnouncements(an);
         _setPosts(po);
         _setStandings(st);
       } else {
@@ -981,11 +1002,11 @@ function Navbar() {
           <button
             onClick={() => setCartOpen(true)}
             aria-label={totalItems > 0 ? `Carrito, ${totalItems} ${totalItems === 1 ? 'producto' : 'productos'}` : 'Abrir carrito'}
-            className="relative text-white hover:text-lime-400 transition-colors"
+            className="relative -m-2.5 p-2.5 text-white hover:text-lime-400 transition-colors"
           >
             <ShoppingCart size={24} />
             {totalItems > 0 && (
-              <span className="absolute -top-2 -right-2 bg-lime-400 text-navy-700 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              <span className="absolute top-0.5 right-0.5 bg-lime-400 text-navy-700 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                 {totalItems}
               </span>
             )}
@@ -993,7 +1014,7 @@ function Navbar() {
           <button
             onClick={() => setMobileOpen(true)}
             aria-label="Abrir menú"
-            className="lg:hidden text-white hover:text-lime-400 transition-colors"
+            className="lg:hidden -m-2.5 p-2.5 text-white hover:text-lime-400 transition-colors"
           >
             <Menu size={24} />
           </button>
@@ -1007,7 +1028,7 @@ function Navbar() {
           <div className="absolute left-0 top-0 h-full w-72 bg-navy-800 slide-in-left">
             <div className="flex items-center justify-between p-4 border-b border-navy-600">
               <img src="/logo.png" alt="VOLEA" className="h-8" onError={handleImgError} />
-              <button onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" className="text-white hover:text-lime-400">
+              <button onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" className="-m-2.5 p-2.5 text-white hover:text-lime-400">
                 <X size={24} />
               </button>
             </div>
@@ -1052,7 +1073,7 @@ function CartDrawer() {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <h2 className="font-display text-xl font-bold text-navy-700">Tu carrito</h2>
-          <button onClick={() => setCartOpen(false)} aria-label="Cerrar carrito" className="text-navy-700 hover:text-red-500 transition-colors">
+          <button onClick={() => setCartOpen(false)} aria-label="Cerrar carrito" className="-m-2.5 p-2.5 text-navy-700 hover:text-red-600 transition-colors">
             <X size={24} />
           </button>
         </div>
@@ -1091,7 +1112,8 @@ function CartDrawer() {
                     <div className="flex items-center gap-2 mt-2">
                       <button
                         onClick={() => updateCartQuantity(item.product.id, item.selectedSize, item.selectedColor, item.quantity - 1)}
-                        className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors"
+                        aria-label={`Quitar una unidad de ${item.product.name}`}
+                        className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors"
                       >
                         <Minus size={14} />
                       </button>
@@ -1109,7 +1131,8 @@ function CartDrawer() {
                             onClick={() => updateCartQuantity(item.product.id, item.selectedSize, item.selectedColor, item.quantity + 1)}
                             disabled={enElTope}
                             title={enElTope ? `No hay más stock (${disponible} disponible${disponible === 1 ? '' : 's'})` : undefined}
-                            className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            aria-label={`Sumar una unidad de ${item.product.name}`}
+                            className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                           >
                             <Plus size={14} />
                           </button>
@@ -1119,7 +1142,8 @@ function CartDrawer() {
                   </div>
                   <button
                     onClick={() => removeFromCart(item.product.id, item.selectedSize, item.selectedColor)}
-                    className="text-gray-400 hover:text-red-500 transition-colors self-start"
+                    aria-label={`Sacar ${item.product.name} del carrito`}
+                    className="-m-2 p-2 text-gray-500 hover:text-red-600 transition-colors self-start"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -1640,14 +1664,18 @@ function HomePage() {
                 {/* La aberración cromática se hace con text-shadow sobre UN solo
                     elemento: con capas superpuestas los fantasmas caían 4-6px
                     corridos en vertical y el título se veía borroso, no glitcheado. */}
+                {/* El nombre sale del evento destacado ("VOLEA" ya va arriba): estaba
+                    escrito "Racket Roll" fijo, y el próximo torneo iba a salir con ese nombre. */}
                 <p
-                  className="mt-1.5 font-display text-[52px] font-black uppercase leading-[0.88] text-white"
+                  className={`mt-1.5 font-display font-black uppercase leading-[0.88] text-white break-words ${
+                    nombreCartel(torneoDestacado.name).length > 14 ? 'text-[40px]' : 'text-[52px]'
+                  }`}
                   style={{
                     textShadow:
                       '-2px 0 0 rgba(34,211,238,.85), 2px 0 0 rgba(217,70,239,.85), 0 0 26px rgba(236,72,153,.45)',
                   }}
                 >
-                  Racket<br />Roll
+                  {nombreCartel(torneoDestacado.name)}
                 </p>
                 <div aria-hidden className="mx-auto my-6 h-px w-24 bg-gradient-to-r from-transparent via-fuchsia-400/80 to-transparent" />
                 <p
@@ -1871,7 +1899,7 @@ function HomePage() {
             </div>
           </Reveal>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[...categories].sort((a, b) => a.sortOrder - b.sortOrder).map((cat, i) => (
+            {categoriasConProductos(categories, products).map((cat, i) => (
               <Reveal key={cat.id} delay={i * 80}>
                 <Link
                   to={`/tienda?category=${encodeURIComponent(cat.id)}`}
@@ -2134,7 +2162,12 @@ function HomePage() {
           <div className="relative">
             <div className="marquee flex whitespace-nowrap">
               {[...activeAnnouncements, ...activeAnnouncements].map((ann, idx) => (
-                <div key={`${ann.title}-${idx}`} className="inline-flex items-center gap-3 mx-8 flex-shrink-0">
+                <div
+                  key={`${ann.title}-${idx}`}
+                  className="inline-flex items-center gap-3 mx-8 flex-shrink-0"
+                  // La segunda vuelta existe solo para que el loop no corte: no se lee.
+                  aria-hidden={idx >= activeAnnouncements.length || undefined}
+                >
                   <span className={`${announcementColors[ann.type] || announcementColors.info} text-white text-xs font-bold px-2 py-1 rounded-full`}>
                     {announcementTypeLabels[ann.type] || 'Información'}
                   </span>
@@ -2220,7 +2253,7 @@ function ShopPage() {
         >
           Todas
         </button>
-        {categories.sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
+        {categoriasConProductos(categories, products).map(cat => (
           <button
             key={cat.id}
             onClick={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
@@ -2334,6 +2367,20 @@ function ProductDetailPage() {
   const images = product.images.length > 0 ? product.images : [FALLBACK_IMG];
   const related = products.filter(p => p.category === product.category && p.id !== product.id).slice(0, 4);
 
+  // Compartir desde el celular abre el menú nativo (WhatsApp, Instagram…); en la
+  // compu copia el link.
+  const compartirProducto = async () => {
+    const url = window.location.href;
+    const datos = { title: `${product.name} | VOLEA`, text: `Mirá ${product.name} de VOLEA`, url };
+    try {
+      if (navigator.share) { await navigator.share(datos); return; }
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copiado');
+    } catch (e) {
+      if ((e as Error)?.name !== 'AbortError') toast.error('No se pudo compartir: copiá el link de la barra del navegador.');
+    }
+  };
+
   const handleAdd = () => {
     const stockKey = selectedColor ? `${selectedSize}|${selectedColor}` : selectedSize;
     const availableStock = product.stockBySize[stockKey] || 0;
@@ -2374,13 +2421,15 @@ function ProductDetailPage() {
               <>
                 <button
                   onClick={() => setMainImg(mainImg > 0 ? mainImg - 1 : images.length - 1)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label="Foto anterior"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                 >
                   <ChevronLeft size={20} className="text-navy-700" />
                 </button>
                 <button
                   onClick={() => setMainImg(mainImg < images.length - 1 ? mainImg + 1 : 0)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label="Foto siguiente"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                 >
                   <ChevronRight size={20} className="text-navy-700" />
                 </button>
@@ -2399,6 +2448,8 @@ function ProductDetailPage() {
                 <button
                   key={i}
                   onClick={() => setMainImg(i)}
+                  aria-label={`Ver foto ${i + 1} de ${images.length}`}
+                  aria-pressed={mainImg === i}
                   className={`w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 border-2 transition-all ${
                     mainImg === i ? 'border-lime-400 ring-2 ring-lime-400/30 scale-105' : 'border-gray-200 hover:border-gray-300'
                   }`}
@@ -2414,7 +2465,7 @@ function ProductDetailPage() {
         <div>
           <div className="flex items-center gap-3 mb-3">
             <span className="inline-block bg-navy-700/10 text-navy-700 text-xs font-bold px-3 py-1 rounded-full">{categoryLabel(categories, product.category)}</span>
-            <span className="text-xs text-gray-400 font-mono">SKU: {product.sku}</span>
+            {product.sku?.trim() && <span className="text-xs text-gray-500 font-mono">SKU: {product.sku}</span>}
           </div>
           <h1 className="font-display text-3xl font-bold text-navy-700 mb-3">{product.name}</h1>
           <div className="flex items-center gap-3 mb-6 flex-wrap">
@@ -2489,6 +2540,8 @@ function ProductDetailPage() {
                     key={color.name}
                     onClick={() => setSelectedColor(color.name)}
                     title={color.name}
+                    aria-label={`Color ${color.name}`}
+                    aria-pressed={selectedColor === color.name}
                     className={`w-10 h-10 rounded-full border-2 transition-all ${
                       selectedColor === color.name ? 'border-lime-400 scale-110' : 'border-gray-300 hover:scale-105'
                     }`}
@@ -2510,15 +2563,17 @@ function ProductDetailPage() {
               <button
                 onClick={() => setQty(Math.max(1, qty - 1))}
                 disabled={qty <= 1}
-                className={`w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+                aria-label="Restar una unidad"
+                className={`w-11 h-11 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
               >
                 <Minus size={18} />
               </button>
-              <span className="font-display font-bold text-lg w-10 text-center">{qty}</span>
+              <span className="font-display font-bold text-lg w-10 text-center" aria-live="polite">{qty}</span>
               <button
                 onClick={() => setQty(Math.min(qty + 1, currentStock))}
                 disabled={qty >= currentStock}
-                className={`w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty >= currentStock ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+                aria-label="Sumar una unidad"
+                className={`w-11 h-11 rounded-lg border border-gray-200 flex items-center justify-center transition-colors ${qty >= currentStock ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
               >
                 <Plus size={18} />
               </button>
@@ -2528,15 +2583,15 @@ function ProductDetailPage() {
           {/* Stock */}
           <div className="mb-6">
             {selectedSize && currentStock > 0 ? (
-              <span className="flex items-center gap-2 text-green-600 text-sm font-semibold">
+              <span className="flex items-center gap-2 text-green-700 text-sm font-semibold">
                 <Check size={16} /> En stock ({currentStock} disponibles en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
               </span>
             ) : getTotalStock(product) === 0 ? (
-              <span className="flex items-center gap-2 text-red-500 text-sm font-semibold">
+              <span className="flex items-center gap-2 text-red-700 text-sm font-semibold">
                 <XCircle size={16} /> Sin stock
               </span>
             ) : (
-              <span className="flex items-center gap-2 text-red-500 text-sm font-semibold">
+              <span className="flex items-center gap-2 text-red-700 text-sm font-semibold">
                 <XCircle size={16} /> Sin stock en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''}
               </span>
             )}
@@ -2556,6 +2611,33 @@ function ProductDetailPage() {
           >
             {added ? <><Check size={20} /> Agregado</> : <><ShoppingCart size={20} /> Agregar al carrito</>}
           </button>
+
+          {/* La duda que más frena una compra de ropa online es el talle: se
+              resuelve por WhatsApp con el producto ya escrito en el mensaje. */}
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <a
+              href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
+                `Hola! Tengo una duda con el talle de ${product.name}${selectedSize ? ` (miraba el ${selectedSize}${selectedColor ? ` en ${selectedColor}` : ''})` : ''}.`,
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 rounded-lg border-2 border-green-700 px-4 py-3 font-display text-sm font-bold text-green-800 hover:bg-green-50 transition-colors"
+            >
+              <MessageCircle size={18} /> ¿Dudás el talle? Escribinos
+            </a>
+            <button
+              type="button"
+              onClick={compartirProducto}
+              className="flex items-center justify-center gap-2 rounded-lg border-2 border-gray-300 px-4 py-3 font-display text-sm font-bold text-navy-700 hover:bg-gray-50 transition-colors"
+            >
+              <Share2 size={18} /> Compartir
+            </button>
+          </div>
+          <ul className="mt-5 space-y-2 rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
+            <li className="flex items-start gap-2"><Truck size={16} className="mt-0.5 shrink-0 text-navy-700" /> Envíos a todo Uruguay, o retiro a coordinar (por ejemplo en un torneo).</li>
+            <li className="flex items-start gap-2"><CreditCard size={16} className="mt-0.5 shrink-0 text-navy-700" /> Pagás al coordinar por WhatsApp: transferencia o efectivo.</li>
+            <li className="flex items-start gap-2"><MessageCircle size={16} className="mt-0.5 shrink-0 text-navy-700" /> Te respondemos por WhatsApp para coordinar la entrega.</li>
+          </ul>
         </div>
       </div>
 
@@ -2660,7 +2742,7 @@ function EventsPage() {
                     {/* Rango completo en eventos de varios días, y sin "- hs" colgado
                         cuando no hay hora cargada (un torneo de 3 días no tiene una). */}
                     <p className="flex items-center gap-2"><Calendar size={14} /> {rangoLargo(evt.date, evt.endDate)}{evt.time ? ` - ${evt.time}hs` : ''}</p>
-                    <p className="flex items-center gap-2"><MapPin size={14} /> {evt.location}, {evt.city}</p>
+                    <p className="flex items-center gap-2"><MapPin size={14} /> {[evt.location, evt.city].filter(Boolean).join(', ')}</p>
                     {evt.maxParticipants && (
                       <p className="flex items-center gap-2"><Users size={14} /> Máx. {evt.maxParticipants} participantes</p>
                     )}
@@ -2746,7 +2828,7 @@ function EventsPage() {
                     {/* fechaEventoLarga y no new Date(iso): "2026-05-10" se parsea como
                         medianoche UTC y en Uruguay se mostraba el día ANTERIOR. */}
                     <p className="flex items-center gap-2"><Calendar size={14} /> {fechaEventoLarga(evt.date)}</p>
-                    <p className="flex items-center gap-2"><MapPin size={14} /> {evt.location}, {evt.city}</p>
+                    <p className="flex items-center gap-2"><MapPin size={14} /> {[evt.location, evt.city].filter(Boolean).join(', ')}</p>
                   </div>
                 </div>
               </div>
@@ -2824,14 +2906,17 @@ function MapPage() {
     // Add markers for filtered clubs
     filteredClubs.forEach(club => {
       const marker = L.marker([club.lat, club.lng]).addTo(map);
+      // Leaflet mete el popup como HTML: los datos del club van escapados, si no
+      // un club con "<img onerror=...>" en la descripción corre código en el sitio.
+      const e = escaparHtml;
       marker.bindPopup(`
         <div style="font-family: 'Montserrat', sans-serif; min-width: 200px;">
-          <h3 style="font-weight: 700; color: #001F3F; margin: 0 0 4px 0; font-size: 14px;">${club.name}</h3>
-          <p style="color: #666; font-size: 12px; margin: 0 0 2px 0;">${club.address}</p>
-          <p style="color: #666; font-size: 12px; margin: 0 0 4px 0;">${club.city}, ${club.country}</p>
-          <p style="color: #888; font-size: 11px; margin: 0 0 8px 0;">${club.description}</p>
-          <a href="https://www.google.com/maps?q=${club.lat},${club.lng}" target="_blank" rel="noopener noreferrer"
-             style="color: #7aa300; font-size: 12px; font-weight: 600; text-decoration: none;">
+          <h3 style="font-weight: 700; color: #001F3F; margin: 0 0 4px 0; font-size: 14px;">${e(club.name)}</h3>
+          <p style="color: #555; font-size: 12px; margin: 0 0 2px 0;">${e(club.address)}</p>
+          <p style="color: #555; font-size: 12px; margin: 0 0 4px 0;">${e(club.city)}, ${e(club.country)}</p>
+          <p style="color: #666; font-size: 11px; margin: 0 0 8px 0;">${e(club.description)}</p>
+          <a href="https://www.google.com/maps?q=${Number(club.lat)},${Number(club.lng)}" target="_blank" rel="noopener noreferrer"
+             style="color: #5c7a00; font-size: 12px; font-weight: 600; text-decoration: none;">
             Ver en Google Maps &rarr;
           </a>
         </div>
@@ -2995,15 +3080,17 @@ function ContactPage() {
               <p className="text-gray-500 text-sm group-hover:text-purple-600 transition-colors">@{INSTAGRAM_HANDLE}</p>
             </div>
           </a>
-          <div className="flex items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-5">
-            <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white">
-              <Mail size={24} />
-            </div>
-            <div>
-              <h3 className="font-display font-semibold text-navy-700">Email</h3>
-              <p className="text-gray-500 text-sm">info@volea.uy</p>
-            </div>
-          </div>
+          {EMAIL_CONTACTO && (
+            <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl p-5">
+              <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white">
+                <Mail size={24} />
+              </div>
+              <div>
+                <h3 className="font-display font-semibold text-navy-700">Email</h3>
+                <p className="text-gray-600 text-sm">{EMAIL_CONTACTO}</p>
+              </div>
+            </a>
+          )}
           <div className="flex items-center gap-4 bg-gray-50 border border-gray-200 rounded-xl p-5">
             <div className="w-12 h-12 bg-navy-700 rounded-full flex items-center justify-center text-lime-400">
               <MapPin size={24} />
@@ -3194,11 +3281,16 @@ function InscripcionPage() {
       </div>
     );
   }
-  if (!evt.inscripcionesAbiertas) {
+  // Un torneo que ya se jugó queda cerrado aunque nadie haya apagado el
+  // interruptor (el Racket Roll seguía aceptando inscripciones semanas después).
+  const eventoTerminado = (evt.endDate || evt.date) < hoyMontevideo();
+  if (!evt.inscripcionesAbiertas || eventoTerminado) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
         <h1 className="font-display text-2xl font-bold text-navy-700 mb-2">{evt.name}</h1>
-        <p className="text-gray-500 mb-6">Las inscripciones online de este evento están cerradas.</p>
+        <p className="text-gray-600 mb-6">
+          {eventoTerminado ? 'Este torneo ya se jugó: las inscripciones están cerradas.' : 'Las inscripciones online de este evento están cerradas.'}
+        </p>
         {waUruguay(evt.phone) && (
           <a
             href={`https://wa.me/${waUruguay(evt.phone)}?text=${encodeURIComponent(`Hola! Consulta por el ${evt.name}`)}`}
@@ -3388,7 +3480,17 @@ function CheckoutPage() {
   const [customer, setCustomer] = useState<CustomerInfo>({
     name: '', phone: '', email: '', address: '', city: '', department: 'Montevideo', notes: ''
   });
+  // La mayoría de las ventas se entregan en los torneos: con "retiro" no se pide
+  // dirección, y el pedido queda marcado así para el equipo.
+  const [entrega, setEntrega] = useState<'envio' | 'retiro'>('envio');
+  const clienteFinal: CustomerInfo = entrega === 'retiro'
+    ? { ...customer, address: 'Retiro / entrega a coordinar por WhatsApp', city: '', department: '' }
+    : customer;
   const [success, setSuccess] = useState(false);
+  // Link de WhatsApp del pedido recién armado: el pedido recién llega cuando el
+  // cliente toca Enviar en WhatsApp, así que la pantalla de éxito lo ofrece de
+  // nuevo por si la ventana no se abrió (el navegador de Instagram la bloquea).
+  const [whatsappPedido, setWhatsappPedido] = useState('');
 
   // El botón de MP aparece solo si el server dice que hay credenciales
   // cargadas. En dev local (Vite, sin /api) la respuesta es el index.html y
@@ -3446,17 +3548,29 @@ function CheckoutPage() {
         <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <Check size={40} className="text-green-500" />
         </div>
-        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Pedido enviado!</h1>
-        <p className="text-gray-500 mb-8 max-w-md mx-auto">
-          Recibimos tu pedido y te vamos a escribir por WhatsApp para coordinar
-          la entrega y el pago. ¡Gracias por elegir VOLEA!
+        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Tu pedido está listo!</h1>
+        <p className="text-gray-600 mb-8 max-w-md mx-auto">
+          Se abrió WhatsApp con el pedido escrito: <strong>tocá Enviar</strong> para
+          que nos llegue. Te respondemos para coordinar la entrega y el pago.
         </p>
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
-        >
-          Volver al inicio
-        </Link>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          {whatsappPedido && (
+            <a
+              href={whatsappPedido}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
+            >
+              <MessageCircle size={18} /> No se abrió WhatsApp: abrir de nuevo
+            </a>
+          )}
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-8 rounded-lg transition-colors"
+          >
+            Volver al inicio
+          </Link>
+        </div>
       </div>
     );
   }
@@ -3474,7 +3588,7 @@ function CheckoutPage() {
     return {
       id: `VO-${Date.now().toString(36).toUpperCase()}`,
       items: cart,
-      customer,
+      customer: clienteFinal,
       total,
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -3492,11 +3606,13 @@ function CheckoutPage() {
       `🏓 *Nuevo pedido VOLEA*`,
       `📌 Ref: ${order.id}`,
       ``,
-      `👤 *Cliente:* ${customer.name}`,
-      `📱 *Tel:* ${customer.phone}`,
-      `📧 *Email:* ${customer.email}`,
-      `📦 *Dirección:* ${customer.address}, ${customer.city}, ${customer.department}`,
-      customer.notes ? `📝 *Notas:* ${customer.notes}` : '',
+      `👤 *Cliente:* ${clienteFinal.name}`,
+      `📱 *Tel:* ${clienteFinal.phone}`,
+      clienteFinal.email ? `📧 *Email:* ${clienteFinal.email}` : '',
+      entrega === 'retiro'
+        ? `📦 *Entrega:* retiro / a coordinar`
+        : `📦 *Dirección:* ${[clienteFinal.address, clienteFinal.city, clienteFinal.department].filter(Boolean).join(', ')}`,
+      clienteFinal.notes ? `📝 *Notas:* ${clienteFinal.notes}` : '',
       ``,
       `🛍 *Productos:*`,
       ...cart.map(i => `  • ${i.product.name} (${[i.selectedSize, i.selectedColor].filter(Boolean).join('/') || 'Único'}) x${i.quantity} - ${formatPrice(i.product.price * i.quantity)}`),
@@ -3514,7 +3630,11 @@ function CheckoutPage() {
     ].filter(Boolean).join('\n');
 
     const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines)}`;
-    window.open(whatsappUrl, '_blank');
+    // window.open devuelve null si el navegador bloquea la ventana (pasa en el
+    // navegador interno de Instagram): ahí se navega directo al link.
+    const ventana = window.open(whatsappUrl, '_blank');
+    if (!ventana) window.location.href = whatsappUrl;
+    setWhatsappPedido(whatsappUrl);
     clearCart();
     setSuccess(true);
   };
@@ -3640,79 +3760,122 @@ function CheckoutPage() {
           <p className="text-sm text-gray-500 mb-4">Con esto armamos tu pedido y te contactamos por WhatsApp.</p>
           <form ref={formRef} onSubmit={handleSubmitWhatsApp} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
+              <label htmlFor="co-nombre" className="block text-sm font-semibold text-navy-700 mb-1">Nombre completo *</label>
               <input
+                id="co-nombre"
                 type="text"
                 required
+                autoComplete="name"
                 value={customer.name}
                 onChange={e => setCustomer({ ...customer, name: e.target.value })}
-                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors"
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono *</label>
+                <label htmlFor="co-telefono" className="block text-sm font-semibold text-navy-700 mb-1">Celular (WhatsApp) *</label>
                 <input
+                  id="co-telefono"
                   type="tel"
+                  inputMode="tel"
                   required
+                  autoComplete="tel"
                   value={customer.phone}
                   onChange={e => setCustomer({ ...customer, phone: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors"
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-navy-700 mb-1">Email *</label>
+                <label htmlFor="co-email" className="block text-sm font-semibold text-navy-700 mb-1">Email (opcional)</label>
                 <input
+                  id="co-email"
                   type="email"
-                  required
+                  autoComplete="email"
                   value={customer.email}
                   onChange={e => setCustomer({ ...customer, email: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors"
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors"
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Dirección *</label>
-              <input
-                type="text"
-                required
-                value={customer.address}
-                onChange={e => setCustomer({ ...customer, address: e.target.value })}
-                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-navy-700 mb-1">Ciudad *</label>
-                <input
-                  type="text"
-                  required
-                  value={customer.city}
-                  onChange={e => setCustomer({ ...customer, city: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors"
-                />
+            <fieldset>
+              <legend className="block text-sm font-semibold text-navy-700 mb-2">¿Cómo lo recibís?</legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {([
+                  ['envio', 'Envío a domicilio'],
+                  ['retiro', 'Retiro o lo coordinamos (ej. en un torneo)'],
+                ] as const).map(([valor, texto]) => (
+                  <label
+                    key={valor}
+                    className={`flex items-center gap-2 rounded-lg border px-4 py-3 text-sm cursor-pointer transition-colors ${
+                      entrega === valor ? 'border-navy-700 bg-navy-50 font-semibold text-navy-700' : 'border-gray-300 text-gray-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="entrega"
+                      value={valor}
+                      checked={entrega === valor}
+                      onChange={() => setEntrega(valor)}
+                      className="accent-navy-700"
+                    />
+                    {texto}
+                  </label>
+                ))}
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-navy-700 mb-1">Departamento *</label>
-                <select
-                  required
-                  value={customer.department}
-                  onChange={e => setCustomer({ ...customer, department: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-                >
-                  {URUGUAY_DEPARTMENTS.map(dep => (
-                    <option key={dep} value={dep}>{dep}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            </fieldset>
+            {entrega === 'envio' && (
+              <>
+                <div>
+                  <label htmlFor="co-direccion" className="block text-sm font-semibold text-navy-700 mb-1">Dirección *</label>
+                  <input
+                    id="co-direccion"
+                    type="text"
+                    required
+                    autoComplete="street-address"
+                    value={customer.address}
+                    onChange={e => setCustomer({ ...customer, address: e.target.value })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="co-ciudad" className="block text-sm font-semibold text-navy-700 mb-1">Ciudad *</label>
+                    <input
+                      id="co-ciudad"
+                      type="text"
+                      required
+                      autoComplete="address-level2"
+                      value={customer.city}
+                      onChange={e => setCustomer({ ...customer, city: e.target.value })}
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="co-departamento" className="block text-sm font-semibold text-navy-700 mb-1">Departamento *</label>
+                    <select
+                      id="co-departamento"
+                      required
+                      autoComplete="address-level1"
+                      value={customer.department}
+                      onChange={e => setCustomer({ ...customer, department: e.target.value })}
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors bg-white"
+                    >
+                      {URUGUAY_DEPARTMENTS.map(dep => (
+                        <option key={dep} value={dep}>{dep}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Notas (opcional)</label>
+              <label htmlFor="co-notas" className="block text-sm font-semibold text-navy-700 mb-1">Notas (opcional)</label>
               <textarea
+                id="co-notas"
                 rows={3}
                 value={customer.notes}
                 onChange={e => setCustomer({ ...customer, notes: e.target.value })}
-                className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors resize-none"
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-navy-700 focus:ring-2 focus:ring-navy-700/25 outline-none transition-colors resize-none"
                 placeholder="Horario de entrega, punto de encuentro u otra aclaración"
               />
             </div>
@@ -5046,7 +5209,7 @@ function AdminPage() {
                 </button>
               </div>
               <div className="space-y-2">
-                {categories.sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
+                {[...categories].sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
                   <div key={cat.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
                     <span className="font-display font-semibold text-navy-700">{cat.name}</span>
                     <button
@@ -6086,8 +6249,8 @@ function FloatingWhatsApp() {
       href={`https://wa.me/${WHATSAPP_NUMBER}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center text-white transition-all hover:scale-110"
-      aria-label="WhatsApp"
+      className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-green-600 hover:bg-green-700 rounded-full shadow-lg flex items-center justify-center text-white transition-all hover:scale-110"
+      aria-label="Escribinos por WhatsApp"
     >
       <MessageCircle size={28} />
     </a>
@@ -6177,7 +6340,7 @@ function BarraAdmin() {
 // ─── 16. Footer ──────────────────────────────────────────────────────────────
 
 function Footer() {
-  const { categories } = useStore();
+  const { categories, products } = useStore();
 
   return (
     <footer className="relative text-white">
@@ -6234,7 +6397,7 @@ function Footer() {
           <div>
             <h3 className="font-display font-bold text-lg mb-4">Categorías</h3>
             <ul className="space-y-2">
-              {categories.sort((a, b) => a.sortOrder - b.sortOrder).map(cat => (
+              {categoriasConProductos(categories, products).map(cat => (
                 <li key={cat.id}>
                   <Link
                     to={`/tienda?category=${encodeURIComponent(cat.id)}`}
@@ -6271,9 +6434,13 @@ function Footer() {
                   <Instagram size={16} /> @{INSTAGRAM_HANDLE}
                 </a>
               </li>
-              <li className="flex items-center gap-2 text-gray-400 text-sm">
-                <Mail size={16} /> info@volea.uy
-              </li>
+              {EMAIL_CONTACTO && (
+                <li>
+                  <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm">
+                    <Mail size={16} /> {EMAIL_CONTACTO}
+                  </a>
+                </li>
+              )}
             </ul>
           </div>
         </div>
@@ -6485,6 +6652,9 @@ function AnimatedRoutes() {
 export default function App() {
   return (
     <HashRouter>
+      {/* "user": si el sistema pide reducir movimiento, framer-motion salta las
+          animaciones de aparición, parallax y transición entre páginas. */}
+      <MotionConfig reducedMotion="user">
       <StoreProvider>
         <ScrollToTop />
         <Toaster
@@ -6511,6 +6681,7 @@ export default function App() {
           <BarraAdmin />
         </div>
       </StoreProvider>
+      </MotionConfig>
     </HashRouter>
   );
 }

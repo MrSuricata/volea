@@ -9,6 +9,8 @@ import type { TorneoPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
 import '../torneos.css';
 
+const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+
 const ETIQUETA_FASE: Record<Torneo['fase'], string> = {
   parejas: 'Inscripción', grupos: 'Armando grupos', faseGrupos: 'Fase de grupos', llave: 'Llave en juego', terminado: 'Terminado',
 };
@@ -75,7 +77,7 @@ export default function TorneosListaPage() {
         <Link className="titulo-torneo" to={`/torneos/${t.id}`}>
           <strong>{t.nombre}</strong>
           <span>
-            {new Date(t.creadoEl).toLocaleDateString('es-UY')} · {t.parejas.length} {individual ? 'jugadores' : 'parejas'} ·{' '}
+            {new Date(t.creadoEl).toLocaleDateString('es-UY')} · {individual ? plural(t.parejas.length, 'jugador', 'jugadores') : plural(t.parejas.length, 'pareja', 'parejas')} ·{' '}
             {ETIQUETA_FORMATO[t.formato ?? 'grupos']} · {ETIQUETA_FASE[t.fase]}
             {t.categoria ? ` · Cat ${t.categoria}` : ''}
             {t.fase === 'terminado' && podio.campeon ? ` · 🏆 ${nombreDe(t, podio.campeon)}` : ''}
@@ -134,8 +136,8 @@ export default function TorneosListaPage() {
               const jugadores = new Set(ev.torneos.flatMap((t) => t.parejas.flatMap((p) => p.jugadorIds))).size;
               const resumen = `${new Date(ev.ultimaFecha).toLocaleDateString('es-UY')} · ${
                 ev.suelto
-                  ? `${unico.parejas.length} ${(unico.formato ?? 'grupos') === 'individual' ? 'jugadores' : 'parejas'} · ${ETIQUETA_FASE[unico.fase]}`
-                  : `${ev.torneos.length} categorías · ${jugadores} jugadores${ev.terminado ? ' · Terminado' : ''}`
+                  ? `${(unico.formato ?? 'grupos') === 'individual' ? plural(unico.parejas.length, 'jugador', 'jugadores') : plural(unico.parejas.length, 'pareja', 'parejas')} · ${ETIQUETA_FASE[unico.fase]}`
+                  : `${plural(ev.torneos.length, 'categoría', 'categorías')} · ${plural(jugadores, 'jugador', 'jugadores')}${ev.terminado ? ' · Terminado' : ''}`
               }`;
               const contenido = (
                 <>

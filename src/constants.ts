@@ -6,6 +6,10 @@ export const WHATSAPP_NUMBER = '59892103276';
 // quedaban mostrando el viejo.
 export const WHATSAPP_DISPLAY = '+598 92 103 276';
 export const INSTAGRAM_HANDLE = 'volea.uy';
+// Vacío = no se muestra. info@volea.uy está publicado pero el dominio no recibe
+// correo (sus DNS no responden: sin MX, los mails rebotan). Cuando haya un mail
+// que funcione, se carga acá y vuelve a aparecer en Contacto y en el footer.
+export const EMAIL_CONTACTO = '';
 // ADMIN_PASSWORD eliminada (2026-08-06): el login real es Supabase Auth; una contraseña
 // hardcodeada acá viajaba en el bundle público — un footgun de seguridad.
 
