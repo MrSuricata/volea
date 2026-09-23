@@ -20,3 +20,18 @@ export function reemplazarOAgregar<T extends { id: string }>(lista: T[], fila: T
 export function quitarPorId<T extends { id: string }>(lista: T[], id: string): T[] {
   return lista.some(x => x.id === id) ? lista.filter(x => x.id !== id) : lista;
 }
+
+/** Cómo terminó un borrado en la nube. */
+export type ResultadoBorrado = 'ok' | 'con-referencias' | 'error';
+
+/**
+ * 23503 = foreign_key_violation de Postgres: la fila tiene otras colgando (un evento
+ * con inscripciones, con la FK en RESTRICT). No es un error de conexión: reintentar
+ * no sirve, hay que avisar qué pasa.
+ */
+export function motivoBorradoFallido(
+  error: { code?: unknown; message?: string } | null | undefined,
+): ResultadoBorrado {
+  if (!error) return 'ok';
+  return error.code === '23503' ? 'con-referencias' : 'error';
+}

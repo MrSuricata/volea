@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quitarPorId, reemplazarOAgregar } from './filas';
+import { motivoBorradoFallido, quitarPorId, reemplazarOAgregar } from './filas';
 
 describe('reemplazarOAgregar', () => {
   const lista = [{ id: 'a', v: 1 }, { id: 'b', v: 2 }];
@@ -26,5 +26,20 @@ describe('quitarPorId', () => {
   it('si no estaba devuelve la misma lista', () => {
     const lista = [{ id: 'a' }];
     expect(quitarPorId(lista, 'x')).toBe(lista);
+  });
+});
+
+describe('motivoBorradoFallido', () => {
+  it('sin error es ok', () => {
+    expect(motivoBorradoFallido(null)).toBe('ok');
+  });
+
+  it('la FK en RESTRICT (23503) dice que hay filas colgando', () => {
+    expect(motivoBorradoFallido({ code: '23503' })).toBe('con-referencias');
+  });
+
+  it('cualquier otro fallo (RLS, timeout, red) es error', () => {
+    expect(motivoBorradoFallido({ code: '42501' })).toBe('error');
+    expect(motivoBorradoFallido(new Error('timeout'))).toBe('error');
   });
 });

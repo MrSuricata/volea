@@ -2,6 +2,7 @@ import { supabase, isSupabaseConnected } from './supabaseClient';
 import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
+import { motivoBorradoFallido, type ResultadoBorrado } from '../utils/filas';
 import type { JugadorPadron } from '../utils/dupr';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
@@ -650,9 +651,15 @@ export const SupabaseService = {
     return true;
   },
 
-  async deleteEvent(id: string): Promise<void> {
-    if (!supabase) return;
-    await conTechoEscritura(supabase.from('events').delete().eq('id', id));
+  // Devuelve CÓMO terminó: con la FK de inscripciones en RESTRICT, un evento con
+  // inscriptos no se deja borrar (23503) y la UI tiene que decir por qué, no fingir
+  // que se borró. Antes no se miraba el resultado y el evento desaparecía de la
+  // lista aunque siguiera en la base.
+  async deleteEvent(id: string): Promise<ResultadoBorrado> {
+    if (!supabase) return 'ok';
+    const { error } = await conTechoEscritura(supabase.from('events').delete().eq('id', id));
+    if (error) console.error('Error deleting event:', error);
+    return motivoBorradoFallido(error);
   },
 
   // ── Inscripciones ──

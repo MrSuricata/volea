@@ -17,7 +17,7 @@ import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
-import { quitarPorId, reemplazarOAgregar } from './utils/filas';
+import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
 import { errorImagen, srcsetImagen, urlImagen } from './utils/imagenes';
 import { cargarLeaflet } from './utils/leaflet';
 import {
@@ -402,7 +402,8 @@ interface StoreContextType {
   events: Event[];
   /** Guarda UN evento (alta o edición). Nunca la lista entera: ver utils/filas.ts. */
   saveEvent: (e: Event) => Promise<boolean>;
-  removeEvent: (id: string) => void;
+  /** Borra en la nube y RECIÉN AHÍ de la lista; si no se pudo, avisa y el evento queda. */
+  removeEvent: (id: string) => Promise<ResultadoBorrado>;
   /** Promos activas (tabla promos). La vigencia por fecha se decide al mostrar. */
   promos: Promo[];
   orders: Order[];
@@ -706,8 +707,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   // el aviso lo dice explícito para que quede claro que hay que relogearse.
   // IIFE async adentro: los call sites hacen .then(warnCloudFail) y la firma
   // sync se mantiene tal cual.
-  const warnCloudFail = (ok: boolean) => {
-    if (ok) return;
+  const avisarFalloNube = (mensaje: string) => {
     void (async () => {
       if (await sesionAdminVencida()) {
         toast.error(
@@ -715,12 +715,15 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
           { duration: 9000 },
         );
       } else {
-        toast.error(
-          '⚠️ No se pudo subir a la nube. El cambio quedó guardado solo en este dispositivo. Revisá tu conexión / que sigas con sesión de admin, y guardá de nuevo.',
-          { duration: 9000 },
-        );
+        toast.error(mensaje, { duration: 9000 });
       }
     })();
+  };
+  const warnCloudFail = (ok: boolean) => {
+    if (ok) return;
+    avisarFalloNube(
+      '⚠️ No se pudo subir a la nube. El cambio quedó guardado solo en este dispositivo. Revisá tu conexión / que sigas con sesión de admin, y guardá de nuevo.',
+    );
   };
 
   const saveProduct = useCallback((p: Product, opts: { sinStock?: boolean } = {}) => {
@@ -784,13 +787,23 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     return SupabaseService.upsertEvent(e).then((ok) => { warnCloudFail(ok); return ok; });
   }, []);
 
-  const removeEvent = useCallback((id: string) => {
-    _setEvents(prev => {
-      const next = quitarPorId(prev, id);
-      StorageService.setEvents(next);
-      return next;
-    });
-    SupabaseService.deleteEvent(id);
+  // Borrar un evento NO es optimista: con inscripciones colgando la base no lo deja
+  // (FK en RESTRICT) y sacarlo igual de la lista mentía — el evento seguía vivo en la
+  // web pública. Se espera la respuesta y solo si anduvo se quita de acá.
+  const removeEvent = useCallback(async (id: string): Promise<ResultadoBorrado> => {
+    const resultado = await SupabaseService.deleteEvent(id);
+    if (resultado === 'ok') {
+      _setEvents(prev => {
+        const next = quitarPorId(prev, id);
+        StorageService.setEvents(next);
+        return next;
+      });
+    } else if (resultado === 'con-referencias') {
+      toast.error('Este evento tiene inscripciones: cerrá las inscripciones en vez de borrarlo.', { duration: 9000 });
+    } else {
+      avisarFalloNube('No se pudo borrar el evento: sigue publicado. Revisá tu conexión / que sigas con sesión de admin, y probá de nuevo.');
+    }
+    return resultado;
   }, []);
 
   const updateOrderStatus = useCallback((id: string, status: Order['status']) => {
@@ -4369,6 +4382,18 @@ function AdminPage() {
   const [eventModal, setEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [deleteEventConfirm, setDeleteEventConfirm] = useState<string | null>(null);
+  // Inscriptos del evento que se está por borrar (null = todavía no se sabe): el
+  // confirm avisa antes de que el admin tire abajo un torneo con gente anotada.
+  const [inscriptosABorrar, setInscriptosABorrar] = useState<number | null>(null);
+  useEffect(() => {
+    setInscriptosABorrar(null);
+    if (!deleteEventConfirm) return;
+    let vivo = true;
+    void SupabaseService.contarInscriptos(deleteEventConfirm).then(n => {
+      if (vivo) setInscriptosABorrar(n);
+    });
+    return () => { vivo = false; };
+  }, [deleteEventConfirm]);
 
   // Badge de inscripciones nuevas desde la última visita a la pestaña (marca
   // en localStorage). Se consulta al montar y al volver el foco; la pestaña lo
@@ -5115,11 +5140,15 @@ function AdminPage() {
             {deleteEventConfirm && (
               <ConfirmDialog
                 title="¿Eliminar evento?"
-                message="Esta acción no se puede deshacer."
+                message={inscriptosABorrar
+                  ? `Este evento tiene ${inscriptosABorrar} ${inscriptosABorrar === 1 ? 'inscripción' : 'inscripciones'}: cerrá las inscripciones en vez de borrarlo. Esta acción no se puede deshacer.`
+                  : 'Esta acción no se puede deshacer.'}
                 onCancel={() => setDeleteEventConfirm(null)}
-                onConfirm={() => {
-                  removeEvent(deleteEventConfirm);
+                onConfirm={async () => {
+                  const id = deleteEventConfirm;
                   setDeleteEventConfirm(null);
+                  // removeEvent ya avisa si no se pudo (y el evento queda en la lista).
+                  if (await removeEvent(id) === 'ok') toast.success('Evento eliminado');
                 }}
               />
             )}
