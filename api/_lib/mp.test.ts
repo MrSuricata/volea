@@ -3,13 +3,17 @@ import { createHmac } from 'node:crypto';
 import {
   armarItemsPreferencia,
   armarUrlRetorno,
+  claveStock,
   hoyMontevideo,
   mapearEstadoMP,
+  motivoPedidoNoPagable,
   mpConfigurado,
   precioConPromo,
   promoVigenteHoy,
   totalItems,
+  validarDisponibilidad,
   validarFirmaWebhook,
+  VENTANA_PEDIDO_MP_MS,
 } from './mp';
 
 describe('promoVigenteHoy', () => {
@@ -253,6 +257,117 @@ describe('armarItemsPreferencia', () => {
       catalogo,
     );
     expect(totalItems(items)).toBe(990 * 2 + 550);
+  });
+});
+
+describe('motivoPedidoNoPagable', () => {
+  const AHORA = Date.parse('2026-09-23T15:00:00Z');
+  // Tal cual lo deja el checkout de MP: addOrder + triggers de la base.
+  const pedidoMP = {
+    items: [{ product: { id: 'p1' }, quantity: 1, selectedSize: 'M', selectedColor: 'Negro' }],
+    payment_status: 'iniciado',
+    payment_provider: 'mp',
+    source: 'web',
+    created_at: '2026-09-23T14:55:00Z',
+  };
+
+  it('acepta un pedido web de MP recién creado', () => {
+    expect(motivoPedidoNoPagable(pedidoMP, AHORA)).toBeNull();
+  });
+
+  it('rechaza un pedido inexistente', () => {
+    expect(motivoPedidoNoPagable(null, AHORA)).toBe('no existe');
+  });
+
+  it('rechaza pedidos de WhatsApp (no les pone payment_provider mp)', () => {
+    expect(motivoPedidoNoPagable({ ...pedidoMP, source: 'whatsapp', payment_provider: null, payment_status: null }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_provider: null }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, source: 'telegram' }, AHORA)).not.toBeNull();
+  });
+
+  it('rechaza un pedido viejo (más de 2 horas): los ids VO- se adivinan', () => {
+    const haceDosHoras = new Date(AHORA - VENTANA_PEDIDO_MP_MS).toISOString();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, created_at: haceDosHoras }, AHORA)).toBeNull(); // justo en el borde
+    const viejo = new Date(AHORA - VENTANA_PEDIDO_MP_MS - 60_000).toISOString();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, created_at: viejo }, AHORA)).toMatch(/2 horas/);
+  });
+
+  it('rechaza created_at vacío, ilegible o en el futuro', () => {
+    expect(motivoPedidoNoPagable({ ...pedidoMP, created_at: null }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, created_at: 'ayer' }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, created_at: '2026-09-23T16:00:00Z' }, AHORA)).not.toBeNull();
+  });
+
+  it('rechaza items que no son un array con datos (antes reventaba con 500)', () => {
+    for (const items of [{ length: 1 }, 'x', null, 5, []]) {
+      expect(motivoPedidoNoPagable({ ...pedidoMP, items }, AHORA)).toMatch(/items/);
+    }
+  });
+
+  it('rechaza pedidos pagos, devueltos o con un pago en curso; admite reintentar un rechazado', () => {
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_status: 'aprobado' }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_status: 'devuelto' }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_status: 'pendiente' }, AHORA)).not.toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_status: 'rechazado' }, AHORA)).toBeNull();
+    expect(motivoPedidoNoPagable({ ...pedidoMP, payment_status: null }, AHORA)).toBeNull();
+  });
+});
+
+describe('claveStock', () => {
+  it('arma la clave igual que el carrito: "talle|color", o solo el talle si no hay color', () => {
+    expect(claveStock({ selectedSize: 'M', selectedColor: 'Negro' })).toBe('M|Negro');
+    expect(claveStock({ selectedSize: 'Único', selectedColor: '' })).toBe('Único');
+    expect(claveStock({ selectedSize: 'Único' })).toBe('Único');
+  });
+});
+
+describe('validarDisponibilidad', () => {
+  const catalogo = [
+    { id: 'p1', name: 'Remera Classic', price: 990, active: true, stock_by_size: { 'M|Fucsia': 2, 'L|Fucsia': 0 } },
+    { id: 'p2', name: 'Gorro VOLEA', price: 550, active: false, stock_by_size: { 'Único|Navy': 5 } },
+    { id: 'p3', name: 'Visera', price: 450, active: null, stock_by_size: { 'Único': 3 } },
+  ];
+  const item = (id: string, quantity: number, selectedSize?: string, selectedColor?: string) =>
+    ({ product: { id, name: `nombre del cliente ${id}` }, quantity, selectedSize, selectedColor });
+
+  it('deja pasar un pedido con stock (active null cuenta como visible, como en el front)', () => {
+    expect(() => validarDisponibilidad([item('p1', 2, 'M', 'Fucsia'), item('p3', 3, 'Único', '')], catalogo)).not.toThrow();
+  });
+
+  it('rechaza un producto inactivo (oculto en la tienda) con su nombre del catálogo', () => {
+    expect(() => validarDisponibilidad([item('p2', 1, 'Único', 'Navy')], catalogo))
+      .toThrow('«Gorro VOLEA» ya no está disponible en la tienda');
+  });
+
+  it('rechaza un producto que ya no existe', () => {
+    expect(() => validarDisponibilidad([item('borrado', 1, 'M', 'Negro')], catalogo)).toThrow(/ya no está disponible/);
+    expect(() => validarDisponibilidad([{ product: { id: 'x' }, quantity: 1 } as never], catalogo))
+      .toThrow('Uno de los productos del carrito ya no está disponible');
+  });
+
+  it('rechaza una variante que el producto no tiene', () => {
+    expect(() => validarDisponibilidad([item('p1', 1, 'XL', 'Fucsia')], catalogo)).toThrow('no viene en XL/Fucsia');
+    expect(() => validarDisponibilidad([item('p1', 1, 'M', '')], catalogo)).toThrow('no viene en M.');
+  });
+
+  it('rechaza una cantidad mayor al stock (dos compran la última unidad)', () => {
+    expect(() => validarDisponibilidad([item('p1', 3, 'M', 'Fucsia')], catalogo)).toThrow(/quedan 2/);
+    expect(() => validarDisponibilidad([item('p1', 1, 'L', 'Fucsia')], catalogo)).toThrow(/Ya no queda stock/);
+  });
+
+  it('suma renglones repetidos de la misma variante (el pedido lo arma el cliente)', () => {
+    expect(() => validarDisponibilidad([item('p1', 1, 'M', 'Fucsia'), item('p1', 2, 'M', 'Fucsia')], catalogo)).toThrow(/quedan 2/);
+  });
+
+  it('rechaza cantidades inválidas antes de mirar el stock', () => {
+    expect(() => validarDisponibilidad([item('p1', 1.5, 'M', 'Fucsia')], catalogo)).toThrow(/Cantidad inválida/);
+    expect(() => validarDisponibilidad([item('p1', NaN, 'M', 'Fucsia')], catalogo)).toThrow(/Cantidad inválida/);
+  });
+
+  it('un stock ilegible o negativo cuenta como sin stock', () => {
+    const raro = [{ id: 'p9', name: 'Raro', price: 10, stock_by_size: { M: 'muchos', L: -2 } }];
+    expect(() => validarDisponibilidad([item('p9', 1, 'M')], raro)).toThrow(/stock/);
+    expect(() => validarDisponibilidad([item('p9', 1, 'L')], raro)).toThrow(/stock/);
   });
 });
 

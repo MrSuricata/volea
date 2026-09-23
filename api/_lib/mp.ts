@@ -71,13 +71,122 @@ export function validarFirmaWebhook(i: FirmaInput): { ok: boolean; motivo?: stri
 // Item de pedido tal como vive en orders.items (CartItem serializado: el
 // product viene embebido del cliente y NO es confiable para precios).
 export interface ItemPedidoRow {
-  product: { id: string; name?: string };
+  product: { id: string; name?: unknown };
   quantity: number;
   selectedSize?: string;
   selectedColor?: string;
 }
 
-export interface ProductoCatalogo { id: string; name: string; price: number; }
+export interface ProductoCatalogo {
+  id: string;
+  name: string;
+  price: number;
+  /** false = oculto en la tienda (null/ausente cuenta como activo, igual que el front). */
+  active?: boolean | null;
+  /** Stock por variante: clave "talle" o "talle|color" → unidades. */
+  stock_by_size?: Record<string, unknown> | null;
+}
+
+// ── Qué pedido se puede mandar a pagar ─────────────────────────────────────
+// /api/mp/preferencia es público y el id del pedido lo genera el front
+// (VO-<Date.now() en base36>): se adivina probando. Por eso solo se aceptan
+// pedidos que tienen la forma EXACTA de un checkout de MP recién hecho, y
+// cualquier otro caso responde el mismo 404 (ver el handler): así probar ids
+// no revela si un pedido existe ni si está pago, y un pedido de WhatsApp no
+// pasa a figurar como de Mercado Pago.
+export const VENTANA_PEDIDO_MP_MS = 2 * 3600 * 1000;
+// Margen para relojes corridos entre Postgres (created_at) y la función.
+const DESFASAJE_RELOJ_MS = 5 * 60 * 1000;
+
+export interface PedidoParaPreferencia {
+  items: unknown;
+  payment_status: string | null;
+  payment_provider: string | null;
+  source: string | null;
+  created_at: string | null;
+}
+
+// Estados de pago que admiten una preferencia nueva. 'pendiente' NO: es un
+// pago en curso (p.ej. un ticket de Abitab/RedPagos todavía sin pagar) y una
+// segunda preferencia abre la puerta a cobrar dos veces. 'rechazado' SÍ: el
+// cliente puede reintentar con otro medio.
+const ESTADOS_QUE_ADMITEN_PAGO = new Set<string | null>([null, 'iniciado', 'rechazado']);
+
+/** null si el pedido se puede mandar a pagar; si no, el motivo (solo para logs, nunca al cliente). */
+export function motivoPedidoNoPagable(
+  p: PedidoParaPreferencia | null | undefined,
+  ahoraMs: number = Date.now(),
+): string | null {
+  if (!p) return 'no existe';
+  // Así lo inserta el checkout de MP (supabaseService.addOrder): source 'web'
+  // y payment_provider 'mp'. Los de WhatsApp quedan con source 'whatsapp' y
+  // provider null.
+  if (p.source !== 'web' || p.payment_provider !== 'mp') return `no es un pedido web de MP (source=${p.source}, provider=${p.payment_provider})`;
+  const creado = p.created_at ? Date.parse(p.created_at) : NaN;
+  if (!Number.isFinite(creado)) return 'sin created_at';
+  // El trigger v22 fuerza created_at = now() en el alta pública: no se puede
+  // inventar uno reciente. El checkout pide la preferencia apenas inserta.
+  if (ahoraMs - creado > VENTANA_PEDIDO_MP_MS) return 'pedido de hace más de 2 horas';
+  if (creado - ahoraMs > DESFASAJE_RELOJ_MS) return 'created_at en el futuro';
+  if (!Array.isArray(p.items) || p.items.length === 0) return 'items no es un array con datos';
+  if (!ESTADOS_QUE_ADMITEN_PAGO.has(p.payment_status)) return `estado de pago ${p.payment_status}`;
+  return null;
+}
+
+// ── Stock ───────────────────────────────────────────────────────────────────
+// ⚠ PARIDAD CON EL FRONT: la clave de stock_by_size se arma igual que en el
+// carrito (App.tsx: `selectedColor ? `${talle}|${color}` : talle`) y que en la
+// RPC descontar_stock_pedido (supabase/migraciones_propuestas/v24_mp.sql).
+export function claveStock(it: Pick<ItemPedidoRow, 'selectedSize' | 'selectedColor'>): string {
+  return it.selectedColor ? `${it.selectedSize ?? ''}|${it.selectedColor}` : (it.selectedSize ?? '');
+}
+
+const unidades = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
+};
+
+const describirVariante = (it: Pick<ItemPedidoRow, 'selectedSize' | 'selectedColor'>) =>
+  [it.selectedSize, it.selectedColor].filter(Boolean).join('/') || 'sin talle';
+
+// Antes de mandar a pagar: cada producto tiene que existir, estar visible en
+// la tienda, venir en esa variante y tener stock para la cantidad pedida
+// (sumando renglones repetidos: el pedido lo arma el cliente y puede traer la
+// misma variante dos veces). NO reserva stock: dos personas pueden pasar esta
+// validación con la última unidad y pagar las dos; eso lo ataja el webhook al
+// descontar (RPC descontar_stock_pedido), que marca el segundo pedido para
+// revisión en vez de dejar el stock en negativo.
+// Los mensajes se muestran tal cual al cliente (el checkout los pone en un toast).
+export function validarDisponibilidad(items: ItemPedidoRow[], catalogo: ProductoCatalogo[]): void {
+  const pedidas = new Map<string, { prod: ProductoCatalogo; it: ItemPedidoRow; clave: string; cantidad: number }>();
+  for (const it of items) {
+    const prod = catalogo.find(p => p.id === it?.product?.id);
+    if (!prod || prod.active === false) {
+      const nombre = prod?.name
+        ?? (typeof it?.product?.name === 'string' && it.product.name.trim() ? it.product.name.trim().slice(0, 80) : null);
+      throw new Error(nombre
+        ? `«${nombre}» ya no está disponible en la tienda. Sacalo del carrito para seguir`
+        : 'Uno de los productos del carrito ya no está disponible en la tienda. Sacalo del carrito para seguir');
+    }
+    if (!Number.isInteger(it.quantity) || it.quantity < 1) throw new Error(`Cantidad inválida para ${prod.name}`);
+    const clave = claveStock(it);
+    const stock = prod.stock_by_size ?? {};
+    if (!Object.prototype.hasOwnProperty.call(stock, clave)) {
+      throw new Error(`«${prod.name}» no viene en ${describirVariante(it)}. Elegí otra variante en el carrito`);
+    }
+    const k = `${prod.id}\u0000${clave}`;
+    const previa = pedidas.get(k);
+    pedidas.set(k, { prod, it, clave, cantidad: (previa?.cantidad ?? 0) + it.quantity });
+  }
+  for (const { prod, it, clave, cantidad } of pedidas.values()) {
+    const hay = unidades(prod.stock_by_size?.[clave]);
+    if (cantidad > hay) {
+      throw new Error(hay > 0
+        ? `No queda stock suficiente de «${prod.name}» (${describirVariante(it)}): quedan ${hay}. Ajustá la cantidad en el carrito`
+        : `Ya no queda stock de «${prod.name}» (${describirVariante(it)}). Sacalo del carrito para seguir`);
+    }
+  }
+}
 
 export interface ItemPreferencia {
   id: string;
