@@ -18,6 +18,7 @@ import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductCo
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
 import { errorImagen, srcsetImagen, urlImagen } from './utils/imagenes';
+import { cargarLeaflet } from './utils/leaflet';
 import {
   WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE, EMAIL_CONTACTO,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -2875,8 +2876,6 @@ function EventsPage() {
 
 // ─── 10b. MapPage (Clubes y Canchas) ─────────────────────────────────────────
 
-declare const L: any;
-
 function MapPage() {
   const { clubs, datosListos } = useStore();
   usePageMeta({
@@ -2886,13 +2885,25 @@ function MapPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const [countryFilter, setCountryFilter] = useState<string>('all');
+  // Leaflet se descarga recién acá (utils/leaflet). Hasta que llega, el recuadro
+  // muestra "Cargando mapa…"; si no llega, la lista de clubes igual está abajo.
+  const [L, setL] = useState<any>(null);
+  const [mapaFallo, setMapaFallo] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    cargarLeaflet()
+      .then((leaflet) => { if (vivo) setL(() => leaflet); })
+      .catch(() => { if (vivo) setMapaFallo(true); });
+    return () => { vivo = false; };
+  }, []);
 
   const filteredClubs = countryFilter === 'all'
     ? clubs
     : clubs.filter(c => c.country === countryFilter);
 
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    if (!L || !mapRef.current || mapInstanceRef.current) return;
 
     // Initialize Leaflet map
     try {
@@ -2911,12 +2922,12 @@ function MapPage() {
         mapInstanceRef.current = null;
       }
     };
-  }, []);
+  }, [L]);
 
   // Update markers when clubs or filter change
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map) return;
+    if (!map || !L) return;
 
     // Remove existing markers
     map.eachLayer((layer: any) => {
@@ -2944,7 +2955,7 @@ function MapPage() {
         </div>
       `);
     });
-  }, [filteredClubs]);
+  }, [filteredClubs, L]);
 
   const countryFlag = (country: string) => {
     switch(country) {
@@ -2985,7 +2996,13 @@ function MapPage() {
 
       {/* Map */}
       <div className="rounded-2xl overflow-hidden shadow-lg border border-gray-200 mb-10">
-        <div ref={mapRef} style={{ height: '400px', width: '100%' }} />
+        <div ref={mapRef} style={{ height: '400px', width: '100%' }} className="relative bg-gray-100">
+          {!L && (
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-500" role="status">
+              {mapaFallo ? 'No se pudo cargar el mapa. La lista de clubes está abajo.' : 'Cargando mapa…'}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Club Cards */}

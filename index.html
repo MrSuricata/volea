@@ -69,9 +69,6 @@
     <link rel="preconnect" href="https://scftuxrtflfowohiewsc.supabase.co" crossorigin />
     <!-- Fuentes podadas a los pesos realmente usados (Lexend 400/600/700/900, Montserrat 400/600/700) -->
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700;900&family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
-    <!-- Leaflet 1.9.4 self-hosted (mismos bytes que unpkg, verificados contra los hashes SRI originales) -->
-    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
-    <script defer src="/vendor/leaflet/leaflet.js"></script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: 'Montserrat', sans-serif; }
@@ -162,6 +159,25 @@
       @keyframes promoLatido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
       @media (prefers-reduced-motion: reduce) {
         .promo-cinta, .promo-brillo, .promo-latido, .pulse-glow { animation: none; }
+        /* Quien pide menos movimiento (mareos, vestibular) ve todo quieto y ya visible. */
+        .marquee, .text-gradient, .float, .fade-in, .slide-in-right, .slide-in-left { animation: none; }
+        .hero-enter { animation: none; opacity: 1; transform: none; }
+        .reveal { opacity: 1; transform: none; transition: none; }
+        .product-card, .product-card .card-img, .hover-scale, .img-zoom img, .gallery-item img { transition: none; }
+        .product-card:hover, .hover-scale:hover { transform: none; }
+        .product-card:hover .card-img, .img-zoom:hover img, .gallery-item:hover img { transform: none; }
+        .parallax-bg { background-attachment: scroll; }
+      }
+      /* La cinta de anuncios se frena al pasar el mouse o al llegarle con Tab. */
+      .marquee:hover, .marquee:focus-within { animation-play-state: paused; }
+
+      /* Foco visible para quien navega con teclado: anillo azul adentro y lima afuera,
+         que se ve tanto sobre blanco como sobre el azul marino. Solo :focus-visible,
+         así el clic con mouse no deja el anillo puesto. */
+      a:focus-visible, button:focus-visible, summary:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
+        outline: 2px solid #001F3F;
+        outline-offset: 0;
+        box-shadow: 0 0 0 4px #ccff00;
       }
 
       /* Gallery hover */
