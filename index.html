@@ -157,6 +157,10 @@
         .product-card:hover .card-img, .img-zoom:hover img, .gallery-item:hover img { transform: none; }
         .parallax-bg { background-attachment: scroll; }
       }
+      /* Red de seguridad de LazyMotion (src/lib/animaciones.ts): si las features de
+         framer-motion no llegaron, lo que arrancó invisible para animarse (initial con
+         opacity 0) se muestra quieto en vez de dejar la página en blanco. */
+      .sin-animaciones [style*="opacity: 0;"] { opacity: 1 !important; transform: none !important; }
       /* La cinta de anuncios se frena al pasar el mouse o al llegarle con Tab. */
       .marquee:hover, .marquee:focus-within { animation-play-state: paused; }
 

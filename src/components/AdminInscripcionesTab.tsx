@@ -19,6 +19,7 @@ const METODO_LBL: Record<string, string> = {
 };
 import { fechaHumana } from '../utils/fechas';
 import { waUruguay } from '../utils/telefono';
+import { almacenLocal } from '../utils/almacen';
 
 const ESTADO_CHIP: Record<Inscripcion['estado'], string> = {
   pendiente: 'bg-amber-50 text-amber-700',
@@ -107,7 +108,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   // del panel se apaga vía alVerla.
   useEffect(() => {
     marcaVisitaPrevia(); // congela la previa antes de pisarla
-    localStorage.setItem(MARCA_INSC_VISTAS, new Date().toISOString());
+    almacenLocal.guardar(MARCA_INSC_VISTAS, new Date().toISOString());
     alVerla();
     // Solo al montar: alVerla es estable a efectos prácticos (setState del padre).
     // eslint-disable-next-line react-hooks/exhaustive-deps

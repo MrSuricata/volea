@@ -10,6 +10,7 @@ import { historialDeJugador, nombresSinVincular } from '../utils/jugadores';
 import type { NombreSinVincular } from '../utils/jugadores';
 import { normalizar, sugerirDeudores } from '../utils/nombres';
 import { fechaHumana } from '../utils/fechas';
+import { almacenLocal } from '../utils/almacen';
 import { categoriasDe } from '../utils/inscripciones';
 
 const money = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
@@ -35,7 +36,8 @@ export default function AdminJugadoresTab({ loadLedgerFull }: {
   const [elegido, setElegido] = useState<string | null>(null);
   const [vincularAbierto, setVincularAbierto] = useState(false);
   const [ignorados, setIgnorados] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(NO_JUGADORES) || '[]'); } catch { return []; }
+    const guardados = almacenLocal.leerJSON<unknown>(NO_JUGADORES);
+    return Array.isArray(guardados) ? guardados.filter((n): n is string => typeof n === 'string') : [];
   });
 
   const cargar = async () => {
@@ -86,7 +88,7 @@ export default function AdminJugadoresTab({ loadLedgerFull }: {
   const marcarNoJugador = (nombre: string) => {
     const nuevos = [...ignorados, nombre];
     setIgnorados(nuevos);
-    localStorage.setItem(NO_JUGADORES, JSON.stringify(nuevos));
+    almacenLocal.guardarJSON(NO_JUGADORES, nuevos);
   };
 
   return (

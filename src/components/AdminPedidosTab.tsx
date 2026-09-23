@@ -805,9 +805,16 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
         archivos: esSubli ? cab.archivos : [],
         items,
       });
-      if (!r.ok) { toast.error(r.error || 'No se pudo guardar el pedido'); return; }
+      if (!r.ok) {
+        // La cabecera de un pedido nuevo pudo haber quedado guardada aunque fallaran
+        // las líneas: con su id, el reintento la actualiza en vez de crear otro pedido.
+        if (r.id && !cab.id) setCab(c => ({ ...c, id: r.id! }));
+        toast.error(r.error || 'No se pudo guardar el pedido');
+        return;
+      }
       if (esSubli) toast.success(esNuevo ? 'Encargo creado ✓' : 'Encargo guardado ✓');
       else toast.success(esNuevo ? 'Pedido creado ✓' : 'Pedido guardado ✓');
+      if (r.aviso) toast.warning(r.aviso, { duration: 9000 });
       onGuardado();
     } finally {
       setGuardando(false);
