@@ -302,6 +302,8 @@ export interface Order {
   mpPaymentId?: string | null;
   paidAt?: string | null;
   paidAmount?: number | null;
+  /** v24: por qué el equipo tiene que mirar este pago (monto distinto, doble cobro, sin stock). null = ok. */
+  requiereRevision?: string | null;
 }
 
 export interface CustomerInfo {

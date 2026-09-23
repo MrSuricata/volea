@@ -1452,3 +1452,22 @@ $post$;
 --     products, events, inscripciones, rk_*, etc.). Las tablas de los otros
 --     sitios del proyecto (demo_*, fenix_*, mariella_*) quedan como estaban.
 --   · recibir_compra: search_path = pg_catalog, public (regla v6).
+
+-- ============================================
+-- v24 (2026-09-23): Mercado Pago blindado — monto, stock y revisión
+-- ============================================
+-- Migración "v24_mp_monto_stock_revision" (el SQL completo, con pre y
+-- post-chequeos, está en supabase/migraciones_propuestas/v24_mp.sql):
+--   · orders.mp_monto_esperado (lo escribe api/mp/preferencia.ts con el total
+--     calculado desde products + promos), orders.stock_descontado_at
+--     (idempotencia) y orders.requiere_revision (NULL = ok; si no, el motivo:
+--     monto/moneda distintos, doble cobro, sin stock al acreditar).
+--   · RPC descontar_stock_pedido(p_order_id) SECURITY DEFINER, solo
+--     service_role: la llama el webhook al aprobarse un pago. Bloquea pedido y
+--     productos (FOR UPDATE), descuenta todo o nada, una sola vez, y nunca deja
+--     stock negativo (si no alcanza, marca el pedido para revisión).
+--   · Trigger orders_limpiar_control_mp_insert: el alta pública no puede
+--     traer esas tres columnas cargadas.
+--   · Probada en producción dentro de una transacción que se deshace.
+--   ⚠ Operativo: un pedido pagado por MP ya descontó stock; no registrar esa
+--     venta en la Caja eligiendo el producto (descontaría dos veces).

@@ -40,8 +40,14 @@ claves entre dos paneles (Mercado Pago y Vercel).
 
 ## 2. Cargar en Vercel y redeploy
 
+**Ya está listo del lado de la base (23/09/2026):** la migración v24 (monto
+esperado, descuento de stock al acreditar y marca "⚠ Revisar pago") está
+aplicada. **Ojo con la Caja:** un pedido pagado por MP ya descontó su stock
+solo; al entregarlo NO registres la venta en la Caja eligiendo el producto,
+porque lo descontaría otra vez.
+
 **Antes de cargar nada:** esto solo tiene efecto una vez que la web en
-producción ya tiene la página `/#/pago/resultado` (a donde Mercado Pago manda
+producción ya tiene la página `/pago/resultado` (a donde Mercado Pago manda
 de vuelta al cliente después de pagar) — si no existe, el botón mandaría a
 la gente a pagar y después a una pantalla rota. Si esta guía ya está en el
 repo, ese deploy ya pasó y este párrafo es solo para que quede constancia;

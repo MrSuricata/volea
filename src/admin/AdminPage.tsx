@@ -79,6 +79,18 @@ const avisarTorneos = (mensaje: string) => toast.error(mensaje);
 
 // Badge del estado de pago online de un pedido (null = flujo WhatsApp puro).
 function BadgePagoMP({ order }: { order: Order }) {
+  // v24: el webhook (o el descuento de stock) dejó el pago para revisar. Gana sobre el
+  // estado: un "Pagado" con el monto equivocado no puede verse verde.
+  if (order.requiereRevision) {
+    return (
+      <span
+        title={order.requiereRevision}
+        className="text-xs font-semibold rounded-full px-2 py-1 whitespace-nowrap bg-red-100 text-red-700"
+      >
+        ⚠ Revisar pago
+      </span>
+    );
+  }
   if (!order.paymentStatus) return null;
   const cfg: Record<PaymentStatus, { texto: string; clases: string }> = {
     aprobado:  { texto: '💳 Pagado (MP)',  clases: 'bg-green-100 text-green-700' },
@@ -1095,6 +1107,10 @@ export default function AdminPage() {
                                 <h4 className="font-display font-semibold text-navy-700 mb-2">Pago online</h4>
                                 <div className="space-y-1 text-sm text-gray-600">
                                   <p><strong>Estado:</strong> <BadgePagoMP order={order} /></p>
+                                  {/* El motivo a la vista: el title del badge no se ve en el celular. */}
+                                  {order.requiereRevision && (
+                                    <p className="text-red-700"><strong>Revisar:</strong> {order.requiereRevision}</p>
+                                  )}
                                   {order.mpPaymentId && <p><strong>ID de pago MP:</strong> {order.mpPaymentId}</p>}
                                   {order.paidAt && <p><strong>Pagado:</strong> {new Date(order.paidAt).toLocaleString('es-UY', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>}
                                   {order.paidAmount != null && <p><strong>Monto acreditado:</strong> {formatPrice(order.paidAmount)}</p>}

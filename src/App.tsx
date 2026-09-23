@@ -15,6 +15,8 @@ import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
 import { FOTO_HERO_HOME } from './lib/precarga';
+import { guardarMarcaDePago } from './pago/marcaPago';
+import { CLAVE_PEDIDO_MP, firmaPedido, idPedidoWeb, pedidoReusable, registroPedidoMP } from './pago/reintentoMP';
 import { lazyConRecarga, cargandoTab } from './lib/lazyConRecarga';
 import { formatPrice, TZ_UY, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
 import { FALLBACK_IMG, handleImgError, errorFoto } from './lib/fotos';
@@ -3494,7 +3496,7 @@ function CheckoutPage() {
       return null;
     }
     return {
-      id: `VO-${Date.now().toString(36).toUpperCase()}`,
+      id: idPedidoWeb(),
       items: cart,
       customer: clienteFinal,
       total,
@@ -3556,24 +3558,40 @@ function CheckoutPage() {
     setPagandoMP(true);
     try {
       // Sin el pedido en la DB no hay preferencia: la función lo relee de ahí.
-      const inserto = await addOrder(order);
-      if (!inserto) throw new Error('No pudimos registrar el pedido (¿problemas de conexión?)');
-      const resp = await fetch('/api/mp/preferencia', {
+      const registrar = async () => {
+        const inserto = await addOrder(order);
+        if (!inserto) throw new Error('No pudimos registrar el pedido (¿problemas de conexión?)');
+        almacenSesion.guardar(CLAVE_PEDIDO_MP, registroPedidoMP(order.id, firma));
+        return order.id;
+      };
+      const pedirPreferencia = (orderId: string) => fetch('/api/mp/preferencia', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: order.id }),
+        body: JSON.stringify({ orderId }),
       });
+      // Reintento del MISMO carrito y cliente (ver pago/reintentoMP.ts): se usa el
+      // pedido que ya se creó en vez de dejar otro "MP sin terminar" en el panel.
+      const firma = firmaPedido(order);
+      const previo = pedidoReusable(almacenSesion.leer(CLAVE_PEDIDO_MP), firma);
+      let orderId = previo ?? await registrar();
+      let resp = await pedirPreferencia(orderId);
+      if (resp.status === 404 && previo) {
+        // El guardado ya no sirve (venció, se pagó o lo borraron): uno nuevo, una vez.
+        almacenSesion.borrar(CLAVE_PEDIDO_MP);
+        orderId = await registrar();
+        resp = await pedirPreferencia(orderId);
+      }
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data.initPoint) throw new Error(data.error || 'No se pudo iniciar el pago');
       // OJO: el carrito NO se vacía acá. Se vacía en /pago/resultado si el
       // pago salió aprobado/pendiente; si el cliente abandona o MP rechaza,
       // el carrito lo espera intacto.
-      // Bandera para que /pago/resultado sepa que este navegador realmente
-      // inició un pago (un link compartido no debe vaciarle el carrito a nadie).
-      // Si no se puede guardar (almacenamiento bloqueado) se paga igual: antes el
-      // setItem tiraba acá y el cliente se quedaba sin poder pagar con el pedido ya
-      // creado. Lo único que se pierde es el vaciado automático del carrito.
-      almacenSesion.guardar('volea_pago_en_curso', '1');
+      // Marca para que /pago/resultado sepa que este navegador realmente inició el
+      // pago de ESTE pedido (un link compartido no le vacía el carrito a nadie). Va
+      // también a localStorage con el id, así sirve aunque MP vuelva en otra pestaña.
+      // Si el almacenamiento está bloqueado se paga igual: solo se pierde el vaciado
+      // automático del carrito (ver pago/marcaPago.ts).
+      guardarMarcaDePago(orderId);
       window.location.href = data.initPoint;
     } catch (err) {
       toast.error(`${err instanceof Error ? err.message : 'Error al iniciar el pago'} — también podés coordinar por WhatsApp.`);

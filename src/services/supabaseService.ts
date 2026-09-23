@@ -990,6 +990,7 @@ export const SupabaseService = {
       mpPaymentId: row.mp_payment_id ?? null,
       paidAt: row.paid_at ?? null,
       paidAmount: row.paid_amount ?? null,
+      requiereRevision: row.requiere_revision ?? null,
       createdAt: row.created_at?.split('T')[0] || '',
     }));
   },

@@ -1,5 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { armarItemsPreferencia, hoyMontevideo, mpConfigurado, promoVigenteHoy } from '../_lib/mp.js';
+import {
+  armarItemsPreferencia,
+  columnaInexistente,
+  hoyMontevideo,
+  motivoPedidoNoPagable,
+  mpConfigurado,
+  promoVigenteHoy,
+  totalItems,
+  validarDisponibilidad,
+  type ItemPedidoRow,
+} from '../_lib/mp.js';
 import { clienteAdmin } from '../_lib/supabaseAdmin.js';
 
 // BASE_URL es opcional: solo hace falta si el dominio cambia.
@@ -13,20 +23,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const orderId = typeof req.body?.orderId === 'string' ? req.body.orderId : '';
   if (!orderId) return res.status(400).json({ error: 'Falta orderId' });
+  // Mismo 404 para TODO pedido que no se pueda pagar (no existe, es de
+  // WhatsApp, es viejo, ya está pago, items rotos): si las respuestas
+  // difirieran, probar ids revelaría qué pedidos existen y cuáles se pagaron.
+  const noEncontrado = () => res.status(404).json({ error: 'Pedido no encontrado' });
+  // Mismo formato que exige el trigger v22 al alta: descarta basura sin ir a la base.
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(orderId)) return noEncontrado();
 
   const db = clienteAdmin(process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const { data: pedido, error } = await db
     .from('orders')
-    .select('id, items, payment_status')
+    .select('id, items, payment_status, payment_provider, source, created_at')
     .eq('id', orderId)
     .maybeSingle();
   if (error) return res.status(500).json({ error: 'No se pudo leer el pedido' });
-  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
-  if (pedido.payment_status === 'aprobado') return res.status(409).json({ error: 'Este pedido ya está pagado' });
-  if (!pedido.items?.length) return res.status(422).json({ error: 'El pedido no tiene items' });
+  const motivo = motivoPedidoNoPagable(pedido);
+  if (motivo || !pedido) {
+    console.warn('MP preferencia: pedido', orderId, 'no se puede pagar:', motivo);
+    return noEncontrado();
+  }
+  const itemsPedido = pedido.items as ItemPedidoRow[];
 
-  const ids = [...new Set((pedido.items ?? []).map((i: { product?: { id?: string } }) => i.product?.id).filter(Boolean))];
-  const { data: catalogo, error: errCat } = await db.from('products').select('id, name, price').in('id', ids as string[]);
+  // Solo ids string van al .in(): el pedido lo armó el cliente y un id con
+  // otra forma rompería el filtro; validarDisponibilidad lo reporta como
+  // producto inexistente.
+  const ids = [...new Set(itemsPedido.map(i => i?.product?.id).filter((id): id is string => typeof id === 'string' && id !== ''))];
+  const { data: catalogo, error: errCat } = await db
+    .from('products')
+    .select('id, name, price, active, stock_by_size')
+    .in('id', ids);
   if (errCat || !catalogo) return res.status(500).json({ error: 'No se pudo leer el catálogo' });
 
   // Promo vigente (tabla promos, la misma fuente que muestra el carrito): el
@@ -41,11 +66,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (errPromo) return res.status(500).json({ error: 'No se pudo verificar las promociones' });
   const promo = promoVigenteHoy(promos ?? [], hoyMontevideo());
 
+  // Precios SIEMPRE del catálogo (armarItemsPreferencia); antes, que cada
+  // producto siga visible, en esa variante y con stock. Los mensajes van tal
+  // cual al toast del checkout.
   let items;
   try {
-    items = armarItemsPreferencia(pedido.items ?? [], catalogo, promo?.percent ?? 0);
+    validarDisponibilidad(itemsPedido, catalogo);
+    items = armarItemsPreferencia(itemsPedido, catalogo, promo?.percent ?? 0);
   } catch (e) {
-    return res.status(422).json({ error: e instanceof Error ? e.message : 'Pedido inválido' });
+    return res.status(400).json({ error: e instanceof Error ? e.message : 'Pedido inválido' });
   }
 
   let respMP: Response;
@@ -89,6 +118,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .update({ mp_preference_id: pref.id, payment_provider: 'mp' })
     .eq('id', pedido.id);
   if (errPref) console.error('No se pudo guardar mp_preference_id en', pedido.id, errPref.message);
+
+  // Lo que se le pidió cobrar a MP, para que el webhook compare contra el
+  // pago real (orders.total lo manda el cliente: no sirve de referencia
+  // firme). Update aparte: si la columna todavía no existe (migración v24
+  // sin aplicar) no se pierde lo de arriba, y el webhook cae a orders.total.
+  const { error: errMonto } = await db
+    .from('orders')
+    .update({ mp_monto_esperado: totalItems(items) })
+    .eq('id', pedido.id);
+  if (errMonto) {
+    if (columnaInexistente(errMonto)) console.warn('MP preferencia: falta orders.mp_monto_esperado (migración v24); el webhook compara contra total');
+    else console.error('No se pudo guardar mp_monto_esperado en', pedido.id, errMonto.message);
+  }
 
   // 'iniciado' solo si el pago no avanzó por otro lado (carrera con el webhook).
   const { error: errIni } = await db

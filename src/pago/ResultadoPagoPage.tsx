@@ -11,7 +11,7 @@ import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Check, Clock, MessageCircle, XCircle } from 'lucide-react';
 import { WHATSAPP_NUMBER } from '../constants';
-import { almacenSesion } from '../utils/almacen';
+import { consumirMarcaDePago } from './marcaPago';
 
 interface ResultadoPagoPageProps {
   clearCart: () => void;
@@ -23,15 +23,14 @@ export default function ResultadoPagoPage({ clearCart }: ResultadoPagoPageProps)
   const pedido = params.get('pedido') || '';
 
   // El carrito recién se vacía cuando el pago salió bien (o quedó en proceso)
-  // Y este navegador fue el que inició el pago: sin la bandera, un link
-  // compartido de "pago aprobado" le vaciaría el carrito a quien lo abra.
+  // Y este navegador fue el que inició el pago de ESTE pedido: sin la marca,
+  // un link compartido de "pago aprobado" le vaciaría el carrito a quien lo
+  // abra. La marca también se busca en localStorage con el id del pedido, así
+  // funciona aunque MP devuelva al cliente en otra pestaña (ver marcaPago.ts).
   const pagoOk = estado === 'aprobado' || estado === 'pendiente';
   useEffect(() => {
-    if (pagoOk && almacenSesion.leer('volea_pago_en_curso')) {
-      almacenSesion.borrar('volea_pago_en_curso');
-      clearCart();
-    }
-  }, [pagoOk, clearCart]);
+    if (pagoOk && consumirMarcaDePago(pedido)) clearCart();
+  }, [pagoOk, pedido, clearCart]);
 
   const msgWhatsApp = encodeURIComponent(
     `¡Hola! Acabo de pagar el pedido ${pedido} con Mercado Pago. ¿Coordinamos la entrega?`,
