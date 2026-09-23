@@ -96,6 +96,9 @@ function rowToProduct(row: any): Product {
   };
 }
 
+const COLUMNAS_TANTEADOR_PUBLICAS =
+  'id, torneo_id, categoria, modo, fase, titulo, pareja_a, pareja_b, jugadores_a, jugadores_b, juez, cancha, obj, cap, cambio_en, sets, hist, estado, ganador, invertido, avisos, llamado_at, created_at, updated_at, terminado_at';
+
 export const SupabaseService = {
   isConnected: isSupabaseConnected,
 
@@ -1222,10 +1225,13 @@ export const SupabaseService = {
   },
 
   // ─── Tanteador (bádminton dobles) ─────────────────────────────────────────
+  // Columnas explícitas, sin creado_por: la tabla se lee en público (/copa) y
+  // creado_por es el email de quien cargó el partido. Desde v23 anon no tiene
+  // SELECT sobre esa columna, así que un select('*') anónimo daría error.
   async getTanteadorPartidos(): Promise<TanteadorPartido[] | null> {
     if (!supabase) return null;
     const { data, error } = await conTechoLectura(
-      supabase.from('tanteador_partidos').select('*').order('created_at', { ascending: false }),
+      supabase.from('tanteador_partidos').select(COLUMNAS_TANTEADOR_PUBLICAS).order('created_at', { ascending: false }),
     );
     if (error) { console.error('Error fetching tanteador:', error); return null; }
     return ((data as Record<string, unknown>[]) || []).map(filaATanteadorPartido);
@@ -1256,10 +1262,11 @@ export const SupabaseService = {
       invertido: p.invertido,
       avisos: p.avisos,
       llamado_at: p.llamadoAt,
-      creado_por: p.creadoPor,
       updated_at: new Date().toISOString(),
       terminado_at: p.terminadoAt,
     };
+    // Al editar, creadoPor llega vacío (no se lee, ver arriba): no pisar el autor.
+    if (p.creadoPor) fila.creado_por = p.creadoPor;
     const { error } = await conTechoEscritura(
       supabase.from('tanteador_partidos').upsert(fila, { onConflict: 'id' }),
     );
