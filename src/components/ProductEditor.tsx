@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, Trash2, Plus, Save, Upload } from 'lucide
 import { toast } from 'sonner';
 import type { Product, Category, ProductColor } from '../types';
 import { sesionAdminVencida } from '../services/authService';
+import { modoGuardadoStock, type GuardadoStock } from '../utils/stock';
 
 const formatPrice = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
 
@@ -31,7 +32,8 @@ function SectionTitle({ children }: { children: ReactNode }) {
 export function ProductEditor({ product, categories, onSave, onClose, uploadImage }: {
   product: Product | null;         // null = crear nuevo
   categories: Category[];
-  onSave: (p: Product) => void;
+  /** false = no se guardó (la UI ya avisó por qué): el editor queda abierto. */
+  onSave: (p: Product, stock: GuardadoStock) => boolean | void | Promise<boolean | void>;
   onClose: () => void;
   uploadImage: (f: File) => Promise<string | null>;
 }) {
@@ -252,7 +254,8 @@ export function ProductEditor({ product, categories, onSave, onClose, uploadImag
       ...(product?.variantMap ? { variantMap: product.variantMap } : {}),
     };
 
-    onSave(p);
+    const ok = await onSave(p, modoGuardadoStock(product?.stockBySize ?? null, stockBySize));
+    if (ok === false) return;
     toast.success(product ? 'Producto actualizado' : 'Producto creado');
   };
 

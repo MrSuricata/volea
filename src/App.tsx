@@ -16,6 +16,7 @@ import { waUruguay } from './utils/telefono';
 import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
+import { mismoStock } from './utils/stock';
 import {
   WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -253,21 +254,28 @@ function setMetaTag(attr: 'name' | 'property', key: string, content: string) {
   el.content = content;
 }
 
+// Una página sin descripción o sin imagen propia vuelve a las de la marca: si se
+// escribieran solo cuando vienen, heredaría las de la última página visitada
+// (un producto sin descripción mostraba la del producto anterior).
+const META_DESCRIPCION_BASE =
+  'VOLEA, la primera marca de indumentaria de pickleball de Uruguay: remeras, polos, shorts y vestidos técnicos, torneos y ranking.';
+const META_IMAGEN_BASE = 'https://volea.vercel.app/og-cover.jpg';
+
 function usePageMeta({ title, description, image }: PageMeta) {
   useEffect(() => {
     const fullTitle = title.includes('VOLEA') ? title : `${title} | VOLEA`;
+    const desc = description?.trim() || META_DESCRIPCION_BASE;
+    const img = image || META_IMAGEN_BASE;
     document.title = fullTitle;
-    if (description) {
-      setMetaTag('name', 'description', description);
-      setMetaTag('property', 'og:description', description);
-    }
+    setMetaTag('name', 'description', desc);
+    setMetaTag('property', 'og:description', desc);
     setMetaTag('property', 'og:title', fullTitle);
     setMetaTag('property', 'og:type', 'website');
-    if (image) setMetaTag('property', 'og:image', image);
-    setMetaTag('name', 'twitter:card', image ? 'summary_large_image' : 'summary');
+    setMetaTag('property', 'og:image', img);
+    setMetaTag('name', 'twitter:card', 'summary_large_image');
     setMetaTag('name', 'twitter:title', fullTitle);
-    if (description) setMetaTag('name', 'twitter:description', description);
-    if (image) setMetaTag('name', 'twitter:image', image);
+    setMetaTag('name', 'twitter:description', desc);
+    setMetaTag('name', 'twitter:image', img);
   }, [title, description, image]);
 }
 
@@ -353,7 +361,7 @@ interface StoreContextType {
   products: Product[];
   setProducts: (p: Product[]) => void;
   refreshProducts: () => Promise<void>;
-  saveProduct: (p: Product) => void;
+  saveProduct: (p: Product, opts?: { sinStock?: boolean }) => void;
   removeProduct: (id: string) => void;
   events: Event[];
   setEvents: (e: Event[]) => void;
@@ -361,6 +369,7 @@ interface StoreContextType {
   promos: Promo[];
   orders: Order[];
   setOrders: (o: Order[]) => void;
+  updateOrderStatus: (id: string, status: Order['status']) => void;
   addOrder: (o: Order) => Promise<boolean>;
   posts: Post[];
   savePost: (p: Post) => void;
@@ -677,14 +686,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     })();
   };
 
-  const saveProduct = useCallback((p: Product) => {
+  const saveProduct = useCallback((p: Product, opts: { sinStock?: boolean } = {}) => {
     _setProducts(prev => {
       const idx = prev.findIndex(x => x.id === p.id);
-      const next = idx >= 0 ? prev.map(x => (x.id === p.id ? p : x)) : [...prev, p];
+      // Sin stock editado, la copia local conserva su stock en vez del del editor.
+      const nuevo = idx >= 0 && opts.sinStock ? { ...p, stockBySize: prev[idx].stockBySize } : p;
+      const next = idx >= 0 ? prev.map(x => (x.id === p.id ? nuevo : x)) : [...prev, nuevo];
       StorageService.setProducts(next);
       return next;
     });
-    SupabaseService.upsertProduct(p).then(warnCloudFail);
+    SupabaseService.upsertProduct(p, opts).then(warnCloudFail);
   }, []);
 
   const removeProduct = useCallback((id: string) => {
@@ -733,6 +744,15 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     _setOrders(o);
     StorageService.setOrders(o);
     SupabaseService.setOrders(o).then(warnCloudFail);
+  }, []);
+
+  const updateOrderStatus = useCallback((id: string, status: Order['status']) => {
+    _setOrders(prev => {
+      const next = prev.map(o => (o.id === id ? { ...o, status } : o));
+      StorageService.setOrders(next);
+      return next;
+    });
+    SupabaseService.updateOrderStatus(id, status).then(warnCloudFail);
   }, []);
 
   // Alta de pedido desde el checkout (anónimo): insert plano, no upsert.
@@ -870,7 +890,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   return (
     <StoreContext.Provider value={{
       datosListos,
-      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, promos, orders, setOrders, addOrder,
+      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, promos, orders, setOrders, updateOrderStatus, addOrder,
       posts, savePost, removePost, standings, saveStanding, removeStanding,
       categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
       cart, addToCart, removeFromCart,
@@ -3988,7 +4008,7 @@ function AdminPage() {
   const store = useStore();
   const {
     isAdmin, currentAdmin, login, sendLoginLink, logout, products, refreshProducts, saveProduct, removeProduct, events, setEvents,
-    orders, setOrders, addOrder, categories, setCategories, clubs, setClubs,
+    orders, setOrders, updateOrderStatus, addOrder, categories, setCategories, clubs, setClubs,
     announcements, setAnnouncements, posts, savePost, removePost,
     standings, saveStanding, removeStanding
   } = store;
@@ -4921,7 +4941,7 @@ function AdminPage() {
                             onChange={(e) => {
                               e.stopPropagation();
                               const newStatus = e.target.value as Order['status'];
-                              setOrders(orders.map(o => o.id === order.id ? { ...o, status: newStatus } : o));
+                              updateOrderStatus(order.id, newStatus);
                             }}
                             className="text-xs rounded-full px-2 py-1 border border-gray-200 focus:outline-none bg-white"
                             onClick={(e) => e.stopPropagation()}
@@ -5382,10 +5402,19 @@ function AdminPage() {
               categories={categories}
               uploadImage={(f) => SupabaseService.uploadImage(f, 'products')}
               onClose={() => { setProductModal(false); setEditingProduct(null); }}
-              onSave={(p) => {
-                saveProduct(p);
+              onSave={async (p, stock) => {
+                if (stock.modo === 'editado') {
+                  const actual = await SupabaseService.getStockProducto(p.id);
+                  if (actual && !mismoStock(actual, stock.base)) {
+                    toast.error('Mientras editabas se movió el stock de este producto (hubo ventas o una compra). No guardé para no pisarlo: cerrá, volvé a abrirlo y cargá el stock de nuevo.', { duration: 10000 });
+                    refreshProducts();
+                    return false;
+                  }
+                }
+                saveProduct(p, { sinStock: stock.modo === 'sin-cambios' });
                 setProductModal(false);
                 setEditingProduct(null);
+                return true;
               }}
             />
           </Suspense>

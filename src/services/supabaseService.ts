@@ -52,7 +52,6 @@ function orderToRow(o: Order) {
     customer_notes: o.customer.notes || '',
     total: o.total,
     status: o.status,
-    source: 'whatsapp',
   };
 }
 
@@ -125,11 +124,23 @@ export const SupabaseService = {
     return ok;
   },
 
-  async upsertProduct(p: Product): Promise<boolean> {
+  // sinStock: el upsert no manda stock_by_size y el de la base queda intacto
+  // (editar una foto no puede devolver unidades que se vendieron en la caja).
+  async upsertProduct(p: Product, opts: { sinStock?: boolean } = {}): Promise<boolean> {
     if (!supabase) return true;
-    const { error } = await conTechoEscritura(supabase.from('products').upsert(productToRow(p), { onConflict: 'id' }));
+    const row: Record<string, unknown> = productToRow(p);
+    if (opts.sinStock) delete row.stock_by_size;
+    const { error } = await conTechoEscritura(supabase.from('products').upsert(row, { onConflict: 'id' }));
     if (error) { console.error('Error upserting product:', error); return false; }
     return true;
+  },
+
+  /** Stock actual de un producto en la nube, o null si no se pudo leer. */
+  async getStockProducto(id: string): Promise<Record<string, number> | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.from('products').select('stock_by_size').eq('id', id).maybeSingle());
+    if (error) { console.error('Error reading product stock:', error); return null; }
+    return (data?.stock_by_size as Record<string, number> | undefined) ?? {};
   },
 
   async deleteProduct(id: string): Promise<boolean> {
@@ -985,7 +996,9 @@ export const SupabaseService = {
   // NO manda al cliente a pagar si el pedido no quedó en la DB.
   async addOrder(o: Order): Promise<boolean> {
     if (!supabase) return false;
-    const row: Record<string, unknown> = orderToRow(o);
+    // `source` va solo en el alta: si viajara en el upsert del admin, cambiar el
+    // estado de un pedido pagado por MP lo volvía 'whatsapp'.
+    const row: Record<string, unknown> = { ...orderToRow(o), source: 'whatsapp' };
     // Los campos de pago se escriben SOLO acá (insert del checkout). El
     // upsert del admin (setOrders/orderToRow) no los incluye a propósito:
     // así nunca pisa lo que el webhook de MP escribió con service role.
@@ -1001,6 +1014,16 @@ export const SupabaseService = {
     // este insert; un cuelgue acá dejaba el checkout colgado en vez de avisar.
     const { error } = await conTechoEscritura(supabase.from('orders').insert(row));
     if (error) { console.error('Error inserting order:', error); return false; }
+    return true;
+  },
+
+  // Cambio de estado de UN pedido. Antes el admin re-subía la lista entera con
+  // upsert: pisaba pedidos que otro había tocado mientras tanto con la copia de
+  // ese navegador.
+  async updateOrderStatus(id: string, status: Order['status']): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('orders').update({ status }).eq('id', id));
+    if (error) { console.error('Error updating order status:', error); return false; }
     return true;
   },
 
