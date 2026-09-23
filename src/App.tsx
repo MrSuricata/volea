@@ -18,6 +18,7 @@ import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductCo
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
 import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
+import { almacenLocal, almacenSesion } from './utils/almacen';
 import { errorImagen, srcsetImagen, urlImagen } from './utils/imagenes';
 import { cargarLeaflet } from './utils/leaflet';
 import {
@@ -57,13 +58,15 @@ import { StandingsPage } from './components/StandingsPage';
 // con pantalla blanca (peor caso: volver de PAGAR en Mercado Pago a /pago/resultado).
 // Si el import() falla, recargamos UNA vez para traer el index nuevo (la bandera en
 // sessionStorage evita el loop); si vuelve a fallar, el throw cae en el ErrorBoundary raíz.
+// almacenSesion y no sessionStorage pelado: con el almacenamiento bloqueado, el
+// removeItem del .then tiraba y hacía fallar TODAS las páginas lazy. Si la bandera no
+// se puede guardar tampoco se recarga (sin bandera no hay freno para el loop).
 const lazyConRecarga = <T extends React.ComponentType<any>>(imp: () => Promise<{ default: T }>) =>
   lazy(() =>
     imp()
-      .then((m) => { sessionStorage.removeItem('volea_chunk_retry'); return m; })
+      .then((m) => { almacenSesion.borrar('volea_chunk_retry'); return m; })
       .catch((err) => {
-        if (!sessionStorage.getItem('volea_chunk_retry')) {
-          sessionStorage.setItem('volea_chunk_retry', '1');
+        if (!almacenSesion.leer('volea_chunk_retry') && almacenSesion.guardar('volea_chunk_retry', '1')) {
           window.location.reload();
           // Promesa que nunca resuelve: la página ya se está recargando, no hay que renderizar nada.
           return new Promise<{ default: T }>(() => {});
@@ -490,8 +493,10 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [posts, _setPosts] = useState<Post[]>([]);
   const [standings, _setStandings] = useState<StandingEntry[]>([]);
   const [cart, _setCart] = useState<CartItem[]>([]);
+  // almacenSesion: un getItem pelado acá, con el almacenamiento bloqueado, tiraba en el
+  // primer render y dejaba TODO el sitio en blanco.
   const [isAdmin, setIsAdmin] = useState(() => {
-    return sessionStorage.getItem('volea_admin') === 'true';
+    return almacenSesion.leer('volea_admin') === 'true';
   });
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
 
@@ -521,7 +526,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
         cargarPedidosAdmin(); // sesión persistida: el admin ya estaba logueado al cargar
       } else if (isSupabaseConnected()) {
         // Supabase sano pero sin sesión real: el flag legacy de password no vale.
-        sessionStorage.removeItem('volea_admin');
+        almacenSesion.borrar('volea_admin');
         setIsAdmin(false);
       }
     })().catch((e) => {
@@ -955,7 +960,7 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     await authSignOut();
     setCurrentAdmin(null);
     setIsAdmin(false);
-    sessionStorage.removeItem('volea_admin');
+    almacenSesion.borrar('volea_admin');
     // roster/resultados de torneos: no dejar que persistan en localStorage en una compu
     // compartida - PERO solo si ya se sincronizaron. El gestor promete "tus cambios quedan
     // guardados en este navegador y se reintenta solo"; si hay push pendiente (mala señal,
@@ -1452,7 +1457,7 @@ function FlyerTorneo({ evento, wa }: { evento: Event; wa: string | null }) {
   const marca = `${evento.id}:${new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY })}`;
 
   useEffect(() => {
-    if (localStorage.getItem('volea_flyer_visto') === marca) return;
+    if (almacenLocal.leer('volea_flyer_visto') === marca) return;
     // Pequeña espera: que el hero pinte primero y el flyer no compita con la carga.
     const t = setTimeout(() => setAbierto(true), 900);
     return () => clearTimeout(t);
@@ -1460,7 +1465,7 @@ function FlyerTorneo({ evento, wa }: { evento: Event; wa: string | null }) {
 
   const cerrar = useCallback(() => {
     setAbierto(false);
-    localStorage.setItem('volea_flyer_visto', marca);
+    almacenLocal.guardar('volea_flyer_visto', marca);
   }, [marca]);
 
   useEffect(() => {
@@ -3759,7 +3764,10 @@ function CheckoutPage() {
       // el carrito lo espera intacto.
       // Bandera para que /pago/resultado sepa que este navegador realmente
       // inició un pago (un link compartido no debe vaciarle el carrito a nadie).
-      sessionStorage.setItem('volea_pago_en_curso', '1');
+      // Si no se puede guardar (almacenamiento bloqueado) se paga igual: antes el
+      // setItem tiraba acá y el cliente se quedaba sin poder pagar con el pedido ya
+      // creado. Lo único que se pierde es el vaciado automático del carrito.
+      almacenSesion.guardar('volea_pago_en_curso', '1');
       window.location.href = data.initPoint;
     } catch (err) {
       toast.error(`${err instanceof Error ? err.message : 'Error al iniciar el pago'} — también podés coordinar por WhatsApp.`);
@@ -4345,9 +4353,9 @@ function AdminPage() {
   // web pública) y consume el hint para que una visita manual a /admin siga cayendo
   // en el dashboard como siempre.
   const [activeTab, setActiveTab] = useState(() => {
-    const atajo = sessionStorage.getItem(ATAJO_TAB_ADMIN);
+    const atajo = almacenSesion.leer(ATAJO_TAB_ADMIN);
     if (atajo) {
-      sessionStorage.removeItem(ATAJO_TAB_ADMIN);
+      almacenSesion.borrar(ATAJO_TAB_ADMIN);
       return atajo;
     }
     return 'dashboard';
@@ -6391,7 +6399,7 @@ function BarraAdmin() {
   if (!isAdmin || pathname.startsWith('/admin')) return null;
 
   const irA = (tab: string) => {
-    sessionStorage.setItem(ATAJO_TAB_ADMIN, tab);
+    almacenSesion.guardar(ATAJO_TAB_ADMIN, tab);
     setAbierta(false);
     navigate('/admin');
   };

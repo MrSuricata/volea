@@ -10,6 +10,7 @@ import { supabase } from '../services/supabaseClient';
 import { SupabaseService } from '../services/supabaseService';
 import type { TanteadorCategoria, TanteadorLado, TanteadorModo, TanteadorPartido } from '../types';
 import { fechaHumana } from '../utils/fechas';
+import { almacenLocal } from '../utils/almacen';
 import {
   anotarPunto,
   cargarResultadoManual,
@@ -33,18 +34,12 @@ import {
 const ESPEJO_KEY = 'volea_tanteador_espejo';
 
 function espejoLeer(): TanteadorPartido | null {
-  try {
-    const raw = localStorage.getItem(ESPEJO_KEY);
-    return raw ? (JSON.parse(raw) as TanteadorPartido) : null;
-  } catch {
-    return null;
-  }
+  return almacenLocal.leerJSON<TanteadorPartido>(ESPEJO_KEY);
 }
+// Sin storage no hay espejo; el guardado en la nube sigue igual (almacenLocal no tira).
 function espejoGuardar(p: TanteadorPartido | null) {
-  try {
-    if (p) localStorage.setItem(ESPEJO_KEY, JSON.stringify(p));
-    else localStorage.removeItem(ESPEJO_KEY);
-  } catch { /* sin storage no hay espejo, el guardado en la nube sigue */ }
+  if (p) almacenLocal.guardarJSON(ESPEJO_KEY, p);
+  else almacenLocal.borrar(ESPEJO_KEY);
 }
 
 type Vista = 'lista' | 'nuevo' | 'juego';

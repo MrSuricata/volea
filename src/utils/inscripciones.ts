@@ -4,6 +4,7 @@
 
 import type { Inscripcion, TarifaEvento } from '../types';
 import { normalizar } from './nombres';
+import { almacenLocal } from './almacen';
 
 /** Costo de una inscripción: $base incluye N categorías, cada adicional suma $extra. */
 export function costoInscripcion(nCategorias: number, tarifa: TarifaEvento): number {
@@ -19,7 +20,8 @@ export const MARCA_INSC_VISTAS = 'volea_insc_vistas';
 
 /** Marca de última visita; si nunca se visitó, una semana atrás. */
 export const marcaVisitaInscripciones = (): string => {
-  const guardada = localStorage.getItem(MARCA_INSC_VISTAS);
+  // almacenLocal: lo llaman BarraAdmin y el panel; sin almacenamiento es "nunca se visitó".
+  const guardada = almacenLocal.leer(MARCA_INSC_VISTAS);
   if (guardada && !isNaN(Date.parse(guardada))) return guardada;
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 };

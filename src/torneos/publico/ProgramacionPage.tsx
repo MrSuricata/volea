@@ -7,6 +7,7 @@ import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
 import { RkCargando, RkError } from './Estados';
 import { supabase } from '../../services/supabaseClient';
+import { almacenLocal } from '../../utils/almacen';
 import '../torneos.css';
 
 // ─── Programación en vivo del Racket Roll ────────────────────────────────────
@@ -590,12 +591,10 @@ export default function ProgramacionPage() {
   const [esAdmin, setEsAdmin] = useState(false);
   // persiste entre recargas (cada deploy recarga la pagina y lo apagaba);
   // en la TV no molesta: sin sesion de admin los controles no se muestran igual
-  const [modoCarga, setModoCargaEstado] = useState(() => {
-    try { return localStorage.getItem('volea_envivo_carga') === '1'; } catch { return false; }
-  });
+  const [modoCarga, setModoCargaEstado] = useState(() => almacenLocal.leer('volea_envivo_carga') === '1');
   const setModoCarga = (v: boolean) => {
     setModoCargaEstado(v);
-    try { localStorage.setItem('volea_envivo_carga', v ? '1' : '0'); } catch { /* privado */ }
+    almacenLocal.guardar('volea_envivo_carga', v ? '1' : '0');
   };
 
   useEffect(() => {

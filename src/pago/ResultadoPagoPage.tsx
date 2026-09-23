@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Check, Clock, MessageCircle, XCircle } from 'lucide-react';
 import { WHATSAPP_NUMBER } from '../constants';
+import { almacenSesion } from '../utils/almacen';
 
 interface ResultadoPagoPageProps {
   clearCart: () => void;
@@ -26,8 +27,8 @@ export default function ResultadoPagoPage({ clearCart }: ResultadoPagoPageProps)
   // compartido de "pago aprobado" le vaciaría el carrito a quien lo abra.
   const pagoOk = estado === 'aprobado' || estado === 'pendiente';
   useEffect(() => {
-    if (pagoOk && sessionStorage.getItem('volea_pago_en_curso')) {
-      sessionStorage.removeItem('volea_pago_en_curso');
+    if (pagoOk && almacenSesion.leer('volea_pago_en_curso')) {
+      almacenSesion.borrar('volea_pago_en_curso');
       clearCart();
     }
   }, [pagoOk, clearCart]);
