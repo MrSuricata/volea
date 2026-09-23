@@ -4,11 +4,15 @@ import {
   armarItemsPreferencia,
   armarUrlRetorno,
   claveStock,
+  columnaInexistente,
+  funcionInexistente,
   hoyMontevideo,
   mapearEstadoMP,
   motivoPedidoNoPagable,
   mpConfigurado,
+  planificarWebhook,
   precioConPromo,
+  problemaImportePago,
   promoVigenteHoy,
   totalItems,
   validarDisponibilidad,
@@ -368,6 +372,129 @@ describe('validarDisponibilidad', () => {
     const raro = [{ id: 'p9', name: 'Raro', price: 10, stock_by_size: { M: 'muchos', L: -2 } }];
     expect(() => validarDisponibilidad([item('p9', 1, 'M')], raro)).toThrow(/stock/);
     expect(() => validarDisponibilidad([item('p9', 1, 'L')], raro)).toThrow(/stock/);
+  });
+});
+
+describe('problemaImportePago', () => {
+  const pago = { id: 1, status: 'approved', transaction_amount: 1980, currency_id: 'UYU' };
+
+  it('acepta monto y moneda iguales a lo esperado', () => {
+    expect(problemaImportePago(pago, { id: 'VO-1', mp_monto_esperado: 1980, total: 1980 })).toBeNull();
+    // PostgREST puede devolver numeric como string.
+    expect(problemaImportePago(pago, { id: 'VO-1', mp_monto_esperado: '1980' })).toBeNull();
+  });
+
+  it('rechaza un monto distinto', () => {
+    expect(problemaImportePago({ ...pago, transaction_amount: 10 }, { id: 'VO-1', mp_monto_esperado: 1980 })).toMatch(/monto 10 UYU en vez de 1980/);
+  });
+
+  it('rechaza otra moneda aunque el número coincida', () => {
+    expect(problemaImportePago({ ...pago, currency_id: 'USD' }, { id: 'VO-1', mp_monto_esperado: 1980 })).toMatch(/moneda USD/);
+    expect(problemaImportePago({ ...pago, currency_id: null }, { id: 'VO-1', mp_monto_esperado: 1980 })).toMatch(/moneda/);
+  });
+
+  it('mp_monto_esperado manda sobre total (total lo escribe el cliente)', () => {
+    expect(problemaImportePago(pago, { id: 'VO-1', mp_monto_esperado: 1980, total: 1 })).toBeNull();
+    expect(problemaImportePago({ ...pago, transaction_amount: 1 }, { id: 'VO-1', mp_monto_esperado: 1980, total: 1 })).not.toBeNull();
+  });
+
+  it('sin mp_monto_esperado (migración v24 sin aplicar) compara contra total', () => {
+    expect(problemaImportePago(pago, { id: 'VO-1', total: 1980 })).toBeNull();
+    expect(problemaImportePago(pago, { id: 'VO-1', mp_monto_esperado: null, total: 2000 })).toMatch(/monto/);
+  });
+
+  it('sin ningún monto de referencia válido no da por bueno el pago', () => {
+    expect(problemaImportePago(pago, { id: 'VO-1', total: 0 })).toMatch(/monto esperado/);
+    expect(problemaImportePago(pago, { id: 'VO-1' })).toMatch(/monto esperado/);
+    expect(problemaImportePago({ ...pago, transaction_amount: null }, { id: 'VO-1', total: 1980 })).toMatch(/no trae monto/);
+  });
+});
+
+describe('planificarWebhook', () => {
+  const AHORA = '2026-09-23T15:00:00.000Z';
+  const pedido = { id: 'VO-1', total: 1980, mp_monto_esperado: 1980, payment_status: 'iniciado', mp_payment_id: null };
+  const aprobado = { id: 555, status: 'approved', external_reference: 'VO-1', transaction_amount: 1980, currency_id: 'UYU', date_approved: '2026-09-23T14:59:00Z' };
+
+  it('pago aprobado y correcto: marca aprobado y pide descontar stock', () => {
+    expect(planificarWebhook(aprobado, pedido, AHORA)).toEqual({
+      patch: { payment_provider: 'mp', mp_payment_id: '555', payment_status: 'aprobado', paid_at: '2026-09-23T14:59:00Z', paid_amount: 1980 },
+      soloSiNoCerrado: false,
+      descontarStock: true,
+      revision: null,
+    });
+  });
+
+  it('el mismo pago aprobado otra vez (reintento) vuelve a pedir el descuento: la RPC es idempotente', () => {
+    const plan = planificarWebhook(aprobado, { ...pedido, payment_status: 'aprobado', mp_payment_id: '555' }, AHORA);
+    expect(plan?.patch.payment_status).toBe('aprobado');
+    expect(plan?.descontarStock).toBe(true);
+  });
+
+  it('monto distinto: NO marca aprobado ni descuenta stock, queda para revisión', () => {
+    const plan = planificarWebhook({ ...aprobado, transaction_amount: 100 }, pedido, AHORA)!;
+    expect(plan.patch.payment_status).toBe('pendiente');
+    expect(plan.patch.paid_amount).toBe(100);
+    expect(plan.patch).not.toHaveProperty('paid_at');
+    expect(plan.patch.requiere_revision).toMatch(/monto 100 UYU en vez de 1980/);
+    expect(plan.revision).toBe(plan.patch.requiere_revision);
+    expect(plan.descontarStock).toBe(false);
+    expect(plan.soloSiNoCerrado).toBe(true); // no degrada un pedido ya aprobado
+  });
+
+  it('moneda distinta: NO marca aprobado, queda para revisión', () => {
+    const plan = planificarWebhook({ ...aprobado, currency_id: 'USD' }, pedido, AHORA)!;
+    expect(plan.patch.payment_status).toBe('pendiente');
+    expect(plan.revision).toMatch(/moneda USD/);
+    expect(plan.descontarStock).toBe(false);
+  });
+
+  it('otro pago aprobado para un pedido ya pagado: no toca el estado, avisa posible doble cobro', () => {
+    const plan = planificarWebhook({ ...aprobado, id: 777 }, { ...pedido, payment_status: 'aprobado', mp_payment_id: '555' }, AHORA)!;
+    expect(plan.patch).toEqual({ requiere_revision: expect.stringMatching(/777.*555.*doble cobro/) });
+    expect(plan.descontarStock).toBe(false);
+  });
+
+  it('un rechazo de otro pago sobre un pedido ya pagado no escribe nada', () => {
+    expect(planificarWebhook({ ...aprobado, id: 777, status: 'rejected' }, { ...pedido, payment_status: 'aprobado', mp_payment_id: '555' }, AHORA)).toBeNull();
+  });
+
+  it('pendiente y rechazado no pisan un pedido cerrado (filtro en la escritura)', () => {
+    expect(planificarWebhook({ ...aprobado, status: 'rejected' }, pedido, AHORA)).toEqual({
+      patch: { payment_provider: 'mp', mp_payment_id: '555', payment_status: 'rechazado' },
+      soloSiNoCerrado: true,
+      descontarStock: false,
+      revision: null,
+    });
+    expect(planificarWebhook({ ...aprobado, status: 'in_process' }, pedido, AHORA)?.soloSiNoCerrado).toBe(true);
+  });
+
+  it('devuelto se escribe siempre (no hay estado que proteger de un reembolso)', () => {
+    const plan = planificarWebhook({ ...aprobado, status: 'refunded' }, { ...pedido, payment_status: 'aprobado', mp_payment_id: '555' }, AHORA)!;
+    expect(plan.patch.payment_status).toBe('devuelto');
+    expect(plan.soloSiNoCerrado).toBe(false);
+  });
+
+  it('estado desconocido: nada que escribir', () => {
+    expect(planificarWebhook({ ...aprobado, status: 'banana' }, pedido, AHORA)).toBeNull();
+  });
+
+  it('sin date_approved usa la hora actual', () => {
+    expect(planificarWebhook({ ...aprobado, date_approved: null }, pedido, AHORA)?.patch.paid_at).toBe(AHORA);
+  });
+});
+
+describe('errores de migración pendiente', () => {
+  it('columnaInexistente reconoce PGRST204 (body) y 42703 (select)', () => {
+    expect(columnaInexistente({ code: 'PGRST204' })).toBe(true);
+    expect(columnaInexistente({ code: '42703' })).toBe(true);
+    expect(columnaInexistente({ code: '23514' })).toBe(false);
+    expect(columnaInexistente(null)).toBe(false);
+  });
+  it('funcionInexistente reconoce PGRST202 y 42883', () => {
+    expect(funcionInexistente({ code: 'PGRST202' })).toBe(true);
+    expect(funcionInexistente({ code: '42883' })).toBe(true);
+    expect(funcionInexistente({ code: '40001' })).toBe(false);
+    expect(funcionInexistente(undefined)).toBe(false);
   });
 });
 

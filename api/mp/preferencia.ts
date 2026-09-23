@@ -1,10 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   armarItemsPreferencia,
+  columnaInexistente,
   hoyMontevideo,
   motivoPedidoNoPagable,
   mpConfigurado,
   promoVigenteHoy,
+  totalItems,
   validarDisponibilidad,
   type ItemPedidoRow,
 } from '../_lib/mp.js';
@@ -116,6 +118,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .update({ mp_preference_id: pref.id, payment_provider: 'mp' })
     .eq('id', pedido.id);
   if (errPref) console.error('No se pudo guardar mp_preference_id en', pedido.id, errPref.message);
+
+  // Lo que se le pidió cobrar a MP, para que el webhook compare contra el
+  // pago real (orders.total lo manda el cliente: no sirve de referencia
+  // firme). Update aparte: si la columna todavía no existe (migración v24
+  // sin aplicar) no se pierde lo de arriba, y el webhook cae a orders.total.
+  const { error: errMonto } = await db
+    .from('orders')
+    .update({ mp_monto_esperado: totalItems(items) })
+    .eq('id', pedido.id);
+  if (errMonto) {
+    if (columnaInexistente(errMonto)) console.warn('MP preferencia: falta orders.mp_monto_esperado (migración v24); el webhook compara contra total');
+    else console.error('No se pudo guardar mp_monto_esperado en', pedido.id, errMonto.message);
+  }
 
   // 'iniciado' solo si el pago no avanzó por otro lado (carrera con el webhook).
   const { error: errIni } = await db

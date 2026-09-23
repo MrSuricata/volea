@@ -303,6 +303,124 @@ export function armarUrlRetorno(baseUrl: string, p: ParamsRetornoMP): string {
   return `${baseUrl}/#/pago/resultado?${q.toString()}`;
 }
 
+// ── Webhook: qué escribir en el pedido ───────────────────────────────────
+// El pago se relee de la API de MP (GET /v1/payments/:id), así que estos
+// datos son auténticos; lo que se valida acá es que CORRESPONDAN al pedido.
+
+/** Lo que usa el webhook del pago devuelto por la API de MP. */
+export interface PagoMP {
+  id: number | string;
+  status?: string | null;
+  external_reference?: string | null;
+  transaction_amount?: number | null; // lo cobrado por los items (sin intereses de cuotas)
+  currency_id?: string | null;
+  date_approved?: string | null;
+}
+
+/** La fila de orders que lee el webhook (select '*': tolera columnas que todavía no existan). */
+export interface PedidoWebhook {
+  id: string;
+  total?: number | string | null;
+  mp_monto_esperado?: number | string | null; // v24; sin migración no viene
+  payment_status?: string | null;
+  mp_payment_id?: string | null;
+}
+
+export const MONEDA_MP = 'UYU';
+
+/**
+ * null si el monto y la moneda del pago coinciden con lo que se pidió cobrar;
+ * si no, el motivo. Referencia: orders.mp_monto_esperado (lo guarda
+ * preferencia.ts con el total que calculó desde el catálogo) y, si no está
+ * (pedido anterior a la migración v24 o update fallido), orders.total, que
+ * el checkout calcula con las mismas reglas de promo.
+ */
+export function problemaImportePago(pago: PagoMP, pedido: PedidoWebhook): string | null {
+  const referencia = pedido.mp_monto_esperado ?? pedido.total;
+  const esperado = referencia == null ? NaN : Number(referencia);
+  if (!Number.isFinite(esperado) || esperado <= 0) return 'el pedido no tiene un monto esperado válido';
+  if (pago.currency_id !== MONEDA_MP) return `moneda ${pago.currency_id ?? '(vacía)'} en vez de ${MONEDA_MP}`;
+  const cobrado = pago.transaction_amount == null ? NaN : Number(pago.transaction_amount);
+  if (!Number.isFinite(cobrado)) return 'el pago no trae monto';
+  // Pesos enteros de los dos lados; el margen solo absorbe decimales de coma flotante.
+  if (Math.abs(cobrado - esperado) > 0.005) return `monto ${cobrado} ${MONEDA_MP} en vez de ${esperado}`;
+  return null;
+}
+
+export interface PlanWebhook {
+  /** Columnas a escribir en orders. */
+  patch: Record<string, unknown>;
+  /** Agregar el filtro payment_status NOT IN (aprobado, devuelto): un reintento tardío no pisa un pedido cerrado. */
+  soloSiNoCerrado: boolean;
+  /** Llamar a la RPC descontar_stock_pedido después de escribir. */
+  descontarStock: boolean;
+  /** Si el pedido queda para revisión, por qué (también va en patch.requiere_revision). */
+  revision: string | null;
+}
+
+/**
+ * Decide qué escribir en el pedido ante un pago de MP. null = no hay nada
+ * que escribir. Nunca marca 'aprobado' si el monto o la moneda no cierran,
+ * ni pisa un pedido ya pagado con OTRO pago (doble cobro: queda para revisión).
+ */
+export function planificarWebhook(pago: PagoMP, pedido: PedidoWebhook, ahoraIso: string): PlanWebhook | null {
+  const estado = mapearEstadoMP(pago.status);
+  if (!estado) return null;
+  const idPago = String(pago.id);
+
+  // El pedido ya se pagó con otro pago de MP (dos preferencias pagadas, o una
+  // pagada dos veces). No se toca el estado: se avisa. Los pendientes o
+  // rechazados de ese otro pago no cambian nada (como el guard de siempre).
+  if (pedido.payment_status === 'aprobado' && pedido.mp_payment_id && pedido.mp_payment_id !== idPago) {
+    if (estado !== 'aprobado' && estado !== 'devuelto') return null;
+    const motivo = `otro pago de MP (${idPago}, ${estado}) para un pedido ya pagado con ${pedido.mp_payment_id}: posible doble cobro`;
+    return { patch: { requiere_revision: motivo }, soloSiNoCerrado: false, descontarStock: false, revision: motivo };
+  }
+
+  const base = { payment_provider: 'mp', mp_payment_id: idPago };
+  if (estado === 'aprobado') {
+    const problema = problemaImportePago(pago, pedido);
+    if (problema) {
+      // La plata entró pero no es lo que se pidió: NO se marca pagado ni se
+      // descuenta stock. 'pendiente' (no final) + el motivo, y el monto real
+      // en paid_amount para que el admin lo vea al revisar.
+      const motivo = `pago ${idPago} aprobado por MP con ${problema}`;
+      return {
+        patch: { ...base, payment_status: 'pendiente', paid_amount: pago.transaction_amount ?? null, requiere_revision: motivo },
+        soloSiNoCerrado: true,
+        descontarStock: false,
+        revision: motivo,
+      };
+    }
+    return {
+      patch: { ...base, payment_status: 'aprobado', paid_at: pago.date_approved ?? ahoraIso, paid_amount: pago.transaction_amount ?? null },
+      soloSiNoCerrado: false,
+      // Idempotente del lado de la base (orders.stock_descontado_at): se pide
+      // en cada notificación aprobada, así un reintento completa un descuento
+      // que haya fallado.
+      descontarStock: true,
+      revision: null,
+    };
+  }
+  return {
+    patch: { ...base, payment_status: estado },
+    soloSiNoCerrado: estado === 'pendiente' || estado === 'rechazado',
+    descontarStock: false,
+    revision: null,
+  };
+}
+
+// Errores de "la migración todavía no se aplicó": el código se puede
+// desplegar antes que supabase/migraciones_propuestas/v24_mp.sql y tiene que
+// degradar sin romper el cobro.
+interface ErrorConCodigo { code?: string | null }
+/** Columna inexistente: PGRST204 (en el body de un insert/update) o 42703 (en un select/filtro). */
+export const columnaInexistente = (e: ErrorConCodigo | null | undefined) =>
+  e?.code === 'PGRST204' || e?.code === '42703';
+/** Función inexistente: PGRST202 (no está en el schema cache de PostgREST) o 42883. */
+export const funcionInexistente = (e: ErrorConCodigo | null | undefined) =>
+  e?.code === 'PGRST202' || e?.code === '42883';
+
 export function mpConfigurado(env: Record<string, string | undefined>): boolean {
   return Boolean(env.MP_ACCESS_TOKEN && env.MP_WEBHOOK_SECRET && env.SUPABASE_SERVICE_ROLE_KEY);
 }
