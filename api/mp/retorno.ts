@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { armarUrlRetorno } from '../_lib/mp';
+import { armarUrlRetorno } from '../_lib/mp.js';
 
 // Puente entre la vuelta de Checkout Pro y el HashRouter de la SPA.
 export default function handler(req: VercelRequest, res: VercelResponse) {

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { mapearEstadoMP, mpConfigurado, validarFirmaWebhook } from '../_lib/mp';
-import { clienteAdmin } from '../_lib/supabaseAdmin';
+import { mapearEstadoMP, mpConfigurado, validarFirmaWebhook } from '../_lib/mp.js';
+import { clienteAdmin } from '../_lib/supabaseAdmin.js';
 
 // Notificaciones de pago de MP. Valida la firma, consulta el pago REAL a la
 // API (nunca confía en el payload) y marca el pedido. Idempotente: la misma

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { armarItemsPreferencia, hoyMontevideo, mpConfigurado, promoVigenteHoy } from '../_lib/mp';
-import { clienteAdmin } from '../_lib/supabaseAdmin';
+import { armarItemsPreferencia, hoyMontevideo, mpConfigurado, promoVigenteHoy } from '../_lib/mp.js';
+import { clienteAdmin } from '../_lib/supabaseAdmin.js';
 
 // BASE_URL es opcional: solo hace falta si el dominio cambia.
 const baseUrl = () => process.env.BASE_URL || 'https://volea.vercel.app';
