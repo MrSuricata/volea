@@ -3,6 +3,7 @@ import { comprimirImagen } from '../utils/imagenes';
 import { conLimite, conReintento } from '../utils/arranque';
 import { faltantesEnPadron } from '../utils/nombres';
 import { motivoBorradoFallido, type ResultadoBorrado } from '../utils/filas';
+import { planLineasCompra, type LineaEnBase } from '../utils/compras';
 import type { JugadorPadron } from '../utils/dupr';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
@@ -1102,8 +1103,37 @@ export const SupabaseService = {
     return ((data as Record<string, unknown>[]) || []).map(filaACompra);
   },
 
-  async saveCompra(c: Compra): Promise<{ ok: boolean; id?: string; error?: string }> {
+  /**
+   * Guarda cabecera y líneas. Las líneas van por id y sin `cantidad_recibida` (ver
+   * utils/compras.ts): antes se borraban y reinsertaban con lo recibido del formulario,
+   * que podía estar viejo, y el próximo "Recibir" duplicaba stock. `aviso` = se guardó,
+   * pero hay algo que el usuario tiene que saber (líneas con recibidas que no se borraron).
+   * Con error, `id` viene si la cabecera sí llegó a guardarse (para no duplicar el pedido
+   * al reintentar).
+   */
+  async saveCompra(c: Compra): Promise<{ ok: boolean; id?: string; error?: string; aviso?: string }> {
     if (!supabase) return { ok: false, error: 'Sin conexion' };
+
+    // 1) Cómo están HOY las líneas en la base (no lo que creía el formulario).
+    let enBase: LineaEnBase[] = [];
+    if (c.id) {
+      const { data: lineas, error: eLeer } = await conTechoLectura(
+        supabase.from('compra_items').select('id, cantidad_recibida, descripcion').eq('compra_id', c.id),
+      );
+      if (eLeer) { console.error('Error leyendo items:', eLeer); return { ok: false, error: eLeer.message }; }
+      enBase = ((lineas as Record<string, unknown>[] | null) ?? []).map(l => ({
+        id: String(l.id),
+        cantidadRecibida: Number(l.cantidad_recibida) || 0,
+        descripcion: String(l.descripcion ?? ''),
+      }));
+    }
+    const plan = planLineasCompra(c.items, enBase);
+    const bajo = plan.bajoLoRecibido[0];
+    if (bajo) {
+      // Antes de escribir nada: el formulario no sabía que ya había llegado mercadería.
+      return { ok: false, error: `De «${bajo.descripcion}» ya llegaron ${bajo.recibida}: no podés encargar menos que eso` };
+    }
+
     const fila: Record<string, unknown> = {
       tipo: c.tipo,
       proveedor: c.proveedor,
@@ -1127,27 +1157,28 @@ export const SupabaseService = {
     if (error) { console.error('Error saving compra:', error); return { ok: false, error: error.message }; }
     const compraId = (data as { id: string } | null)?.id ?? c.id;
 
-    // Las lineas se reemplazan enteras: es un pedido chico y asi no quedan huerfanas.
-    const { error: eDel } = await conTechoEscritura(
-      supabase.from('compra_items').delete().eq('compra_id', compraId),
-    );
-    if (eDel) { console.error('Error limpiando items:', eDel); return { ok: false, error: eDel.message }; }
-
-    if (c.items.length > 0) {
-      const filas = c.items.map((it, i) => ({
-        compra_id: compraId,
-        product_id: it.productId,
-        descripcion: it.descripcion,
-        variante: it.variante,
-        cantidad: it.cantidad,
-        cantidad_recibida: it.cantidadRecibida ?? 0,
-        costo_unitario: it.costoUnitario,
-        orden: i,
-      }));
-      const { error: eIns } = await conTechoEscritura(supabase.from('compra_items').insert(filas));
-      if (eIns) { console.error('Error guardando items:', eIns); return { ok: false, error: eIns.message }; }
+    // 2) Upsert por id. Sin cantidad_recibida en las columnas: en las existentes el
+    // ON CONFLICT no la toca y las nuevas nacen con el 0 por defecto de la base.
+    if (plan.filas.length > 0) {
+      const { error: eUps } = await conTechoEscritura(
+        supabase.from('compra_items').upsert(plan.filas.map(f => ({ ...f, compra_id: compraId })), { onConflict: 'id' }),
+      );
+      if (eUps) { console.error('Error guardando items:', eUps); return { ok: false, id: compraId, error: eUps.message }; }
     }
-    return { ok: true, id: compraId };
+
+    // 3) Borrar SOLO lo que el usuario quitó. El filtro cantidad_recibida = 0 va en el
+    // DELETE mismo: si justo alguien recibió unidades de esa línea, la base no la borra.
+    const avisos: string[] = plan.retenidas.map(l =>
+      `«${l.descripcion}» no se quitó: ya se recibieron ${l.cantidadRecibida}.`);
+    if (plan.borrar.length > 0) {
+      const { data: borradas, error: eDel } = await conTechoEscritura(
+        supabase.from('compra_items').delete().in('id', plan.borrar).eq('cantidad_recibida', 0).select('id'),
+      );
+      if (eDel) { console.error('Error quitando items:', eDel); return { ok: false, id: compraId, error: eDel.message }; }
+      const quedaron = plan.borrar.length - ((borradas as unknown[] | null)?.length ?? 0);
+      if (quedaron > 0) avisos.push(`${quedaron} ${quedaron === 1 ? 'línea quitada no se borró' : 'líneas quitadas no se borraron'}: recién se recibieron unidades.`);
+    }
+    return { ok: true, id: compraId, aviso: avisos.length > 0 ? avisos.join(' ') : undefined };
   },
 
   async deleteCompra(id: string): Promise<boolean> {
