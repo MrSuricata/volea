@@ -6393,7 +6393,9 @@ function Footer() {
       <div
         className="absolute inset-0"
         style={{
-          backgroundImage: 'url(/products/lifestyle-sunset-back.jpg)',
+          // Versión chica (600px, 16 KB) de la foto del hero: tapada al 95% por el
+          // azul de abajo no se nota la diferencia, y el footer está en TODAS las páginas.
+          backgroundImage: 'url(/products/footer-fondo.jpg)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
