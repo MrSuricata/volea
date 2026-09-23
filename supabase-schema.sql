@@ -1435,3 +1435,20 @@ BEGIN
   END IF;
 END
 $post$;
+
+-- ============================================
+-- v23 (2026-09-23): auditoría web — inscripciones, tanteador y TRUNCATE
+-- ============================================
+-- Migración "v23_inscripciones_restrict_tanteador_email_truncate":
+--   · inscripciones.event_id → events: ON DELETE RESTRICT (antes CASCADE: borrar
+--     un evento se llevaba las inscripciones pagas). Para sacar un evento con
+--     inscripciones, cerrarlas; la web avisa si el borrado falla.
+--   · tanteador_partidos: anon ya no lee creado_por (email del admin que cargó
+--     el partido). SELECT por columnas para anon; /copa pide columnas
+--     explícitas (COLUMNAS_TANTEADOR_PUBLICAS en supabaseService). El equipo
+--     (authenticated) sigue con SELECT completo. Realtime respeta los permisos
+--     por columna (realtime.apply_rls usa has_column_privilege).
+--   · REVOKE TRUNCATE a anon y authenticated en las tablas de VOLEA (orders,
+--     products, events, inscripciones, rk_*, etc.). Las tablas de los otros
+--     sitios del proyecto (demo_*, fenix_*, mariella_*) quedan como estaban.
+--   · recibir_compra: search_path = pg_catalog, public (regla v6).
