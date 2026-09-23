@@ -4,6 +4,7 @@ import type { ConfigPuntos, Escalon, Jugador, Torneo } from '../engine/tipos';
 import { calcularRanking } from '../engine/ranking';
 import { listarJugadoresPublicos, listarTorneosPublicos, obtenerConfigPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
+import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 
 const NOMBRE_ESCALON: Record<Escalon, string> = {
@@ -115,6 +116,7 @@ export default function RankingPage() {
             </table>
           </div>
         )}
+        <VitrinaTienda />
       </main>
     </div>
   );

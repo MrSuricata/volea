@@ -8,6 +8,7 @@ import { nombreDe } from '../ui/util';
 import { podioDeTorneo } from './resultado';
 import { obtenerTorneoPublico } from './datos';
 import { RkAviso, RkCargando, RkError } from './Estados';
+import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 
 // 30s de polling: sigue siendo "en vivo" para el ritmo de un torneo de pickleball y
@@ -163,6 +164,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
             {individual ? (parejas.length === 1 ? 'o' : 'os') : (parejas.length === 1 ? 'a' : 'as')}.
           </p>
         )}
+        <VitrinaTienda />
       </main>
     </div>
   );

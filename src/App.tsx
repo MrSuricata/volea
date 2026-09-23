@@ -9,10 +9,11 @@ import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
 import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, Promo } from './types';
-import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
+import { hoyMontevideo, precioConPromo, totalesConPromo, ventanaPromo } from './utils/promo';
 import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
 import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
+import { usePromo } from './tienda/promo';
 import { lazyConRecarga, cargandoTab } from './lib/lazyConRecarga';
 import { formatPrice, TZ_UY, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
 import { FALLBACK_IMG, handleImgError, errorFoto } from './lib/fotos';
@@ -285,35 +286,6 @@ function useParallax(distance = 80) {
 }
 
 // ─── 3. StoreContext & StoreProvider ─────────────────────────────────────────
-
-/**
- * La promo del momento: `activa` descuenta AHORA (el mismo cálculo que cobra
- * Mercado Pago en el server); `proxima` es la que se anuncia antes de arrancar.
- */
-function usePromo(): { activa: Promo | null; proxima: Promo | null } {
-  const { promos } = useStore();
-  // `hoy` es ESTADO y se refresca al volver a la pestaña (y cada minuto): calculado
-  // una sola vez quedaba congelado en la fecha de carga — una pestaña abierta el 16
-  // y retomada el 18 no mostraba el descuento, y el pedido por WhatsApp salía a
-  // precio de lista: sobrecobro silencioso. El caso inverso (carrito abierto
-  // cruzando el fin de la promo) mostraba un descuento que MP ya no iba a hacer.
-  const [hoy, setHoy] = useState(hoyMontevideo);
-  useEffect(() => {
-    const tick = () => setHoy(hoyMontevideo());
-    document.addEventListener('visibilitychange', tick); // es evento de document, no de window
-    window.addEventListener('focus', tick);
-    const id = setInterval(tick, 60_000);
-    return () => {
-      document.removeEventListener('visibilitychange', tick);
-      window.removeEventListener('focus', tick);
-      clearInterval(id);
-    };
-  }, []);
-  return useMemo(
-    () => ({ activa: promoVigente(promos, hoy), proxima: promoPorVenir(promos, hoy) }),
-    [promos, hoy],
-  );
-}
 
 function StoreProvider({ children }: { children: React.ReactNode }) {
   const [products, _setProducts] = useState<Product[]>([]);

@@ -7,6 +7,7 @@ import { podioDeTorneo } from './resultado';
 import { agruparPorEvento, listarTorneosPublicos, torneoEnVivo } from './datos';
 import type { TorneoPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
+import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
@@ -166,6 +167,7 @@ export default function TorneosListaPage() {
             })}
           </ul>
         )}
+        <VitrinaTienda />
       </main>
     </div>
   );
