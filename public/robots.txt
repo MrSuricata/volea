@@ -1,3 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /checkout
+Disallow: /pago/
+
 Sitemap: https://volea.vercel.app/sitemap.xml
