@@ -1,4 +1,28 @@
 {
+  "images": {
+    "sizes": [
+      160,
+      320,
+      640,
+      960,
+      1280
+    ],
+    "qualities": [
+      75
+    ],
+    "formats": [
+      "image/avif",
+      "image/webp"
+    ],
+    "minimumCacheTTL": 2678400,
+    "remotePatterns": [
+      {
+        "protocol": "https",
+        "hostname": "scftuxrtflfowohiewsc.supabase.co",
+        "pathname": "^/storage/v1/object/public/.*$"
+      }
+    ]
+  },
   "rewrites": [
     {
       "source": "/sitemap.xml",
@@ -49,7 +73,7 @@
       "destination": "/api/og?tipo=pagina&p=:p"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/((?!api/|assets/|_vercel/).*)",
       "destination": "/index.html"
     }
   ],

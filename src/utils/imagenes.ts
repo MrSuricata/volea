@@ -62,3 +62,53 @@ export async function comprimirImagen(archivo: File): Promise<File> {
     return archivo; // decodificación falló (p.ej. HEIC fuera de Safari): comportamiento de siempre
   }
 }
+
+// ─── Fotos achicadas al mostrar ──────────────────────────────────────────────
+//
+// POR QUÉ: las fotos del catálogo en Storage pesan 300 KB – 3,4 MB (PNG de mockup) y
+// la tienda las mostraba enteras en tarjetas de ~300px: la grilla bajaba ~18 MB. Vercel
+// las redimensiona y convierte a AVIF/WebP en /_vercel/image (config "images" en
+// vercel.json, que tiene que listar los mismos anchos que ANCHOS_IMAGEN) y las cachea.
+// Solo para fotos de NUESTRO Storage (lo único autorizado en remotePatterns) y solo en
+// el sitio publicado: en localhost ese endpoint no existe. Si falla (p.ej. se acabó el
+// cupo gratis de transformaciones), errorImagen() vuelve a la foto original.
+
+const ORIGEN_STORAGE = 'https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/';
+export const ANCHOS_IMAGEN = [160, 320, 640, 960, 1280] as const;
+export type AnchoImagen = (typeof ANCHOS_IMAGEN)[number];
+
+function optimizadorDisponible(): boolean {
+  if (!import.meta.env.PROD || typeof location === 'undefined') return false;
+  return !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+}
+
+export function esOptimizable(url: string | undefined, activo = optimizadorDisponible()): url is string {
+  return activo && typeof url === 'string' && url.startsWith(ORIGEN_STORAGE);
+}
+
+export function urlImagen(url: string, ancho: AnchoImagen, activo = optimizadorDisponible()): string {
+  if (!esOptimizable(url, activo)) return url;
+  return `/_vercel/image?url=${encodeURIComponent(url)}&w=${ancho}&q=75`;
+}
+
+/** srcset con los anchos hasta `maximo` inclusive, o undefined si la foto no se optimiza. */
+export function srcsetImagen(url: string, maximo: AnchoImagen = 1280, activo = optimizadorDisponible()): string | undefined {
+  if (!esOptimizable(url, activo)) return undefined;
+  return ANCHOS_IMAGEN.filter((a) => a <= maximo)
+    .map((a) => `${urlImagen(url, a, true)} ${a}w`)
+    .join(', ');
+}
+
+/**
+ * onError para <img> con srcset: primero reintenta con la foto original (sin srcset,
+ * que si no gana sobre src) y, si esa también falla, pone `respaldo`.
+ */
+export function errorImagen(img: HTMLImageElement, original: string | undefined, respaldo: string): void {
+  img.removeAttribute('srcset');
+  if (original && !img.dataset.reintento) {
+    img.dataset.reintento = '1';
+    img.src = original;
+    return;
+  }
+  img.src = respaldo;
+}

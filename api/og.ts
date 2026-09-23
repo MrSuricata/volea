@@ -18,6 +18,13 @@ const ANON =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjZnR1eHJ0Zmxmb3dvaGlld3NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDgyMjAsImV4cCI6MjA5NTMyNDIyMH0.F9n9X_urG0O0Oo2vTI_S8LcRWR93girs1e4eZb8bWUI';
 const IMAGEN_BASE = `${SITE}/og-cover.jpg`;
 
+// La foto de la tarjeta, achicada por Vercel (misma config "images" que usa el
+// sitio): las del catálogo pesan hasta 3,4 MB y WhatsApp no muestra previews
+// tan pesadas. Solo las de nuestro Storage; cualquier otra va tal cual.
+const STORAGE = 'https://scftuxrtflfowohiewsc.supabase.co/storage/v1/object/public/';
+const fotoTarjeta = (url: string) =>
+  url.startsWith(STORAGE) ? `${SITE}/_vercel/image?url=${encodeURIComponent(url)}&w=960&q=75` : url;
+
 const PAGINAS: Record<string, { titulo: string; descripcion: string }> = {
   tienda: { titulo: 'Tienda — Indumentaria de pickleball | VOLEA', descripcion: 'Remeras, polos, shorts, vestidos y accesorios técnicos de pickleball, diseñados en Uruguay.' },
   torneos: { titulo: 'Torneos VOLEA', descripcion: 'Resultados, llaves y campeones de los torneos de pickleball que organiza VOLEA en Uruguay.' },
@@ -65,7 +72,7 @@ async function metaDe(tipo: string, id: string, slug: string, pagina: string): P
     return {
       titulo: `${p.name} — $U ${p.price} | VOLEA`,
       descripcion: corto(p.description || `${p.name}: indumentaria de pickleball VOLEA, diseñada en Uruguay.`),
-      imagen: imagenes[0] || IMAGEN_BASE,
+      imagen: imagenes[0] ? fotoTarjeta(imagenes[0]) : IMAGEN_BASE,
       ruta,
       tipo: 'product',
       ld: {
@@ -111,7 +118,7 @@ async function metaDe(tipo: string, id: string, slug: string, pagina: string): P
     return {
       titulo: `${p.title} | VOLEA`,
       descripcion: corto(p.excerpt || p.title),
-      imagen: p.cover_url || IMAGEN_BASE,
+      imagen: p.cover_url ? fotoTarjeta(p.cover_url) : IMAGEN_BASE,
       ruta: `/blog/${p.slug}`,
       tipo: 'article',
       ld: {
@@ -137,7 +144,7 @@ async function metaDe(tipo: string, id: string, slug: string, pagina: string): P
     return {
       titulo: `${e.name} — Inscripción | VOLEA`,
       descripcion: corto(e.description || `Inscribite online al ${e.name}${lugar ? ` en ${lugar}` : ''}.`),
-      imagen: e.image_url || IMAGEN_BASE,
+      imagen: e.image_url ? fotoTarjeta(e.image_url) : IMAGEN_BASE,
       ruta: `/inscripcion/${e.id}`,
       tipo: 'website',
       ld: {

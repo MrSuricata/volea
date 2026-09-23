@@ -17,6 +17,7 @@ import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
+import { errorImagen, srcsetImagen, urlImagen } from './utils/imagenes';
 import {
   WHATSAPP_NUMBER, WHATSAPP_DISPLAY, INSTAGRAM_HANDLE, EMAIL_CONTACTO,
   INITIAL_EVENTS, INITIAL_CLUBS, INITIAL_ANNOUNCEMENTS
@@ -239,6 +240,11 @@ const FALLBACK_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 const handleImgError = (e: React.SyntheticEvent<HTMLImageElement>) => {
   e.currentTarget.src = FALLBACK_IMG;
 };
+
+// Para fotos servidas achicadas (utils/imagenes): si la versión optimizada falla,
+// primero la original y recién después la placa VOLEA.
+const errorFoto = (original?: string) => (e: React.SyntheticEvent<HTMLImageElement>) =>
+  errorImagen(e.currentTarget, original, FALLBACK_IMG);
 
 const URUGUAY_DEPARTMENTS = [
   'Montevideo', 'Canelones', 'Maldonado', 'Colonia', 'San José', 'Rocha',
@@ -1108,10 +1114,10 @@ function CartDrawer() {
               {cart.map((item, idx) => (
                 <div key={`${item.product.id}-${item.selectedSize}-${item.selectedColor}-${idx}`} className="flex gap-3 bg-gray-50 rounded-lg p-3">
                   <img
-                    src={item.product.images[0] || FALLBACK_IMG}
+                    src={item.product.images[0] ? urlImagen(item.product.images[0], 160) : FALLBACK_IMG}
                     alt={item.product.name}
                     className="w-20 h-20 object-cover rounded-lg"
-                    onError={handleImgError}
+                    onError={errorFoto(item.product.images[0])}
                   />
                   <div className="flex-1 min-w-0">
                     <h3 className="font-display font-semibold text-sm text-navy-700 truncate">{item.product.name}</h3>
@@ -1211,12 +1217,14 @@ function ProductCard({ product }: { product: Product }) {
     <Link to={`/producto/${product.id}`} className="product-card group block bg-white rounded-2xl overflow-hidden shadow-md border border-gray-100">
       <div className="relative aspect-square bg-gray-100 overflow-hidden">
         <img
-          src={product.images[0] || FALLBACK_IMG}
+          src={product.images[0] ? urlImagen(product.images[0], 640) : FALLBACK_IMG}
+          srcSet={product.images[0] ? srcsetImagen(product.images[0], 960) : undefined}
+          sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
           alt={product.name}
           loading="lazy"
           decoding="async"
           className="card-img w-full h-full object-cover"
-          onError={handleImgError}
+          onError={errorFoto(product.images[0])}
         />
         {/* Hover overlay */}
         <div className="card-overlay absolute inset-0 bg-navy-700/60 flex items-center justify-center z-10">
@@ -2423,10 +2431,13 @@ function ProductDetailPage() {
         <div>
           <div className="aspect-square rounded-2xl overflow-hidden bg-gray-100 mb-4 relative group">
             <img
-              src={images[mainImg]}
+              key={images[mainImg]}
+              src={urlImagen(images[mainImg], 960)}
+              srcSet={srcsetImagen(images[mainImg])}
+              sizes="(min-width: 1280px) 616px, (min-width: 768px) 50vw, 100vw"
               alt={product.name}
               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-              onError={handleImgError}
+              onError={errorFoto(images[mainImg])}
             />
             {images.length > 1 && (
               <>
@@ -2465,7 +2476,7 @@ function ProductDetailPage() {
                     mainImg === i ? 'border-lime-400 ring-2 ring-lime-400/30 scale-105' : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
-                  <img src={img} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={handleImgError} />
+                  <img src={urlImagen(img, 160)} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={errorFoto(img)} />
                 </button>
               ))}
             </div>
@@ -3694,10 +3705,10 @@ function CheckoutPage() {
             {cart.map((item, idx) => (
               <div key={idx} className="flex gap-3">
                 <img
-                  src={item.product.images[0] || FALLBACK_IMG}
+                  src={item.product.images[0] ? urlImagen(item.product.images[0], 160) : FALLBACK_IMG}
                   alt={item.product.name}
                   className="w-16 h-16 object-cover rounded-lg"
-                  onError={handleImgError}
+                  onError={errorFoto(item.product.images[0])}
                 />
                 <div className="flex-1 min-w-0">
                   <h3 className="font-display font-semibold text-sm text-navy-700 truncate">{item.product.name}</h3>
@@ -4076,10 +4087,10 @@ function StockProductRow({
     <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${hasAlert ? 'border-yellow-200' : 'border-gray-100'}`}>
       <div className="p-4 flex items-center gap-4">
         <img
-          src={product.images[0] || FALLBACK_IMG}
+          src={product.images[0] ? urlImagen(product.images[0], 160) : FALLBACK_IMG}
           alt={product.name}
           className="w-16 h-16 object-cover rounded-lg flex-shrink-0"
-          onError={handleImgError}
+          onError={errorFoto(product.images[0])}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -4902,7 +4913,7 @@ function AdminPage() {
                         {/* Foto y nombre abren el editor (pedido de Brian 2026-08-06):
                             el lápiz de Acciones quedaba lejos en pantallas anchas. */}
                         <td className="px-4 py-3 cursor-pointer" onClick={() => { setEditingProduct(p); setProductModal(true); }} title="Editar producto">
-                          <img src={p.images[0] || FALLBACK_IMG} alt={p.name} className="w-12 h-12 object-cover rounded-lg" onError={handleImgError} />
+                          <img src={p.images[0] ? urlImagen(p.images[0], 160) : FALLBACK_IMG} alt={p.name} className="w-12 h-12 object-cover rounded-lg" onError={errorFoto(p.images[0])} />
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono hidden sm:table-cell">{p.sku}</td>
                         <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm cursor-pointer hover:text-lime-800 transition-colors" onClick={() => { setEditingProduct(p); setProductModal(true); }} title="Editar producto">{p.name}</td>
@@ -5152,10 +5163,10 @@ function AdminPage() {
                                 {order.items.map((item, idx) => (
                                   <div key={idx} className="flex items-center gap-3">
                                     <img
-                                      src={item.product.images[0] || FALLBACK_IMG}
+                                      src={item.product.images[0] ? urlImagen(item.product.images[0], 160) : FALLBACK_IMG}
                                       alt={item.product.name}
                                       className="w-10 h-10 object-cover rounded"
-                                      onError={handleImgError}
+                                      onError={errorFoto(item.product.images[0])}
                                     />
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-semibold truncate">{item.product.name}</p>
