@@ -113,17 +113,8 @@ export const SupabaseService = {
   },
 
   // Las escrituras admin devuelven false si la nube las rechazó (RLS/sesión vencida),
-  // para que la UI avise en vez de fingir éxito.
-  async setProducts(products: Product[]): Promise<boolean> {
-    if (!supabase) return true;
-    let ok = true;
-    for (const p of products) {
-      const { error } = await conTechoEscritura(supabase.from('products').upsert(productToRow(p), { onConflict: 'id' }));
-      if (error) { console.error('Error upserting product:', error); ok = false; }
-    }
-    return ok;
-  },
-
+  // para que la UI avise en vez de fingir éxito. Siempre de a UNA fila: re-subir la
+  // lista entera pisaba lo que otro dispositivo había cambiado (ver utils/filas.ts).
   // sinStock: el upsert no manda stock_by_size y el de la base queda intacto
   // (editar una foto no puede devolver unidades que se vendieron en la caja).
   async upsertProduct(p: Product, opts: { sinStock?: boolean } = {}): Promise<boolean> {
@@ -158,17 +149,16 @@ export const SupabaseService = {
     return (data || []).map(row => ({ id: row.id, name: row.name, sortOrder: row.sort_order || 0 }));
   },
 
-  async setCategories(categories: Category[]): Promise<boolean> {
+  // UNA categoría por vez (ver utils/filas.ts): re-subir la lista entera pisaba
+  // lo que otro dispositivo hubiera cambiado mientras tanto.
+  async upsertCategory(c: Category): Promise<boolean> {
     if (!supabase) return true;
-    let ok = true;
-    for (const c of categories) {
-      const { error } = await conTechoEscritura(supabase.from('categories').upsert(
-        { id: c.id, name: c.name, sort_order: c.sortOrder },
-        { onConflict: 'id' }
-      ));
-      if (error) { console.error('Error upserting category:', error); ok = false; }
-    }
-    return ok;
+    const { error } = await conTechoEscritura(supabase.from('categories').upsert(
+      { id: c.id, name: c.name, sort_order: c.sortOrder },
+      { onConflict: 'id' }
+    ));
+    if (error) { console.error('Error upserting category:', error); return false; }
+    return true;
   },
 
   async deleteCategory(id: string): Promise<boolean> {
@@ -639,21 +629,25 @@ export const SupabaseService = {
     }));
   },
 
-  async setEvents(events: Event[]): Promise<void> {
-    if (!supabase) return;
-    for (const e of events) {
-      await conTechoEscritura(supabase.from('events').upsert({
-        id: e.id, name: e.name, date: e.date, time: e.time,
-        location: e.location, city: e.city, description: e.description,
-        image_url: e.imageUrl, maps_url: e.mapsUrl,
-        max_participants: e.maxParticipants || null,
-        status: e.status, category: e.category,
-        phone: e.phone || null,
-        end_date: e.endDate || null,
-        inscripciones_abiertas: e.inscripcionesAbiertas === true,
-        categorias: e.categorias || '',
-      }, { onConflict: 'id' }));
-    }
+  // UN evento por vez, y devuelve si la nube lo aceptó. Antes se re-subía la lista
+  // entera sin mirar errores: una pestaña vieja que editaba OTRO evento volvía a abrir
+  // las inscripciones que se habían cerrado desde el celular (ver utils/filas.ts).
+  // topes y tarifa no viajan: los editan la pestaña Inscripciones y el SQL.
+  async upsertEvent(e: Event): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('events').upsert({
+      id: e.id, name: e.name, date: e.date, time: e.time,
+      location: e.location, city: e.city, description: e.description,
+      image_url: e.imageUrl, maps_url: e.mapsUrl,
+      max_participants: e.maxParticipants || null,
+      status: e.status, category: e.category,
+      phone: e.phone || null,
+      end_date: e.endDate || null,
+      inscripciones_abiertas: e.inscripcionesAbiertas === true,
+      categorias: e.categorias || '',
+    }, { onConflict: 'id' }));
+    if (error) { console.error('Error upserting event:', error); return false; }
+    return true;
   },
 
   async deleteEvent(id: string): Promise<void> {
@@ -999,9 +993,9 @@ export const SupabaseService = {
     // `source` va solo en el alta: si viajara en el upsert del admin, cambiar el
     // estado de un pedido pagado por MP lo volvía 'whatsapp'.
     const row: Record<string, unknown> = { ...orderToRow(o), source: 'whatsapp' };
-    // Los campos de pago se escriben SOLO acá (insert del checkout). El
-    // upsert del admin (setOrders/orderToRow) no los incluye a propósito:
-    // así nunca pisa lo que el webhook de MP escribió con service role.
+    // Los campos de pago se escriben SOLO acá (insert del checkout). orderToRow
+    // no los incluye a propósito: así ninguna escritura del admin pisa lo que el
+    // webhook de MP escribió con service role.
     if (o.paymentStatus) {
       row.payment_status = o.paymentStatus;
       row.payment_provider = o.paymentProvider ?? 'mp';
@@ -1027,17 +1021,6 @@ export const SupabaseService = {
     return true;
   },
 
-  // Solo admins autenticados (magic link) pueden actualizar pedidos existentes.
-  async setOrders(orders: Order[]): Promise<boolean> {
-    if (!supabase) return true;
-    let ok = true;
-    for (const o of orders) {
-      const { error } = await conTechoEscritura(supabase.from('orders').upsert(orderToRow(o), { onConflict: 'id' }));
-      if (error) { console.error('Error upserting order:', error); ok = false; }
-    }
-    return ok;
-  },
-
   // ── Clubs ──
   async getClubs(): Promise<Club[]> {
     if (!supabase || !isSupabaseConnected()) return [];
@@ -1051,21 +1034,24 @@ export const SupabaseService = {
     }));
   },
 
-  async setClubs(clubs: Club[]): Promise<void> {
-    if (!supabase) return;
-    for (const c of clubs) {
-      await conTechoEscritura(supabase.from('clubs').upsert({
-        id: c.id, name: c.name, address: c.address, city: c.city,
-        country: c.country, lat: c.lat, lng: c.lng, phone: c.phone || '',
-        instagram: c.instagram || '', has_pickleball: c.hasPickleball,
-        description: c.description,
-      }, { onConflict: 'id' }));
-    }
+  // Mismo criterio que upsertEvent: una fila, con resultado.
+  async upsertClub(c: Club): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('clubs').upsert({
+      id: c.id, name: c.name, address: c.address, city: c.city,
+      country: c.country, lat: c.lat, lng: c.lng, phone: c.phone || '',
+      instagram: c.instagram || '', has_pickleball: c.hasPickleball,
+      description: c.description,
+    }, { onConflict: 'id' }));
+    if (error) { console.error('Error upserting club:', error); return false; }
+    return true;
   },
 
-  async deleteClub(id: string): Promise<void> {
-    if (!supabase) return;
-    await conTechoEscritura(supabase.from('clubs').delete().eq('id', id));
+  async deleteClub(id: string): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('clubs').delete().eq('id', id));
+    if (error) { console.error('Error deleting club:', error); return false; }
+    return true;
   },
 
   // ── Announcements ──
@@ -1080,19 +1066,22 @@ export const SupabaseService = {
     }));
   },
 
-  async setAnnouncements(announcements: Announcement[]): Promise<void> {
-    if (!supabase) return;
-    for (const a of announcements) {
-      await conTechoEscritura(supabase.from('announcements').upsert({
-        id: a.id, title: a.title, content: a.content,
-        type: a.type, active: a.active,
-      }, { onConflict: 'id' }));
-    }
+  // Mismo criterio que upsertEvent: una fila, con resultado.
+  async upsertAnnouncement(a: Announcement): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('announcements').upsert({
+      id: a.id, title: a.title, content: a.content,
+      type: a.type, active: a.active,
+    }, { onConflict: 'id' }));
+    if (error) { console.error('Error upserting announcement:', error); return false; }
+    return true;
   },
 
-  async deleteAnnouncement(id: string): Promise<void> {
-    if (!supabase) return;
-    await conTechoEscritura(supabase.from('announcements').delete().eq('id', id));
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    if (!supabase) return true;
+    const { error } = await conTechoEscritura(supabase.from('announcements').delete().eq('id', id));
+    if (error) { console.error('Error deleting announcement:', error); return false; }
+    return true;
   },
 
   // ─── Pedidos: proveedores y sublimación ───────────────────────────────────

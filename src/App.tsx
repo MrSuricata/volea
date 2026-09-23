@@ -17,6 +17,7 @@ import { marcaVisitaInscripciones } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, PaymentStatus, Promo, SocioName, VentaCajaInput, GastoPendienteInput } from './types';
 import { hoyMontevideo, precioConPromo, promoPorVenir, promoVigente, totalesConPromo, ventanaPromo } from './utils/promo';
 import { mismoStock } from './utils/stock';
+import { quitarPorId, reemplazarOAgregar } from './utils/filas';
 import { errorImagen, srcsetImagen, urlImagen } from './utils/imagenes';
 import { cargarLeaflet } from './utils/leaflet';
 import {
@@ -395,16 +396,16 @@ interface StoreContextType {
   // vacía diría "no encontramos productos", que es mentira: aún no llegaron.
   datosListos: boolean;
   products: Product[];
-  setProducts: (p: Product[]) => void;
   refreshProducts: () => Promise<void>;
   saveProduct: (p: Product, opts?: { sinStock?: boolean }) => void;
   removeProduct: (id: string) => void;
   events: Event[];
-  setEvents: (e: Event[]) => void;
+  /** Guarda UN evento (alta o edición). Nunca la lista entera: ver utils/filas.ts. */
+  saveEvent: (e: Event) => Promise<boolean>;
+  removeEvent: (id: string) => void;
   /** Promos activas (tabla promos). La vigencia por fecha se decide al mostrar. */
   promos: Promo[];
   orders: Order[];
-  setOrders: (o: Order[]) => void;
   updateOrderStatus: (id: string, status: Order['status']) => void;
   addOrder: (o: Order) => Promise<boolean>;
   posts: Post[];
@@ -414,11 +415,14 @@ interface StoreContextType {
   saveStanding: (s: StandingEntry) => void;
   removeStanding: (id: string) => void;
   categories: Category[];
-  setCategories: (c: Category[]) => void;
+  saveCategory: (c: Category) => Promise<boolean>;
+  removeCategory: (id: string) => void;
   clubs: Club[];
-  setClubs: (c: Club[]) => void;
+  saveClub: (c: Club) => Promise<boolean>;
+  removeClub: (id: string) => void;
   announcements: Announcement[];
-  setAnnouncements: (a: Announcement[]) => void;
+  saveAnnouncement: (a: Announcement) => Promise<boolean>;
+  removeAnnouncement: (id: string) => void;
   cart: CartItem[];
   addToCart: (item: CartItem) => void;
   removeFromCart: (productId: string, size: string, color: string) => void;
@@ -684,12 +688,6 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => { vivo = false; clearTimeout(techoSplash); };
   }, []);
 
-  const setProducts = useCallback((p: Product[]) => {
-    _setProducts(p);
-    StorageService.setProducts(p);
-    SupabaseService.setProducts(p);
-  }, []);
-
   // Recarga de solo lectura desde Supabase (ej: tras reponer stock al anular
   // una venta en la Caja). No escribe nada de vuelta a la nube.
   const refreshProducts = useCallback(async () => {
@@ -773,16 +771,26 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     SupabaseService.deleteStanding(id).then(warnCloudFail);
   }, []);
 
-  const setEvents = useCallback((e: Event[]) => {
-    _setEvents(e);
-    StorageService.setEvents(e);
-    SupabaseService.setEvents(e);
+  // Eventos, categorías, clubes y anuncios: se guarda UNA fila, la que se tocó, y el
+  // estado local se actualiza sobre el más reciente (updater funcional). Antes se
+  // re-subía la lista entera del navegador, que podía estar vieja, y sin mirar errores:
+  // ver utils/filas.ts. Si la nube rechaza, warnCloudFail avisa (el cambio local queda).
+  const saveEvent = useCallback((e: Event) => {
+    _setEvents(prev => {
+      const next = reemplazarOAgregar(prev, e);
+      StorageService.setEvents(next);
+      return next;
+    });
+    return SupabaseService.upsertEvent(e).then((ok) => { warnCloudFail(ok); return ok; });
   }, []);
 
-  const setOrders = useCallback((o: Order[]) => {
-    _setOrders(o);
-    StorageService.setOrders(o);
-    SupabaseService.setOrders(o).then(warnCloudFail);
+  const removeEvent = useCallback((id: string) => {
+    _setEvents(prev => {
+      const next = quitarPorId(prev, id);
+      StorageService.setEvents(next);
+      return next;
+    });
+    SupabaseService.deleteEvent(id);
   }, []);
 
   const updateOrderStatus = useCallback((id: string, status: Order['status']) => {
@@ -805,22 +813,58 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
     return SupabaseService.addOrder(order);
   }, []);
 
-  const setCategories = useCallback((c: Category[]) => {
-    _setCategories(c);
-    StorageService.setCategories(c);
-    SupabaseService.setCategories(c);
+  const saveCategory = useCallback((c: Category) => {
+    _setCategories(prev => {
+      const next = reemplazarOAgregar(prev, c);
+      StorageService.setCategories(next);
+      return next;
+    });
+    return SupabaseService.upsertCategory(c).then((ok) => { warnCloudFail(ok); return ok; });
   }, []);
 
-  const setClubs = useCallback((c: Club[]) => {
-    _setClubs(c);
-    StorageService.setClubs(c);
-    SupabaseService.setClubs(c);
+  const removeCategory = useCallback((id: string) => {
+    _setCategories(prev => {
+      const next = quitarPorId(prev, id);
+      StorageService.setCategories(next);
+      return next;
+    });
+    SupabaseService.deleteCategory(id).then(warnCloudFail);
   }, []);
 
-  const setAnnouncements = useCallback((a: Announcement[]) => {
-    _setAnnouncements(a);
-    StorageService.setAnnouncements(a);
-    SupabaseService.setAnnouncements(a);
+  const saveClub = useCallback((c: Club) => {
+    _setClubs(prev => {
+      const next = reemplazarOAgregar(prev, c);
+      StorageService.setClubs(next);
+      return next;
+    });
+    return SupabaseService.upsertClub(c).then((ok) => { warnCloudFail(ok); return ok; });
+  }, []);
+
+  const removeClub = useCallback((id: string) => {
+    _setClubs(prev => {
+      const next = quitarPorId(prev, id);
+      StorageService.setClubs(next);
+      return next;
+    });
+    SupabaseService.deleteClub(id).then(warnCloudFail);
+  }, []);
+
+  const saveAnnouncement = useCallback((a: Announcement) => {
+    _setAnnouncements(prev => {
+      const next = reemplazarOAgregar(prev, a);
+      StorageService.setAnnouncements(next);
+      return next;
+    });
+    return SupabaseService.upsertAnnouncement(a).then((ok) => { warnCloudFail(ok); return ok; });
+  }, []);
+
+  const removeAnnouncement = useCallback((id: string) => {
+    _setAnnouncements(prev => {
+      const next = quitarPorId(prev, id);
+      StorageService.setAnnouncements(next);
+      return next;
+    });
+    SupabaseService.deleteAnnouncement(id).then(warnCloudFail);
   }, []);
 
   const setCart = useCallback((c: CartItem[]) => {
@@ -929,9 +973,10 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   return (
     <StoreContext.Provider value={{
       datosListos,
-      products, setProducts, refreshProducts, saveProduct, removeProduct, events, setEvents, promos, orders, setOrders, updateOrderStatus, addOrder,
+      products, refreshProducts, saveProduct, removeProduct, events, saveEvent, removeEvent, promos, orders, updateOrderStatus, addOrder,
       posts, savePost, removePost, standings, saveStanding, removeStanding,
-      categories, setCategories, clubs, setClubs, announcements, setAnnouncements,
+      categories, saveCategory, removeCategory, clubs, saveClub, removeClub,
+      announcements, saveAnnouncement, removeAnnouncement,
       cart, addToCart, removeFromCart,
       updateCartQuantity, clearCart, isAdmin, currentAdmin, login, sendLoginLink, logout,
       searchQuery, setSearchQuery, selectedCategory, setSelectedCategory,
@@ -4215,9 +4260,9 @@ function BadgePagoMP({ order }: { order: Order }) {
 function AdminPage() {
   const store = useStore();
   const {
-    isAdmin, currentAdmin, login, sendLoginLink, logout, products, refreshProducts, saveProduct, removeProduct, events, setEvents,
-    orders, setOrders, updateOrderStatus, addOrder, categories, setCategories, clubs, setClubs,
-    announcements, setAnnouncements, posts, savePost, removePost,
+    isAdmin, currentAdmin, login, sendLoginLink, logout, products, refreshProducts, saveProduct, removeProduct, events, saveEvent, removeEvent,
+    orders, updateOrderStatus, addOrder, categories, saveCategory, removeCategory, clubs, saveClub, removeClub,
+    announcements, saveAnnouncement, removeAnnouncement, posts, savePost, removePost,
     standings, saveStanding, removeStanding
   } = store;
 
@@ -5057,11 +5102,8 @@ function AdminPage() {
                 uploadImage={(f) => SupabaseService.uploadImage(f, 'events')}
                 onClose={() => { setEventModal(false); setEditingEvent(null); }}
                 onSave={(evt) => {
-                  if (editingEvent) {
-                    setEvents(events.map(e => e.id === evt.id ? evt : e));
-                  } else {
-                    setEvents([...events, evt]);
-                  }
+                  // Solo el evento editado: re-subir la lista entera pisaba cambios de otro dispositivo.
+                  void saveEvent(evt);
                   setEventModal(false);
                   setEditingEvent(null);
                 }}
@@ -5076,8 +5118,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteEventConfirm(null)}
                 onConfirm={() => {
-                  SupabaseService.deleteEvent(deleteEventConfirm);
-                  setEvents(events.filter(e => e.id !== deleteEventConfirm));
+                  removeEvent(deleteEventConfirm);
                   setDeleteEventConfirm(null);
                 }}
               />
@@ -5232,7 +5273,7 @@ function AdminPage() {
                     if (e.key === 'Enter' && newCategory.trim()) {
                       const id = newCategory.trim().toLowerCase().replace(/\s+/g, '-');
                       if (!categories.find(c => c.id === id)) {
-                        setCategories([...categories, { id, name: newCategory.trim(), sortOrder: categories.length + 1 }]);
+                        void saveCategory({ id, name: newCategory.trim(), sortOrder: categories.length + 1 });
                         setNewCategory('');
                       }
                     }
@@ -5243,7 +5284,7 @@ function AdminPage() {
                     if (newCategory.trim()) {
                       const id = newCategory.trim().toLowerCase().replace(/\s+/g, '-');
                       if (!categories.find(c => c.id === id)) {
-                        setCategories([...categories, { id, name: newCategory.trim(), sortOrder: categories.length + 1 }]);
+                        void saveCategory({ id, name: newCategory.trim(), sortOrder: categories.length + 1 });
                         setNewCategory('');
                       }
                     }
@@ -5258,10 +5299,7 @@ function AdminPage() {
                   <div key={cat.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
                     <span className="font-display font-semibold text-navy-700">{cat.name}</span>
                     <button
-                      onClick={() => {
-                        SupabaseService.deleteCategory(cat.id);
-                        setCategories(categories.filter(c => c.id !== cat.id));
-                      }}
+                      onClick={() => removeCategory(cat.id)}
                       className="text-gray-400 hover:text-red-500 transition-colors"
                     >
                       <X size={18} />
@@ -5334,11 +5372,7 @@ function AdminPage() {
                 club={editingClub}
                 onClose={() => { setClubModal(false); setEditingClub(null); }}
                 onSave={(c) => {
-                  if (editingClub) {
-                    setClubs(clubs.map(cl => cl.id === c.id ? c : cl));
-                  } else {
-                    setClubs([...clubs, c]);
-                  }
+                  void saveClub(c);
                   setClubModal(false);
                   setEditingClub(null);
                 }}
@@ -5351,8 +5385,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteClubConfirm(null)}
                 onConfirm={() => {
-                  SupabaseService.deleteClub(deleteClubConfirm);
-                  setClubs(clubs.filter(c => c.id !== deleteClubConfirm));
+                  removeClub(deleteClubConfirm);
                   setDeleteClubConfirm(null);
                 }}
               />
@@ -5434,11 +5467,7 @@ function AdminPage() {
                 announcement={editingAnnouncement}
                 onClose={() => { setAnnouncementModal(false); setEditingAnnouncement(null); }}
                 onSave={(a) => {
-                  if (editingAnnouncement) {
-                    setAnnouncements(announcements.map(an => an.id === a.id ? a : an));
-                  } else {
-                    setAnnouncements([...announcements, a]);
-                  }
+                  void saveAnnouncement(a);
                   setAnnouncementModal(false);
                   setEditingAnnouncement(null);
                 }}
@@ -5451,8 +5480,7 @@ function AdminPage() {
                 message="Esta acción no se puede deshacer."
                 onCancel={() => setDeleteAnnouncementConfirm(null)}
                 onConfirm={() => {
-                  SupabaseService.deleteAnnouncement(deleteAnnouncementConfirm);
-                  setAnnouncements(announcements.filter(a => a.id !== deleteAnnouncementConfirm));
+                  removeAnnouncement(deleteAnnouncementConfirm);
                   setDeleteAnnouncementConfirm(null);
                 }}
               />
