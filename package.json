@@ -30,9 +30,17 @@
     "@vercel/node": "^5.9.5",
     "@vitejs/plugin-legacy": "^6.1.1",
     "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.6.1",
+    "postcss": "^8.5.28",
+    "tailwindcss": "3.4.17",
     "terser": "^5.50.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
     "vitest": "^3.2.7"
-  }
+  },
+  "browserslist": [
+    "chrome >= 60",
+    "safari >= 11",
+    "not dead"
+  ]
 }
