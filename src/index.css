@@ -1,0 +1,7 @@
+/* Tailwind compilado en el build (reemplaza al Play CDN que corría en el navegador).
+   Las clases propias (.reveal, .product-card, .promo-*, etc.) siguen en el <style>
+   inline de index.html: Vite inserta el <link> de este CSS después, así las
+   utilidades le siguen ganando a esas clases como pasaba con el CDN. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

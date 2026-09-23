@@ -72,51 +72,6 @@
     <!-- Leaflet 1.9.4 self-hosted (mismos bytes que unpkg, verificados contra los hashes SRI originales) -->
     <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
     <script defer src="/vendor/leaflet/leaflet.js"></script>
-    <!-- Tailwind Play CDN 3.4.17 self-hosted con defer: el CDN de dev era 302 + tercero sin SRI + render-blocking.
-         Mitigación hasta migrar a Tailwind compilado. -->
-    <script defer src="/vendor/tailwind-3.4.17.js"></script>
-    <!-- OJO: la config va DESPUÉS del script de Tailwind y como type="module" a propósito:
-         el Play CDN pisa window.tailwind con un Proxy nuevo al ejecutarse (config pre-seteada se pierde),
-         y un module inline corre después de los defer anteriores en orden de documento,
-         así que esto reproduce exactamente la semántica original (config asignada tras cargar el CDN). -->
-    <script type="module">
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              display: ['Lexend', 'sans-serif'],
-              body: ['Montserrat', 'sans-serif'],
-            },
-            colors: {
-              navy: {
-                50: '#f0f4ff',
-                100: '#e0e8ff',
-                200: '#b8c9ff',
-                300: '#7a9bff',
-                400: '#4a6fd4',
-                500: '#1a3a6b',
-                600: '#0d2b52',
-                700: '#001F3F',
-                800: '#001830',
-                900: '#001020',
-              },
-              lime: {
-                50: '#fdfff0',
-                100: '#f5ffe0',
-                200: '#e8ffb8',
-                300: '#d4ff70',
-                400: '#ccff00',
-                500: '#B8E934',
-                600: '#9acc00',
-                700: '#7aa300',
-                800: '#5c7a00',
-                900: '#3d5200',
-              },
-            },
-          },
-        },
-      }
-    </script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: 'Montserrat', sans-serif; }
