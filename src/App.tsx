@@ -4349,6 +4349,27 @@ function AnimatedRoutes() {
   );
 }
 
+/**
+ * Marco de la página. El panel admin es una app propia (rediseño 24/09): sin la franja de
+ * envíos, el menú de la tienda con carrito ni el footer, que lo hacían sentir un anexo de
+ * la web (y el menú sticky de la tienda tapaba la barra del panel).
+ */
+function Marco({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  if (/^\/admin(\/|$)/.test(pathname)) return <main className="min-h-screen bg-gray-50">{children}</main>;
+  return (
+    <div className="flex flex-col min-h-screen">
+      <TopBar />
+      <Navbar />
+      <CartDrawer />
+      <main className="flex-1">{children}</main>
+      <Footer />
+      <FloatingWhatsApp />
+      <BarraAdmin />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -4376,17 +4397,9 @@ export default function App() {
             },
           }}
         />
-        <div className="flex flex-col min-h-screen">
-          <TopBar />
-          <Navbar />
-          <CartDrawer />
-          <main className="flex-1">
-            <AnimatedRoutes />
-          </main>
-          <Footer />
-          <FloatingWhatsApp />
-          <BarraAdmin />
-        </div>
+        <Marco>
+          <AnimatedRoutes />
+        </Marco>
       </StoreProvider>
       </MotionConfig>
       </LazyMotion>
