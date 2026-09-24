@@ -19,6 +19,7 @@ import { useStore } from '../tienda/store';
 import { lazyConRecarga } from '../lib/lazyConRecarga';
 import { cn } from '../lib/cn';
 import { ATAJO_TAB_ADMIN } from '../lib/atajoAdmin';
+import { resultadoIncierto } from './ui-ventas/ventas';
 import { StockDashboard } from './StockDashboard';
 import { LineasCancha } from '../ui/LineasCancha';
 import { Boton, BotonIcono, Campo, CargandoFilas, Dialogo, Entrada, Vacio } from './ui';
@@ -100,8 +101,9 @@ export default function AdminPage() {
   const registrarVenta = useCallback(async (input: VentaCajaInput) => {
     const result = await SupabaseService.registrarVentaCaja(input, cajaReportedBy);
     // Venta de catálogo: el stock bajó y las otras pestañas (Stock, Productos)
-    // deben verlo — mismo patrón de refresh que la anulación.
-    if (result.ok && input.productId) refreshProducts();
+    // deben verlo — mismo patrón de refresh que la anulación. Si no se sabe si entró
+    // (timeout / red), también: la RPC pudo haber descontado igual.
+    if (input.productId && (result.ok || resultadoIncierto(result.error))) refreshProducts();
     return result;
   }, [cajaReportedBy, refreshProducts]);
   const registrarGasto = useCallback(
@@ -580,11 +582,11 @@ export default function AdminPage() {
         {/* Barra de arriba del celular: siempre a mano (antes había que volver arriba de todo para abrir el menú). */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-gray-200 bg-white/95 px-2 pt-[env(safe-area-inset-top)] backdrop-blur lg:hidden">
           <BotonIcono etiqueta="Abrir menú" icono={<Menu size={22} />} onClick={() => setMenuAbierto(true)} />
-          <div className="min-w-0 flex-1">
-            {grupoActual && <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">{grupoActual.label}</p>}
-            <p className="truncate font-display text-base font-black uppercase leading-tight tracking-tight text-navy-700">{tabActual?.label ?? 'Panel'}</p>
-          </div>
-          <img src="/logo.png" alt="" className="mr-2 h-6 opacity-90" />
+          {/* Solo marca: el título ya lo pone cada pantalla (repetirlo acá lo duplicaba). */}
+          <Link to="/admin" onClick={(e) => { e.preventDefault(); irA('dashboard'); }} className="flex min-w-0 flex-1 items-center gap-2" aria-label="Inicio del panel">
+            <img src="/logo.png" alt="VOLEA" className="h-6" />
+            <span className="rounded bg-navy-700 px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-[0.2em] text-white">Panel</span>
+          </Link>
         </header>
 
         <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8 md:pt-8 lg:pb-12">
