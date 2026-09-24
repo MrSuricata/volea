@@ -1,9 +1,30 @@
-import { useState } from 'react';
-import { X, Save } from 'lucide-react';
+import { useId, useRef, useState, type FormEvent } from 'react';
+import { ImagePlus, Loader2, Save, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Event } from '../types';
+import { cn } from '../lib/cn';
+import { AreaTexto, Boton, Campo, Dialogo, Entrada, Insignia, Interruptor, Segmentado } from './ui';
+import { hayCambios } from './formulario';
+import { CLASE_FORMULARIO, GrupoFormulario, Rotulo, confirmarDescarte } from './PiezasFormulario';
 
 // ─── EventModal ──────────────────────────────────────────────────────────────
+// Rediseño 24/09: Dialogo del kit (pantalla completa en el celular, pie fijo con Guardar
+// a mano aunque el teclado esté abierto), campos agrupados, nada de 3 columnas a 390px,
+// tipo y estado como selector segmentado, y el flyer con vista previa y botón de verdad.
+
+const TIPOS: { valor: Event['category']; texto: string }[] = [
+  { valor: 'tournament', texto: 'Torneo' },
+  { valor: 'clinic', texto: 'Clínica' },
+  { valor: 'social', texto: 'Social' },
+];
+
+const ESTADOS: { valor: Event['status']; texto: string }[] = [
+  { valor: 'upcoming', texto: 'Próximo' },
+  { valor: 'past', texto: 'Pasado' },
+];
+
+// iOS centra el texto de los inputs de fecha/hora: alineado a la izquierda como el resto.
+const FECHA_IZQ = '[&::-webkit-date-and-time-value]:text-left';
 
 export function EventModal({
   event, uploadImage, onClose, onSave
@@ -13,7 +34,7 @@ export function EventModal({
   onClose: () => void;
   onSave: (e: Event) => void;
 }) {
-  const [form, setForm] = useState<Event>(
+  const [inicial] = useState<Event>(() =>
     event || {
       id: `evt-${Date.now()}`,
       name: '',
@@ -32,12 +53,22 @@ export function EventModal({
       categorias: '',
     }
   );
+  const [form, setForm] = useState<Event>(inicial);
   const [subiendo, setSubiendo] = useState(false);
+  const archivo = useRef<HTMLInputElement>(null);
+  const idForm = useId();
+  const sucio = hayCambios(inicial, form);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const cambiar = <K extends keyof Event>(campo: K, valor: Event[K]) => setForm((f) => ({ ...f, [campo]: valor }));
+
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    // Guardar a mitad de la subida dejaba el evento sin el flyer nuevo.
+    if (subiendo) return;
     onSave(form);
   };
+
+  const cancelar = () => { if (confirmarDescarte(sucio)) onClose(); };
 
   // Subir el flyer desde el celular: antes solo se podía pegar una URL, que en la
   // práctica significaba no poder poner la imagen.
@@ -60,224 +91,234 @@ export function EventModal({
     }
   };
 
+  // Mismo corte que el formulario público de inscripción (App.tsx).
+  const categorias = (form.categorias || '').split(',').map(c => c.trim()).filter(Boolean);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="font-display text-xl font-bold text-navy-700">
-            {event ? 'Editar Evento' : 'Nuevo Evento'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-navy-700 transition-colors">
-            <X size={24} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre *</label>
-            <input
+    <Dialogo
+      abierto
+      titulo={event ? 'Editar evento' : 'Nuevo evento'}
+      descripcion={event ? event.name : 'Se publica en Eventos y, si es el próximo torneo, en la home.'}
+      alCerrar={onClose}
+      ancho="lg"
+      sucio={sucio}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={cancelar}>Cancelar</Boton>
+          <Boton type="submit" form={idForm} icono={<Save size={17} />} disabled={subiendo}>
+            {subiendo ? 'Esperando la imagen…' : 'Guardar evento'}
+          </Boton>
+        </>
+      )}
+    >
+      <form
+        id={idForm}
+        onSubmit={handleSubmit}
+        className={CLASE_FORMULARIO}
+      >
+        <GrupoFormulario titulo="Evento">
+          <Campo etiqueta="Nombre" requerido>
+            <Entrada
               type="text"
               required
+              autoComplete="off"
+              placeholder="Ej. Copa VOLEA Primavera"
               value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+              onChange={e => cambiar('name', e.target.value)}
             />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Fecha *</label>
-              <input
-                type="date"
-                required
-                value={form.date}
-                onChange={e => setForm({ ...form, date: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
+          </Campo>
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+            <div className="min-w-0">
+              <Rotulo>Tipo</Rotulo>
+              <Segmentado etiqueta="Tipo de evento" opciones={TIPOS} valor={form.category} alCambiar={v => cambiar('category', v)} anchoCompleto />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Último día</label>
-              <input
+            <div className="min-w-0">
+              <Rotulo>Estado</Rotulo>
+              <Segmentado etiqueta="Estado del evento" opciones={ESTADOS} valor={form.status} alCambiar={v => cambiar('status', v)} anchoCompleto />
+            </div>
+          </div>
+          <Campo etiqueta="Descripción">
+            <AreaTexto
+              rows={3}
+              value={form.description}
+              onChange={e => cambiar('description', e.target.value)}
+              className="resize-y"
+            />
+          </Campo>
+        </GrupoFormulario>
+
+        <GrupoFormulario titulo="Cuándo y dónde">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
+            <Campo etiqueta="Fecha" requerido>
+              <Entrada type="date" required value={form.date} onChange={e => cambiar('date', e.target.value)} className={FECHA_IZQ} />
+            </Campo>
+            <Campo etiqueta="Último día" ayuda="Solo si dura varios días.">
+              <Entrada
                 type="date"
                 min={form.date || undefined}
                 value={form.endDate || ''}
-                onChange={e => setForm({ ...form, endDate: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+                onChange={e => cambiar('endDate', e.target.value)}
+                className={FECHA_IZQ}
               />
-              <p className="mt-1 text-[11px] text-gray-400">Solo si dura varios días.</p>
-            </div>
+            </Campo>
+            <Campo etiqueta="Hora">
+              <Entrada type="time" value={form.time} onChange={e => cambiar('time', e.target.value)} className={FECHA_IZQ} />
+            </Campo>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Hora</label>
-              <input
-                type="time"
-                value={form.time}
-                onChange={e => setForm({ ...form, time: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo etiqueta="Lugar" requerido>
+              <Entrada type="text" required placeholder="Ej. Club Biguá" value={form.location} onChange={e => cambiar('location', e.target.value)} />
+            </Campo>
+            <Campo etiqueta="Ciudad" requerido>
+              <Entrada type="text" required placeholder="Ej. Montevideo" value={form.city} onChange={e => cambiar('city', e.target.value)} />
+            </Campo>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Lugar *</label>
-              <input
-                type="text"
-                required
-                value={form.location}
-                onChange={e => setForm({ ...form, location: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Ciudad *</label>
-              <input
-                type="text"
-                required
-                value={form.city}
-                onChange={e => setForm({ ...form, city: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Descripción</label>
-            <textarea
-              rows={3}
-              value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none"
+          <Campo etiqueta="Link de Google Maps" ayuda="Sirve el link de “Compartir” de Google Maps. Arma el botón “Ver en mapa”.">
+            <Entrada
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              placeholder="https://maps.app.goo.gl/…"
+              value={form.mapsUrl}
+              onChange={e => cambiar('mapsUrl', e.target.value)}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Imagen / flyer</label>
-            <div className="flex items-center gap-3">
-              {form.imageUrl && (
-                <img src={form.imageUrl} alt="" className="h-20 w-20 flex-shrink-0 rounded-lg border border-gray-200 object-cover" />
+          </Campo>
+        </GrupoFormulario>
+
+        <GrupoFormulario titulo="Flyer">
+          <div className="flex gap-4">
+            {/* Sin flyer: la caja misma es el botón de subir (blanco fácil con el dedo). */}
+            <button
+              type="button"
+              onClick={() => archivo.current?.click()}
+              disabled={subiendo}
+              aria-label={form.imageUrl ? 'Cambiar el flyer' : 'Subir el flyer'}
+              className={cn(
+                'relative flex h-36 w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg border transition-colors sm:h-44 sm:w-36',
+                form.imageUrl
+                  ? 'border-gray-200 bg-navy-900'
+                  : 'border-dashed border-gray-300 bg-gray-50 text-gray-400 hover:border-navy-700 hover:text-navy-700',
               )}
-              <div className="min-w-0 flex-1">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-navy-700 transition-colors hover:border-lime-400">
-                  {subiendo ? 'Subiendo…' : form.imageUrl ? 'Cambiar imagen' : 'Subir imagen'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={subiendo}
-                    onChange={e => { void handleArchivo(e.target.files?.[0]); e.target.value = ''; }}
-                  />
-                </label>
-                <input
-                  type="text"
-                  placeholder="…o pegá una URL"
-                  value={form.imageUrl}
-                  onChange={e => setForm({ ...form, imageUrl: e.target.value })}
-                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors text-sm"
-                />
+            >
+              {form.imageUrl ? (
+                <img src={form.imageUrl} alt="Vista previa del flyer" className="h-full w-full object-contain" />
+              ) : (
+                <ImagePlus size={28} aria-hidden />
+              )}
+              {subiendo && (
+                <span className="absolute inset-0 flex items-center justify-center bg-navy-900/70" role="status" aria-label="Subiendo imagen">
+                  <Loader2 size={24} className="animate-spin text-white" />
+                </span>
+              )}
+            </button>
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+              <div>
+                <p className="text-sm font-semibold text-navy-700">
+                  {subiendo ? 'Subiendo la imagen…' : form.imageUrl ? 'Flyer cargado' : 'Sin flyer'}
+                </p>
+                <p className="mt-0.5 text-[13px] text-gray-500">Se ve entero, sin recortes. Vertical o cuadrado queda mejor.</p>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <Boton
+                  variante="secundario"
+                  icono={<Upload size={17} />}
+                  cargando={subiendo}
+                  onClick={() => archivo.current?.click()}
+                >
+                  {form.imageUrl ? 'Cambiar' : 'Subir imagen'}
+                </Boton>
+                {form.imageUrl && !subiendo && (
+                  <Boton variante="fantasma" icono={<Trash2 size={17} />} onClick={() => cambiar('imageUrl', '')}>
+                    Quitar
+                  </Boton>
+                )}
+              </div>
+              <input
+                ref={archivo}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                tabIndex={-1}
+                disabled={subiendo}
+                onChange={e => { void handleArchivo(e.target.files?.[0]); e.target.value = ''; }}
+              />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono de inscripciones</label>
-              <input
-                type="text"
+          <Campo etiqueta="…o pegá el link de una imagen">
+            <Entrada
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              placeholder="https://…"
+              value={form.imageUrl}
+              onChange={e => cambiar('imageUrl', e.target.value)}
+            />
+          </Campo>
+        </GrupoFormulario>
+
+        <GrupoFormulario titulo="Inscripciones">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo etiqueta="Teléfono de inscripciones" ayuda="Arma el botón de WhatsApp en la home.">
+              <Entrada
+                type="tel"
+                inputMode="tel"
+                autoComplete="off"
                 placeholder="092 103 276"
                 value={form.phone || ''}
-                onChange={e => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+                onChange={e => cambiar('phone', e.target.value)}
               />
-              <p className="mt-1 text-[11px] text-gray-400">Arma el botón de WhatsApp en la home.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">URL Maps</label>
-              <input
+            </Campo>
+            <Campo etiqueta="Máx. participantes" ayuda="Se muestra en la ficha. Vacío = sin tope.">
+              <Entrada
                 type="text"
-                value={form.mapsUrl}
-                onChange={e => setForm({ ...form, mapsUrl: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                value={form.maxParticipants ?? ''}
+                onChange={e => {
+                  const digitos = e.target.value.replace(/\D/g, '');
+                  cambiar('maxParticipants', digitos ? Number(digitos) : undefined);
+                }}
+                className="tabular-nums"
               />
-            </div>
+            </Campo>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Máx. Participantes</label>
-              <input
-                type="number"
-                min={0}
-                value={form.maxParticipants || ''}
-                onChange={e => setForm({ ...form, maxParticipants: e.target.value ? Number(e.target.value) : undefined })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Estado</label>
-              <select
-                value={form.status}
-                onChange={e => setForm({ ...form, status: e.target.value as Event['status'] })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-              >
-                <option value="upcoming">Próximo</option>
-                <option value="past">Pasado</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Categoría</label>
-              <select
-                value={form.category}
-                onChange={e => setForm({ ...form, category: e.target.value as Event['category'] })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-              >
-                <option value="tournament">Torneo</option>
-                <option value="clinic">Clínica</option>
-                <option value="social">Social</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Inscripción online */}
-          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.inscripcionesAbiertas === true}
-                onChange={e => setForm({ ...form, inscripcionesAbiertas: e.target.checked })}
-                className="accent-lime-500 w-4 h-4"
-              />
-              <span className="text-sm font-semibold text-navy-700">Inscripción online abierta</span>
-            </label>
+          <div className="rounded-xl border border-gray-200 px-4 py-2">
+            <Interruptor
+              etiqueta="Inscripción online abierta"
+              descripcion="Muestra el formulario de inscripción en la web."
+              activo={form.inscripcionesAbiertas === true}
+              alCambiar={v => cambiar('inscripcionesAbiertas', v)}
+            />
             {form.inscripcionesAbiertas && (
-              <div>
-                <label className="block text-sm font-semibold text-navy-700 mb-1">Categorías (separadas por coma)</label>
-                <textarea
-                  rows={2}
-                  placeholder="Singles A,Singles B,Doble Mixto A,…"
-                  value={form.categorias || ''}
-                  onChange={e => setForm({ ...form, categorias: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none text-sm"
-                />
-                <p className="mt-1 text-[11px] text-gray-400">
-                  Se muestran como botones en el formulario. Vacío = campo de texto libre.
-                </p>
+              <div className="space-y-3 border-t border-gray-100 pb-2 pt-4">
+                <Campo
+                  etiqueta="Categorías"
+                  ayuda="Separadas por coma. Se muestran como botones en el formulario; vacío = campo de texto libre."
+                >
+                  <AreaTexto
+                    rows={3}
+                    placeholder="Singles A, Singles B, Doble Mixto A…"
+                    value={form.categorias || ''}
+                    onChange={e => cambiar('categorias', e.target.value)}
+                    className="resize-y"
+                  />
+                </Campo>
+                {categorias.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-gray-400">
+                      {categorias.length} {categorias.length === 1 ? 'categoría' : 'categorías'}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {categorias.map((c, i) => <Insignia key={`${c}-${i}`} tono="navy">{c}</Insignia>)}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Save size={18} /> Guardar
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </GrupoFormulario>
+      </form>
+    </Dialogo>
   );
 }
