@@ -351,8 +351,9 @@ function useEsAncho(): boolean {
     if (!window.matchMedia) return;
     const mq = window.matchMedia(CONSULTA_ANCHO);
     const alCambiar = () => setAncho(mq.matches);
-    mq.addEventListener('change', alCambiar);
-    return () => mq.removeEventListener('change', alCambiar);
+    // Safari viejo (iOS < 14) solo tiene addListener.
+    if (mq.addEventListener) mq.addEventListener('change', alCambiar); else mq.addListener(alCambiar);
+    return () => { if (mq.removeEventListener) mq.removeEventListener('change', alCambiar); else mq.removeListener(alCambiar); };
   }, []);
   return ancho;
 }
