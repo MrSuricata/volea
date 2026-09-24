@@ -14,6 +14,7 @@ import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/
 import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
+import { conFotoPrimero, destacados, fotoDeCategoria, relacionados } from './tienda/catalogo';
 import { FOTO_HERO_HOME } from './lib/precarga';
 import { guardarMarcaDePago } from './pago/marcaPago';
 import { CLAVE_PEDIDO_MP, firmaPedido, idPedidoWeb, pedidoReusable, registroPedidoMP } from './pago/reintentoMP';
@@ -1098,8 +1099,8 @@ function ProductCard({ product }: { product: Product }) {
           className="card-img w-full h-full object-cover"
           onError={errorFoto(product.images[0])}
         />
-        {/* Hover overlay */}
-        <div className="card-overlay absolute inset-0 bg-navy-700/60 flex items-center justify-center z-10">
+        {/* Hover overlay (solo con mouse: en el celular el toque ya abre la ficha) */}
+        <div className="card-overlay absolute inset-0 bg-navy-700/60 hidden sm:flex items-center justify-center z-10">
           <span className="bg-lime-400 text-navy-700 font-display font-bold text-sm px-6 py-2 rounded-full flex items-center gap-2">
             <Eye size={16} /> Ver producto
           </span>
@@ -1107,10 +1108,10 @@ function ProductCard({ product }: { product: Product }) {
         {/* Badges */}
         {totalStock === 0 && (
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
-            <span className="bg-red-600 text-white text-sm font-display font-bold px-4 py-2 rounded-full tracking-wider">AGOTADO</span>
+            <span className="bg-red-600 text-white text-xs sm:text-sm font-display font-bold px-3 py-1.5 sm:px-4 sm:py-2 rounded-full tracking-wider">AGOTADO</span>
           </div>
         )}
-        <div className="absolute top-3 left-3 flex flex-col gap-1 z-10">
+        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-col items-start gap-1 z-10">
           {promo && (
             <span className="bg-navy-900 text-lime-400 text-xs font-black px-2 py-1 rounded-full">−{promo.percent}%</span>
           )}
@@ -1121,29 +1122,30 @@ function ProductCard({ product }: { product: Product }) {
             <span className="bg-lime-400 text-navy-700 text-xs font-bold px-2 py-1 rounded-full">NUEVO</span>
           )}
         </div>
-        <span className="absolute top-3 right-3 bg-navy-700/80 text-white text-xs px-2 py-1 rounded-full z-10">{categoryLabel(categories, product.category)}</span>
+        {/* En 2 columnas de celular la etiqueta de categoría tapaba media foto: solo desde sm. */}
+        <span className="absolute top-3 right-3 hidden sm:inline bg-navy-700/80 text-white text-xs px-2 py-1 rounded-full z-10">{categoryLabel(categories, product.category)}</span>
       </div>
-      <div className="p-4">
-        <h3 className="font-display font-semibold text-navy-700 group-hover:text-lime-600 transition-colors line-clamp-2">{product.name}</h3>
-        <div className="mt-2 flex items-center gap-2">
+      <div className="p-3 sm:p-4">
+        <h3 className="font-display font-semibold text-sm sm:text-base text-navy-700 group-hover:text-lime-600 transition-colors line-clamp-2">{product.name}</h3>
+        <div className="mt-1 sm:mt-2 flex flex-wrap items-baseline gap-x-2">
           {/* Con promo vigente: precio descontado (el que se cobra de verdad) y el de
               lista tachado. La oferta previa del producto no se muestra a la vez para
               no apilar tres números. */}
           {promo ? (
             <>
-              <span className="font-display font-bold text-lg text-navy-700">{formatPrice(precioConPromo(product.price, promo.percent))}</span>
-              <span className="text-sm text-gray-400 line-through">{formatPrice(product.price)}</span>
+              <span className="font-display font-bold text-base sm:text-lg text-navy-700">{formatPrice(precioConPromo(product.price, promo.percent))}</span>
+              <span className="text-xs sm:text-sm text-gray-400 line-through">{formatPrice(product.price)}</span>
             </>
           ) : (
             <>
-              <span className="font-display font-bold text-lg text-navy-700">{formatPrice(product.price)}</span>
+              <span className="font-display font-bold text-base sm:text-lg text-navy-700">{formatPrice(product.price)}</span>
               {product.isOffer && product.originalPrice && (
-                <span className="text-sm text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
+                <span className="text-xs sm:text-sm text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
               )}
             </>
           )}
         </div>
-        <div className="mt-3 flex items-center justify-between">
+        <div className="mt-3 hidden sm:flex items-center justify-between">
           {/* lime-800, no 500/600: sobre blanco esos tonos no llegan ni a 3:1 (ilegible al sol) */}
           <span className="text-lime-800 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
             Ver producto <ArrowRight size={14} />
@@ -1362,7 +1364,7 @@ function HomePage() {
     image: window.location.origin + '/logo.png',
   });
 
-  const featured = products.filter(p => p.isFeatured && p.active !== false).slice(0, 4);
+  const featured = destacados(products);
 
   const publishedPosts = posts
     .filter(p => p.published)
@@ -1711,54 +1713,21 @@ function HomePage() {
         </section>
       )}
 
-      {/* ── 2. Cómo comprar ─────────────────────────────────────────────── */}
-      <section className="bg-navy-700 py-16">
-        <div className="max-w-7xl mx-auto px-4">
-          <Reveal>
-            <div className="text-center mb-10">
-              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Así de simple</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">Cómo comprar en VOLEA</h2>
-            </div>
-          </Reveal>
-          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {steps.map((step, i) => (
-              <StaggerItem key={i}>
-                <div className="relative bg-navy-800/60 border border-navy-600 rounded-2xl p-8 h-full">
-                  <span className="absolute top-6 right-6 font-display font-black text-5xl text-navy-600 select-none">
-                    {i + 1}
-                  </span>
-                  <div className="w-12 h-12 bg-lime-400 rounded-xl flex items-center justify-center text-navy-700 mb-5">
-                    {step.icon}
-                  </div>
-                  <h3 className="font-display font-bold text-white text-lg mb-2">{step.title}</h3>
-                  <p className="text-gray-400 text-sm leading-relaxed">{step.desc}</p>
-                </div>
-              </StaggerItem>
-            ))}
-          </StaggerGrid>
-          <Reveal delay={150}>
-            <p className="text-center text-gray-400 text-sm mt-8">
-              Pagá online con Mercado Pago o coordiná pago y entrega por WhatsApp — transferencia o efectivo, como prefieras.
-            </p>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* ── 3. Destacados ───────────────────────────────────────────────── */}
+      {/* ── 2. Destacados ───────────────────────────────────────────────── */}
       {/* Con la web mostrándose a los 4s, esta sección podía quedar como un título con una
           grilla vacía debajo — lo primero que ve alguien que entra con mala red, y parece
           rota. Si todavía no hay nada que destacar, no se dibuja. */}
       {(featured.length > 0 || datosListos) && (
-      <section className="py-20 bg-gradient-to-b from-white to-gray-50">
+      <section className="py-14 md:py-20 bg-gradient-to-b from-white to-gray-50">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
-            <div className="text-center mb-12">
+            <div className="text-center mb-8 md:mb-12">
               <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">La selección de la casa</span>
               <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Destacados de la colección</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
             {featured.map(p => (
               <StaggerItem key={p.id}>
                 <ProductCard product={p} />
@@ -1779,32 +1748,89 @@ function HomePage() {
       </section>
       )}
 
-      {/* ── 4. Categorías ───────────────────────────────────────────────── */}
-      <section className="bg-gray-50 py-20">
+      {/* ── 3. Cómo comprar (después de los productos: quien entra quiere ver ropa, no el
+          instructivo; en celular son tres renglones, no tres tarjetas de pantalla entera) ─────────────────────────────────────────────── */}
+      <section className="bg-navy-700 py-12 md:py-16">
         <div className="max-w-7xl mx-auto px-4">
           <Reveal>
-            <div className="text-center mb-12">
+            <div className="text-center mb-8 md:mb-10">
+              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Así de simple</span>
+              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">Cómo comprar en VOLEA</h2>
+            </div>
+          </Reveal>
+          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 max-w-5xl mx-auto">
+            {steps.map((step, i) => (
+              <StaggerItem key={i}>
+                <div className="relative flex items-start gap-4 md:block bg-navy-800/60 border border-navy-600 rounded-2xl p-5 md:p-8 h-full">
+                  <span className="absolute top-6 right-6 hidden md:block font-display font-black text-5xl text-navy-600 select-none">
+                    {i + 1}
+                  </span>
+                  <div className="w-11 h-11 md:w-12 md:h-12 shrink-0 bg-lime-400 rounded-xl flex items-center justify-center text-navy-700 md:mb-5">
+                    {step.icon}
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-white text-base md:text-lg mb-1 md:mb-2"><span className="md:hidden">{i + 1}. </span>{step.title}</h3>
+                    <p className="text-gray-400 text-sm leading-relaxed">{step.desc}</p>
+                  </div>
+                </div>
+              </StaggerItem>
+            ))}
+          </StaggerGrid>
+          <Reveal delay={150}>
+            <p className="text-center text-gray-400 text-sm mt-8">
+              Pagá online con Mercado Pago o coordiná pago y entrega por WhatsApp — transferencia o efectivo, como prefieras.
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ── 4. Categorías ───────────────────────────────────────────────── */}
+      <section className="bg-gray-50 py-14 md:py-20">
+        <div className="max-w-7xl mx-auto px-4">
+          <Reveal>
+            <div className="text-center mb-8 md:mb-12">
               <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">Encontrá lo tuyo</span>
               <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Explorá por categoría</h2>
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {categoriasConProductos(categories, products).map((cat, i) => (
-              <Reveal key={cat.id} delay={i * 80}>
-                <Link
-                  to={`/tienda?category=${encodeURIComponent(cat.id)}`}
-                  className="hover-scale flex flex-col items-center justify-center bg-white rounded-xl p-6 shadow-md border border-gray-100 hover:border-lime-400 hover:shadow-lg transition-all group"
-                >
-                  <div className="text-navy-700 group-hover:text-lime-500 transition-colors mb-3">
-                    {categoryIcons[cat.name] || <Package size={26} />}
-                  </div>
-                  <span className="font-display font-semibold text-navy-700 text-sm text-center">{cat.name}</span>
-                  <ChevronRight size={14} className="text-gray-300 group-hover:text-lime-500 transition-colors mt-2" />
-                </Link>
-              </Reveal>
-            ))}
-          </div>
+          {/* Foto real de cada categoría (antes: íconos genéricos, cinco cajitas iguales).
+              En celular, una fila que se desliza en vez de seis filas de tarjetas. */}
+          <Reveal>
+            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-5">
+              {categoriasConProductos(categories, products).map((cat) => {
+                const foto = fotoDeCategoria(products, cat.id);
+                return (
+                  <Link
+                    key={cat.id}
+                    to={`/tienda?category=${encodeURIComponent(cat.id)}`}
+                    className="group relative block aspect-[4/5] w-36 shrink-0 snap-start overflow-hidden rounded-xl bg-navy-700 shadow-md ring-1 ring-gray-100 transition-shadow hover:shadow-lg hover:ring-lime-400 md:w-auto"
+                  >
+                    {foto ? (
+                      <img
+                        src={urlImagen(foto, 320)}
+                        srcSet={srcsetImagen(foto, 640)}
+                        sizes="(min-width: 1024px) 20vw, (min-width: 768px) 33vw, 144px"
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full bg-white object-cover transition-transform duration-500 group-hover:scale-105"
+                        onError={errorFoto(foto)}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-lime-400">
+                        {categoryIcons[cat.name] || <Package size={32} />}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-navy-900/90 via-navy-900/50 to-transparent p-3 pt-10">
+                      <span className="font-display text-sm font-bold text-white">{cat.name}</span>
+                      <ChevronRight size={16} className="shrink-0 text-lime-400 transition-transform group-hover:translate-x-0.5" />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -1819,7 +1845,11 @@ function HomePage() {
                 <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
               </div>
             </Reveal>
-            <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <StaggerGrid className={
+              publishedPosts.length === 1 ? 'grid grid-cols-1 gap-6 max-w-md mx-auto'
+                : publishedPosts.length === 2 ? 'grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto'
+                  : 'grid grid-cols-1 md:grid-cols-3 gap-6'
+            }>
               {publishedPosts.map(post => (
                 <StaggerItem key={post.slug}>
                   <Link
@@ -2020,7 +2050,7 @@ function HomePage() {
               <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
             </div>
           </Reveal>
-          <StaggerGrid className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 max-w-4xl mx-auto">
+          <StaggerGrid className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 max-w-4xl mx-auto">
             {[
               { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
               { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
@@ -2035,10 +2065,10 @@ function HomePage() {
                     onError={handleImgError}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-transparent to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-4">
-                    <div className="w-8 h-1 bg-lime-400 mb-2" />
-                    <h3 className="font-display font-bold text-white text-base md:text-lg">{member.name}</h3>
-                    <p className="text-gray-300 text-sm">{member.role}</p>
+                  <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4">
+                    <div className="w-6 sm:w-8 h-1 bg-lime-400 mb-1 sm:mb-2" />
+                    <h3 className="font-display font-bold text-white text-xs leading-tight sm:text-base md:text-lg">{member.name}</h3>
+                    <p className="text-gray-300 text-[11px] sm:text-sm">{member.role}</p>
                   </div>
                 </div>
               </StaggerItem>
@@ -2104,20 +2134,22 @@ function ShopPage() {
   if (sort === 'price-asc') filtered.sort((a, b) => a.price - b.price);
   else if (sort === 'price-desc') filtered.sort((a, b) => b.price - a.price);
   else filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  filtered = conFotoPrimero(filtered); // una placa sin foto arriba de todo parece un error
 
   return (
-    <div className="fade-in max-w-7xl mx-auto px-4 py-12">
+    <div className="fade-in max-w-7xl mx-auto px-4 py-8 md:py-12">
       <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Nuestra colección</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <div className="w-16 h-1 bg-lime-400 mb-6 md:mb-8" />
       <PromoBanner compacto />
 
       {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4 mb-8">
-        <div className="flex-1 relative">
+      <div className="flex gap-2 md:gap-4 mb-4 md:mb-8">
+        <div className="flex-1 min-w-0 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
             placeholder="Buscar productos..."
+            aria-label="Buscar productos"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors font-body"
@@ -2126,19 +2158,22 @@ function ShopPage() {
         <select
           value={sort}
           onChange={e => setSort(e.target.value)}
-          className="px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 outline-none font-body bg-white"
+          aria-label="Ordenar"
+          className="w-36 shrink-0 md:w-auto px-3 md:px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 outline-none font-body bg-white"
         >
-          <option value="recent">Más recientes</option>
+          <option value="recent">Recientes</option>
           <option value="price-asc">Menor precio</option>
           <option value="price-desc">Mayor precio</option>
         </select>
       </div>
 
-      {/* Category tabs */}
-      <div className="flex flex-wrap gap-2 mb-8">
+      {/* Category tabs: en celular una fila que se desliza (antes 4 filas de botones
+          antes del primer producto). */}
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 mb-4 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 md:mb-8">
         <button
           onClick={() => setSelectedCategory('')}
-          className={`px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+          aria-pressed={!selectedCategory}
+          className={`shrink-0 px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
             !selectedCategory ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
           }`}
         >
@@ -2148,7 +2183,8 @@ function ShopPage() {
           <button
             key={cat.id}
             onClick={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
-            className={`px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+            aria-pressed={selectedCategory === cat.id}
+            className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
               selectedCategory === cat.id ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
@@ -2174,7 +2210,7 @@ function ShopPage() {
           )}
         </div>
       ) : (
-        <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <StaggerGrid className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
           {filtered.map((p) => (
             <StaggerItem key={p.id}>
               <ProductCard product={p} />
@@ -2204,6 +2240,17 @@ function ProductDetailPage() {
   const [selectedColor, setSelectedColor] = useState('');
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
+  // Barra fija en celular: el botón "Agregar al carrito" queda debajo de fotos, talles y
+  // colores (casi dos pantallas abajo). Mientras no se ve, aparece abajo con el precio.
+  const botonAgregarRef = useRef<HTMLButtonElement>(null);
+  const [botonAgregarVisible, setBotonAgregarVisible] = useState(true);
+  useEffect(() => {
+    const boton = botonAgregarRef.current;
+    if (!boton || typeof IntersectionObserver === 'undefined') return;
+    const obs = new IntersectionObserver(([e]) => setBotonAgregarVisible(e.isIntersecting));
+    obs.observe(boton);
+    return () => obs.disconnect();
+  }, [product?.id]);
 
   useEffect(() => {
     if (product) {
@@ -2256,7 +2303,7 @@ function ProductDetailPage() {
   const currentStock = selectedSize ? getStock(selectedSize, selectedColor || undefined) : 0;
 
   const images = product.images.length > 0 ? product.images : [FALLBACK_IMG];
-  const related = products.filter(p => p.category === product.category && p.id !== product.id).slice(0, 4);
+  const related = relacionados(products, product); // antes podía mostrar productos ocultos
 
   // Compartir desde el celular abre el menú nativo (WhatsApp, Instagram…); en la
   // compu copia el link.
@@ -2276,7 +2323,7 @@ function ProductDetailPage() {
     const stockKey = selectedColor ? `${selectedSize}|${selectedColor}` : selectedSize;
     const availableStock = product.stockBySize[stockKey] || 0;
     if (qty > availableStock) {
-      alert(`Solo hay ${availableStock} unidades disponibles en talle ${selectedSize}${selectedColor ? ` color ${selectedColor}` : ''}`);
+      toast.error(`Solo hay ${availableStock} unidades disponibles en talle ${selectedSize}${selectedColor ? ` color ${selectedColor}` : ''}`);
       return;
     }
     addToCart({ product, quantity: qty, selectedSize, selectedColor });
@@ -2493,6 +2540,7 @@ function ProductDetailPage() {
 
           {/* Add to Cart */}
           <button
+            ref={botonAgregarRef}
             onClick={handleAdd}
             disabled={!selectedSize || currentStock === 0}
             className={`w-full font-display font-bold py-4 rounded-lg text-lg transition-all flex items-center justify-center gap-2 ${
@@ -2539,10 +2587,39 @@ function ProductDetailPage() {
       {related.length > 0 && (
         <section className="mt-20">
           <h2 className="font-display text-2xl font-bold text-navy-700 mb-6">También te puede interesar</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
             {related.map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </section>
+      )}
+
+      {/* Lugar para que la barra fija no tape el final de la página. */}
+      <div className="h-20 md:hidden" aria-hidden="true" />
+      {!botonAgregarVisible && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] shadow-[0_-4px_16px_rgba(0,31,63,0.08)] backdrop-blur md:hidden">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-navy-700">{product.name}</p>
+              <p className="font-display font-bold text-navy-700">
+                {formatPrice(promoActiva ? precioConPromo(product.price, promoActiva.percent) : product.price)}
+                {selectedSize && <span className="ml-2 text-xs font-semibold text-gray-500">Talle {selectedSize}</span>}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                // Sin talle elegido o sin stock, lleva al selector en vez de fallar callado.
+                if (!selectedSize || currentStock === 0) botonAgregarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                else handleAdd();
+              }}
+              className={`shrink-0 rounded-lg px-5 py-3 font-display font-bold transition-colors ${
+                added ? 'bg-green-500 text-white' : 'bg-lime-400 text-navy-700 hover:bg-lime-500'
+              }`}
+            >
+              {added ? 'Agregado' : !selectedSize ? 'Elegí talle' : currentStock === 0 ? 'Ver talles' : 'Agregar'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -3814,6 +3891,14 @@ function CheckoutPage() {
                 placeholder="Horario de entrega, punto de encuentro u otra aclaración"
               />
             </div>
+            {/* En celular el resumen queda debajo del formulario: el total se repite acá,
+                al lado del botón, para no mandar el pedido sin ver cuánto es. */}
+            <div className="flex items-baseline justify-between rounded-lg bg-gray-50 px-4 py-3 lg:hidden">
+              <span className="text-sm font-semibold text-gray-600">
+                Total · {cart.reduce((n, i) => n + i.quantity, 0)} {cart.reduce((n, i) => n + i.quantity, 0) === 1 ? 'producto' : 'productos'}
+              </span>
+              <span className="font-display text-xl font-bold text-navy-700">{formatPrice(total)}</span>
+            </div>
             {mpDisponible && (
               <button
                 type="button"
@@ -3865,12 +3950,17 @@ function NotFoundPage() {
 // ─── 15. FloatingWhatsApp ────────────────────────────────────────────────────
 
 function FloatingWhatsApp() {
+  const { pathname } = useLocation();
+  // Checkout: tapaba "Enviar pedido" y es el mismo canal. Pago y TV (/copa, /programacion):
+  // no aporta. En la ficha sube para no pisar la barra fija de "Agregar".
+  if (/^\/(checkout|pago|copa|programacion|admin)(\/|$)/.test(pathname)) return null;
+  const enFicha = pathname.startsWith('/producto/');
   return (
     <a
       href={`https://wa.me/${WHATSAPP_NUMBER}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-green-600 hover:bg-green-700 rounded-full shadow-lg flex items-center justify-center text-white transition-all hover:scale-110"
+      className={`fixed ${enFicha ? 'bottom-24 md:bottom-6' : 'bottom-6'} right-4 sm:right-6 z-40 w-14 h-14 bg-green-600 hover:bg-green-700 rounded-full shadow-lg flex items-center justify-center text-white transition-all hover:scale-110`}
       aria-label="Escribinos por WhatsApp"
     >
       <MessageCircle size={28} />
@@ -3977,9 +4067,11 @@ function Footer() {
       />
       <div className="absolute inset-0 bg-navy-900/95" />
       <div className="relative z-10 max-w-7xl mx-auto px-4 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
+        {/* En celular: marca y contacto a lo ancho, Links y Categorías lado a lado (antes era una
+            sola columna de ~20 renglones). */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-10 md:gap-10">
           {/* Logo */}
-          <div>
+          <div className="col-span-2 lg:col-span-1">
             <img src="/logo-white.png" alt="VOLEA" className="h-10 mb-4" onError={(e) => {
               e.currentTarget.style.display = 'none';
               const span = document.createElement('span');
@@ -4002,7 +4094,10 @@ function Footer() {
               {[
                 { to: '/', label: 'Inicio' },
                 { to: '/tienda', label: 'Tienda' },
+                { to: '/torneos', label: 'Torneos' },
+                { to: '/ranking', label: 'Ranking' },
                 { to: '/eventos', label: 'Eventos' },
+                { to: '/blog', label: 'Blog' },
                 { to: '/mapa', label: 'Mapa' },
                 { to: '/contacto', label: 'Contacto' },
               ].map(link => (
@@ -4033,7 +4128,7 @@ function Footer() {
           </div>
 
           {/* Contact */}
-          <div>
+          <div className="col-span-2 md:col-span-1">
             <h3 className="font-display font-bold text-lg mb-4">Contacto</h3>
             <ul className="space-y-3">
               <li>
@@ -4285,7 +4380,9 @@ export default function App() {
       <StoreProvider>
         <ScrollToTop />
         <Toaster
-          position="bottom-right"
+          // Arriba: abajo a la derecha tapaban el botón "Finalizar compra" del carrito
+          // en el celular y competían con el botón de WhatsApp.
+          position="top-center"
           theme="dark"
           richColors
           toastOptions={{
