@@ -125,7 +125,7 @@ export function Interruptor({ activo, alCambiar, etiqueta, descripcion, disabled
         onClick={() => alCambiar(!activo)}
         className={cn('relative h-7 w-12 shrink-0 rounded-full transition-colors', activo ? 'bg-navy-700' : 'bg-gray-300')}
       >
-        <span className={cn('absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform', activo ? 'translate-x-6' : 'translate-x-1')} />
+        <span className={cn('absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform', activo ? 'translate-x-6' : 'translate-x-1')} />
       </button>
     </label>
   );
