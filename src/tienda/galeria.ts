@@ -158,3 +158,34 @@ export function scrollParaVer(scrollActual: number, visible: number, inicio: num
   if (inicio + largo + margen > scrollActual + visible) return inicio + largo + margen - visible;
   return scrollActual;
 }
+
+/**
+ * Tamaño con que se DIBUJA una foto `object-contain` dentro de su marco. En el visor la
+ * <img> ocupa todo el panel; el paneo se limita con lo que mide la foto de verdad, no
+ * con las franjas blancas de alrededor.
+ */
+export function tamanoContenido(natural: Tamano, marco: Tamano): Tamano {
+  if (!(natural.ancho > 0) || !(natural.alto > 0)) return marco;
+  const f = Math.min(marco.ancho / natural.ancho, marco.alto / natural.alto);
+  return { ancho: natural.ancho * f, alto: natural.alto * f };
+}
+
+export type Rgba = [number, number, number, number];
+
+/**
+ * Color para rellenar las franjas de una foto que no llena la caja. La mayoría viene
+ * sobre blanco o transparente: esas van con `multiply` sobre el gris de la caja (null).
+ * Pero hay fotos sobre fondo oscuro o gris (p.ej. VOLEA Shadow, gris 51): con el gris
+ * claro de la caja quedaban como un rectángulo oscuro flotando. Si los bordes son
+ * parejos, se rellena con su promedio; si no (foto con fondo variado), gris de caja.
+ * `bordes`: píxeles del borde de la foto (esquinas y medios de cada lado).
+ */
+export function colorDeFondo(bordes: Rgba[]): string | null {
+  if (bordes.length === 0 || bordes.some((p) => p[3] < 250)) return null; // transparente
+  const canal = (c: number) => bordes.map((p) => p[c]);
+  const dispersion = Math.max(...[0, 1, 2].map((c) => Math.max(...canal(c)) - Math.min(...canal(c))));
+  if (dispersion > 32) return null;
+  const promedio = [0, 1, 2].map((c) => Math.round(canal(c).reduce((a, b) => a + b, 0) / bordes.length));
+  if (Math.min(...promedio) >= 246) return null; // blanco: multiply lo funde con la caja
+  return `rgb(${promedio[0]}, ${promedio[1]}, ${promedio[2]})`;
+}

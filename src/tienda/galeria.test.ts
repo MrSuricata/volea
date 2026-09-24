@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ajusteFoto, anchoMiniatura, decidirSwipe, esDobleToque, escalaConRueda, indiceCircular,
   indiceDesdeScroll, limitarEscala, limitarPaneo, origenZoom, pellizco, scrollParaVer, vecinos,
-  zoomEnPunto,
+  tamanoContenido, zoomEnPunto, colorDeFondo, type Rgba,
 } from './galeria';
 
 describe('indiceCircular / vecinos', () => {
@@ -190,5 +190,39 @@ describe('scrollParaVer', () => {
     expect(scrollParaVer(0, 300, 280, 56)).toBe(280 + 56 + 8 - 300);
     expect(scrollParaVer(200, 300, 120, 56)).toBe(112);
     expect(scrollParaVer(50, 300, 4, 56)).toBe(0);
+  });
+});
+
+describe('tamanoContenido', () => {
+  it('encaja la foto entera en el marco sin deformarla', () => {
+    expect(tamanoContenido({ ancho: 1600, alto: 1000 }, { ancho: 400, alto: 800 })).toEqual({ ancho: 400, alto: 250 });
+    expect(tamanoContenido({ ancho: 800, alto: 1000 }, { ancho: 1000, alto: 500 })).toEqual({ ancho: 400, alto: 500 });
+  });
+  it('fotos chicas se agrandan hasta el marco', () => {
+    expect(tamanoContenido({ ancho: 100, alto: 100 }, { ancho: 300, alto: 600 })).toEqual({ ancho: 300, alto: 300 });
+  });
+  it('sin medidas naturales usa el marco', () => {
+    expect(tamanoContenido({ ancho: 0, alto: 0 }, { ancho: 300, alto: 600 })).toEqual({ ancho: 300, alto: 600 });
+  });
+});
+
+describe('colorDeFondo', () => {
+  const op = (r: number, g = r, b = r): Rgba => [r, g, b, 255];
+  it('blanco o casi blanco: se funde con multiply (null)', () => {
+    expect(colorDeFondo([op(255), op(255), op(255), op(255)])).toBeNull();
+    expect(colorDeFondo([op(255), op(255), op(254), op(244)])).toBeNull(); // una esquina con sombra
+  });
+  it('transparente: se ve la caja (null)', () => {
+    expect(colorDeFondo([[0, 0, 0, 0], op(255), op(255), op(255)])).toBeNull();
+  });
+  it('fondo parejo oscuro o gris: se rellena con ese color', () => {
+    expect(colorDeFondo([op(51), op(51), op(51), op(51)])).toBe('rgb(51, 51, 51)'); // VOLEA Shadow
+    expect(colorDeFondo([op(246, 248, 248), op(236, 237, 238), op(230, 232, 233), op(227, 227, 229)])).toBe('rgb(235, 236, 237)');
+  });
+  it('fondo variado (foto con escenario): no inventa un color', () => {
+    expect(colorDeFondo([op(195, 194, 195), op(84, 98, 110), op(138, 142, 153), op(95, 67, 79)])).toBeNull();
+  });
+  it('sin muestras no rompe', () => {
+    expect(colorDeFondo([])).toBeNull();
   });
 });

@@ -16,6 +16,7 @@ import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
 import { conFotoPrimero, destacados, fotoDeCategoria, relacionados } from './tienda/catalogo';
+import GaleriaProducto from './tienda/GaleriaProducto';
 import { FOTO_HERO_HOME } from './lib/precarga';
 import { guardarMarcaDePago } from './pago/marcaPago';
 import { CLAVE_PEDIDO_MP, firmaPedido, idPedidoWeb, pedidoReusable, registroPedidoMP } from './pago/reintentoMP';
@@ -2184,7 +2185,6 @@ function ProductDetailPage() {
     description: product ? product.description.slice(0, 160) : 'Producto VOLEA',
     image: product?.images[0],
   });
-  const [mainImg, setMainImg] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [qty, setQty] = useState(1);
@@ -2215,7 +2215,6 @@ function ProductDetailPage() {
       const talleComprable = product.sizes.find((s) => stockDe(s, color) > 0);
       if (product.colors.length > 0) setSelectedColor(color);
       if (product.sizes.length > 0) setSelectedSize(talleComprable ?? product.sizes[0]);
-      setMainImg(0);
       setQty(1);
       setAdded(false);
     }
@@ -2296,60 +2295,7 @@ function ProductDetailPage() {
 
       <div className="grid md:grid-cols-2 gap-12">
         {/* Images */}
-        <div>
-          <div className="aspect-square rounded-2xl overflow-hidden bg-gray-100 mb-4 relative group">
-            <img
-              key={images[mainImg]}
-              src={urlImagen(images[mainImg], 960)}
-              srcSet={srcsetImagen(images[mainImg])}
-              sizes="(min-width: 1280px) 616px, (min-width: 768px) 50vw, 100vw"
-              alt={product.name}
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-              onError={errorFoto(images[mainImg])}
-            />
-            {images.length > 1 && (
-              <>
-                <button
-                  onClick={() => setMainImg(mainImg > 0 ? mainImg - 1 : images.length - 1)}
-                  aria-label="Foto anterior"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                >
-                  <ChevronLeft size={20} className="text-navy-700" />
-                </button>
-                <button
-                  onClick={() => setMainImg(mainImg < images.length - 1 ? mainImg + 1 : 0)}
-                  aria-label="Foto siguiente"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                >
-                  <ChevronRight size={20} className="text-navy-700" />
-                </button>
-              </>
-            )}
-            {/* Image counter */}
-            {images.length > 1 && (
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-navy-700/70 text-white text-xs font-display font-bold px-3 py-1 rounded-full">
-                {mainImg + 1} / {images.length}
-              </div>
-            )}
-          </div>
-          {images.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {images.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setMainImg(i)}
-                  aria-label={`Ver foto ${i + 1} de ${images.length}`}
-                  aria-pressed={mainImg === i}
-                  className={`w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 border-2 transition-all ${
-                    mainImg === i ? 'border-lime-400 ring-2 ring-lime-400/30 scale-105' : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <img src={urlImagen(img, 160)} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={errorFoto(img)} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <GaleriaProducto key={product.id} imagenes={images} nombre={product.name} />
 
         {/* Info */}
         <div>
