@@ -55,7 +55,7 @@ function PildoraSync({ estado, refrescando, alRefrescar }: { estado: EstadoSync;
         title="Tocá para traer lo último del server"
         aria-label={`${p.texto}. Refrescar desde el server`}
         className={cn(
-          'fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-4 z-30 inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full pl-3.5 pr-3 font-display text-[13px] font-bold shadow-lg ring-1 ring-black/10 transition-transform active:scale-[0.97] lg:left-auto lg:right-6',
+          'fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-4 z-30 lg:bottom-6 inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full pl-3.5 pr-3 font-display text-[13px] font-bold shadow-lg ring-1 ring-black/10 transition-transform active:scale-[0.97] lg:left-auto lg:right-6',
           p.clase,
         )}
       >

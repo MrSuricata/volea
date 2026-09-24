@@ -306,7 +306,3 @@
 .rk.rk--admin ::-webkit-scrollbar-track { background: #f3f4f6; }
 .rk.rk--admin ::-webkit-scrollbar-thumb { background: #cbd5e1; border-color: #f3f4f6; }
 .rk.rk--admin ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-/* Parche del Interruptor del kit: la bolita es `absolute` sin `left` y Chrome la ubica
-   en el centro del botón (layout de <button>), así que prendido quedaba afuera. Sacarlo
-   cuando src/admin/ui/Campo.tsx le ponga left-0 a la bolita. */
-.rk.rk--admin button[role='switch'] > span { left: 0; }
