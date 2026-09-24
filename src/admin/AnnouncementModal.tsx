@@ -1,8 +1,41 @@
-import { useState } from 'react';
-import { X, Save } from 'lucide-react';
+import { useId, useState, type FormEvent } from 'react';
+import { Save } from 'lucide-react';
 import type { Announcement } from '../types';
+import { cn } from '../lib/cn';
+import { AreaTexto, Boton, Campo, Dialogo, Entrada, Interruptor, type TonoInsignia } from './ui';
+import { hayCambios } from './formulario';
+import { CLASE_FORMULARIO, GrupoFormulario, Rotulo, confirmarDescarte } from './PiezasFormulario';
 
 // ─── AnnouncementModal ───────────────────────────────────────────────────────
+// Rediseño 24/09: Dialogo del kit, tipo como opciones legibles (antes un select; en la
+// lista el "Promoción" era lima-700 sobre lima-100, casi invisible) y una vista previa
+// de la franja de anuncios de la home tal como se ve (fondo azul marino).
+
+type Tipo = Announcement['type'];
+
+export const TIPOS_ANUNCIO: { valor: Tipo; texto: string }[] = [
+  { valor: 'info', texto: 'Información' },
+  { valor: 'promo', texto: 'Promoción' },
+  { valor: 'event', texto: 'Evento' },
+  { valor: 'important', texto: 'Importante' },
+];
+
+/** Tono de Insignia para listar anuncios en el panel (legible sobre blanco). */
+export const TONO_TIPO_ANUNCIO: Record<Tipo, TonoInsignia> = {
+  info: 'info',
+  promo: 'bien',
+  event: 'navy',
+  important: 'alerta',
+};
+
+// Copia literal de los colores del ticker público (App.tsx, announcementColors): si
+// cambian allá, cambiarlos acá para que la vista previa no mienta.
+const COLOR_TICKER: Record<Tipo, string> = {
+  info: 'bg-navy-500',
+  promo: 'bg-lime-600',
+  event: 'bg-navy-700 border border-lime-400/40',
+  important: 'bg-red-500',
+};
 
 export function AnnouncementModal({
   announcement, onClose, onSave
@@ -11,7 +44,7 @@ export function AnnouncementModal({
   onClose: () => void;
   onSave: (a: Announcement) => void;
 }) {
-  const [form, setForm] = useState<Announcement>(
+  const [inicial] = useState<Announcement>(() =>
     announcement || {
       id: `ann-${Date.now()}`,
       title: '',
@@ -21,89 +54,122 @@ export function AnnouncementModal({
       createdAt: new Date().toISOString().split('T')[0],
     }
   );
+  const [form, setForm] = useState<Announcement>(inicial);
+  const idForm = useId();
+  const idTipo = useId();
+  const sucio = hayCambios(inicial, form);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const cambiar = <K extends keyof Announcement>(campo: K, valor: Announcement[K]) => setForm((f) => ({ ...f, [campo]: valor }));
+
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     onSave(form);
   };
 
+  const cancelar = () => { if (confirmarDescarte(sucio)) onClose(); };
+  const etiquetaTipo = TIPOS_ANUNCIO.find(t => t.valor === form.type)?.texto ?? 'Información';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="font-display text-xl font-bold text-navy-700">
-            {announcement ? 'Editar Anuncio' : 'Nuevo Anuncio'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-navy-700 transition-colors">
-            <X size={24} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Título *</label>
-            <input
+    <Dialogo
+      abierto
+      titulo={announcement ? 'Editar anuncio' : 'Nuevo anuncio'}
+      descripcion="Se muestra en la franja de anuncios de la home."
+      alCerrar={onClose}
+      ancho="md"
+      sucio={sucio}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={cancelar}>Cancelar</Boton>
+          <Boton type="submit" form={idForm} icono={<Save size={17} />}>Guardar anuncio</Boton>
+        </>
+      )}
+    >
+      <form id={idForm} onSubmit={handleSubmit} className={CLASE_FORMULARIO}>
+        <GrupoFormulario titulo="Anuncio">
+          <Campo etiqueta="Título" requerido>
+            <Entrada
               type="text"
               required
+              autoComplete="off"
+              placeholder="Ej. 20% off en remeras hasta el domingo"
               value={form.title}
-              onChange={e => setForm({ ...form, title: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
+              onChange={e => cambiar('title', e.target.value)}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Contenido *</label>
-            <textarea
-              rows={4}
+          </Campo>
+          <Campo etiqueta="Texto" requerido ayuda="En el celular la franja muestra solo el tipo y el título.">
+            <AreaTexto
+              rows={3}
               required
               value={form.content}
-              onChange={e => setForm({ ...form, content: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none"
+              onChange={e => cambiar('content', e.target.value)}
+              className="resize-y"
+            />
+          </Campo>
+          <div>
+            <Rotulo id={idTipo}>Tipo</Rotulo>
+            <div role="radiogroup" aria-labelledby={idTipo} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {TIPOS_ANUNCIO.map(t => {
+                const elegido = form.type === t.valor;
+                return (
+                  <button
+                    key={t.valor}
+                    type="button"
+                    role="radio"
+                    aria-checked={elegido}
+                    onClick={() => cambiar('type', t.valor)}
+                    className={cn(
+                      'flex h-11 items-center gap-2 rounded-lg border px-3 text-left text-[13px] font-semibold transition-colors',
+                      elegido
+                        ? 'border-navy-700 bg-navy-50 text-navy-700 ring-1 ring-inset ring-navy-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-navy-700 hover:text-navy-700',
+                    )}
+                  >
+                    <span aria-hidden className={cn('h-3 w-3 shrink-0 rounded-full', COLOR_TICKER[t.valor])} />
+                    {t.texto}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-200 px-4 py-1">
+            <Interruptor
+              etiqueta="Visible en la web"
+              descripcion={form.active ? 'Está en la franja de la home.' : 'Oculto: no aparece hasta que lo actives.'}
+              activo={form.active}
+              alCambiar={v => cambiar('active', v)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Tipo</label>
-              <select
-                value={form.type}
-                onChange={e => setForm({ ...form, type: e.target.value as Announcement['type'] })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-              >
-                <option value="info">Información</option>
-                <option value="promo">Promoción</option>
-                <option value="event">Evento</option>
-                <option value="important">Importante</option>
-              </select>
-            </div>
-            <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={e => setForm({ ...form, active: e.target.checked })}
-                  className="w-4 h-4 text-lime-400 border-gray-300 rounded focus:ring-lime-400"
-                />
-                <span className="text-sm font-semibold text-navy-700">Activo</span>
-              </label>
-            </div>
-          </div>
+        </GrupoFormulario>
 
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Save size={18} /> Guardar
-            </button>
+        <GrupoFormulario titulo="Vista previa">
+          {/* Misma pieza que el ticker de la home (App.tsx, "Ticker de anuncios"), quieta. */}
+          <div
+            aria-hidden
+            className={cn('overflow-hidden rounded-xl border border-navy-600 bg-navy-800 py-4 transition-opacity', !form.active && 'opacity-50')}
+          >
+            <div className="flex min-w-0 items-center gap-3 whitespace-nowrap px-4">
+              <span className={cn(COLOR_TICKER[form.type], 'shrink-0 rounded-full px-2 py-1 text-xs font-bold text-white')}>
+                {etiquetaTipo}
+              </span>
+              {/* El título manda: se achica recién cuando el texto ya no entra. */}
+              <span className={cn('min-w-0 shrink-[0.2] truncate font-display text-sm font-bold', form.title ? 'text-white' : 'text-white/40')}>
+                {form.title || 'Título del anuncio'}
+              </span>
+              {/* Como en la home: el texto solo aparece en pantallas anchas. */}
+              {form.content && (
+                <>
+                  <span className="hidden shrink-0 text-sm text-gray-400 sm:inline">—</span>
+                  <span className="hidden min-w-0 truncate text-sm text-gray-300 sm:inline">{form.content}</span>
+                </>
+              )}
+              <span className="shrink-0 text-lg text-lime-400">•</span>
+            </div>
           </div>
-        </form>
-      </div>
-    </div>
+          <p className="text-[13px] text-gray-500">
+            {form.active ? 'Así pasa por la franja, en movimiento y junto a los otros anuncios activos.' : 'Oculto: así se vería si lo activás.'}
+          </p>
+        </GrupoFormulario>
+      </form>
+    </Dialogo>
   );
 }
