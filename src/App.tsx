@@ -4089,7 +4089,7 @@ function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h3 className="font-display font-bold text-lg mb-4">Links</h3>
+            <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Navegá</h3>
             <ul className="space-y-2">
               {[
                 { to: '/', label: 'Inicio' },
@@ -4112,7 +4112,7 @@ function Footer() {
 
           {/* Categories */}
           <div>
-            <h3 className="font-display font-bold text-lg mb-4">Categorías</h3>
+            <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Categorías</h3>
             <ul className="space-y-2">
               {categoriasConProductos(categories, products).map(cat => (
                 <li key={cat.id}>
@@ -4129,7 +4129,7 @@ function Footer() {
 
           {/* Contact */}
           <div className="col-span-2 md:col-span-1">
-            <h3 className="font-display font-bold text-lg mb-4">Contacto</h3>
+            <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Contacto</h3>
             <ul className="space-y-3">
               <li>
                 <a
