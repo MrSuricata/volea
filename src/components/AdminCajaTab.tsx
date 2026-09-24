@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, Info, MessageCircle, FileDown, Loader2, Plus, Minus, X, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, FileDown, Plus, Minus, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil, Check, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput, GastoPendiente, GastoPendienteInput } from '../types';
 import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
@@ -10,10 +11,15 @@ import type { ItemCarrito, VentaRapida } from '../utils/caja';
 import { normalizar, sugerirDeudores } from '../utils/nombres';
 import { SupabaseService } from '../services/supabaseService';
 import type { JugadorPadron } from '../utils/dupr';
+import { cn } from '../lib/cn';
+import {
+  Boton, BotonIcono, Campo, Entrada, EntradaPlata, Dialogo, Confirmar, EncabezadoPagina, Tarjeta, Plata,
+  Insignia, Segmentado, BarraFiltros, Chip, Vacio, CargandoFilas, ErrorEstado, formatoPlata, type TonoInsignia,
+} from '../admin/ui';
+import { Kpi } from '../admin/ui-ventas/Kpi';
+import { plural, resultadoIncierto } from '../admin/ui-ventas/ventas';
 
 const TZ = 'America/Montevideo';
-
-const formatMoney = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
 
 /** "5/8" — para el "desde" de los deudores, sin hora. */
 const formatFechaCorta = (iso: string) => {
@@ -50,24 +56,32 @@ const TEXTO_VENC: Record<EstadoVenc, (v: string) => string> = {
   vencido: v => `Venció el ${formatDia(v)}`,
   hoy: () => 'Vence hoy',
   proximo: v => `Vence el ${formatDia(v)}`,
-  sinFecha: () => 'Sin fecha de vencimiento',
+  sinFecha: () => 'Sin fecha',
 };
 
-const ESTILO_VENC: Record<EstadoVenc, { borde: string; texto: string; chip: string }> = {
-  vencido: { borde: 'border-red-200', texto: 'text-red-600', chip: 'bg-red-100 text-red-600' },
-  hoy: { borde: 'border-amber-200', texto: 'text-amber-700', chip: 'bg-amber-100 text-amber-700' },
-  proximo: { borde: 'border-gray-200', texto: 'text-gray-400', chip: 'bg-gray-100 text-gray-500' },
-  sinFecha: { borde: 'border-gray-200', texto: 'text-gray-400', chip: 'bg-gray-100 text-gray-500' },
+// Un solo mapa estado → tono por dominio (clases literales, ver tailwindClases.test).
+const TONO_VENC: Record<EstadoVenc, TonoInsignia> = {
+  vencido: 'alerta',
+  hoy: 'atencion',
+  proximo: 'neutro',
+  sinFecha: 'neutro',
+};
+
+const ICONO_VENC: Record<EstadoVenc, string> = {
+  vencido: 'bg-red-50 text-red-600',
+  hoy: 'bg-amber-50 text-amber-700',
+  proximo: 'bg-gray-100 text-gray-500',
+  sinFecha: 'bg-gray-100 text-gray-500',
 };
 
 type PeriodFilter = 'hoy' | '7d' | '30d' | 'todo';
 type KindFilter = 'todos' | 'venta' | 'gasto';
 
-const PERIODS: { id: PeriodFilter; label: string }[] = [
-  { id: 'hoy', label: 'Hoy' },
-  { id: '7d', label: '7 días' },
-  { id: '30d', label: '30 días' },
-  { id: 'todo', label: 'Todo' },
+const PERIODS: { valor: PeriodFilter; texto: string }[] = [
+  { valor: 'hoy', texto: 'Hoy' },
+  { valor: '7d', texto: '7 días' },
+  { valor: '30d', texto: '30 días' },
+  { valor: 'todo', texto: 'Todo' },
 ];
 
 const KINDS: { id: KindFilter; label: string }[] = [
@@ -82,24 +96,32 @@ const PAYMENT_LABELS: Record<string, string> = {
   transferencia: 'Transferencia',
 };
 
-const METHOD_BADGE: Record<string, string> = {
-  mp: 'bg-blue-50 text-blue-600',
-  efectivo: 'bg-green-50 text-green-700',
-  transferencia: 'bg-navy-50 text-navy-600',
+const TONO_METODO: Record<'mp' | 'efectivo' | 'transferencia' | 'debe', TonoInsignia> = {
+  mp: 'info',
+  efectivo: 'bien',
+  transferencia: 'navy',
+  debe: 'atencion',
 };
 
-const badgeClass = 'rounded-full px-2 py-0.5 font-semibold';
-const sectionTitleClass = 'mb-2 font-display text-sm font-bold uppercase tracking-wide text-gray-500';
-const inputClass = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 focus:border-navy-400 focus:outline-none';
-const labelClass = 'mb-1 block font-display text-xs font-bold uppercase tracking-wide text-gray-500';
-
-// Chips de método de pago del modal de venta (mismos colores que los badges de la lista)
-const METODOS_VENTA: { id: VentaCajaInput['payment']; label: string; activo: string }[] = [
-  { id: 'mp', label: 'MP', activo: 'border-blue-300 bg-blue-50 text-blue-600' },
-  { id: 'efectivo', label: 'Efectivo', activo: 'border-green-300 bg-green-50 text-green-700' },
-  { id: 'transferencia', label: 'Transferencia', activo: 'border-navy-300 bg-navy-50 text-navy-600' },
-  { id: 'debe', label: 'Debe', activo: 'border-amber-300 bg-amber-50 text-amber-700' },
+// Método de pago del modal de venta. SIN valor por defecto a propósito: con un
+// default, el apuro del mostrador registraba todo como efectivo.
+const METODOS_VENTA: { valor: VentaCajaInput['payment']; texto: string }[] = [
+  { valor: 'mp', texto: 'MP' },
+  { valor: 'efectivo', texto: 'Efectivo' },
+  { valor: 'transferencia', texto: 'Transferencia' },
+  { valor: 'debe', texto: 'Debe' },
 ];
+
+const METODOS_COBRO: { valor: 'mp' | 'efectivo' | 'transferencia'; texto: string }[] = [
+  { valor: 'mp', texto: 'MP' },
+  { valor: 'efectivo', texto: 'Efectivo' },
+  { valor: 'transferencia', texto: 'Transferencia' },
+];
+
+const OPCIONES_SOCIOS = SOCIOS.map(s => ({ valor: s, texto: NOMBRES_SOCIOS[s] }));
+
+/** Rótulo chico de sección (mismo que el de las tarjetas del kit). */
+const claseRotulo = 'mb-1.5 block text-[13px] font-semibold text-navy-700';
 
 export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSocioMoves, products, registrarVenta, registrarGasto, socioSugerido, cobrarDeudor, loadGastosPendientes, saveGastoPendiente, pagarGastoPendiente, deleteGastoPendiente }: {
   loadLedger: () => Promise<LedgerEntry[] | null>;
@@ -124,7 +146,9 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   // aparecía "Sin movimientos" mientras cargaba, mentira conocida).
   const [cargandoInicial, setCargandoInicial] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [period, setPeriod] = useState<PeriodFilter>('7d');
+  // Arranca en "Hoy": la Caja se abre en el torneo o en el mostrador para ver la
+  // jornada; la semana queda a un toque.
+  const [period, setPeriod] = useState<PeriodFilter>('hoy');
   const [kind, setKind] = useState<KindFilter>('todos');
   // Buscador de movimientos (pedido de Brian): matchea etiqueta, deudor, quién
   // lo registró y la variante, sin tildes. No toca los totales de arriba.
@@ -140,6 +164,8 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   const [pendientes, setPendientes] = useState<GastoPendiente[]>([]);
   const [pendienteEdit, setPendienteEdit] = useState<GastoPendiente | 'nuevo' | null>(null);
   const [pendienteAPagar, setPendienteAPagar] = useState<GastoPendiente | null>(null);
+  const [aBorrarPendiente, setABorrarPendiente] = useState<GastoPendiente | null>(null);
+  const [borrandoPendiente, setBorrandoPendiente] = useState(false);
 
   // Padrón de jugadores: sugiere el comprador sin duplicar nombres ("Hernán" ≠
   // "Hernan") y permite VINCULAR la venta al jugador (id), que es lo que
@@ -290,11 +316,18 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   }, [pendientes]);
 
   const handleBorrarPendiente = async (g: GastoPendiente) => {
-    const ok = await deleteGastoPendiente(g.id);
-    if (!ok) { toast.error('No se pudo borrar el gasto'); return; }
-    toast.success('Gasto pendiente borrado');
-    setPendienteEdit(null);
-    refresh();
+    if (borrandoPendiente) return;
+    setBorrandoPendiente(true);
+    try {
+      const ok = await deleteGastoPendiente(g.id);
+      if (!ok) { toast.error('No se pudo borrar el gasto'); return; }
+      toast.success('Gasto pendiente borrado');
+      setABorrarPendiente(null);
+      setPendienteEdit(null);
+      refresh();
+    } finally {
+      setBorrandoPendiente(false);
+    }
   };
 
   const handleRevert = async (entry: LedgerEntry) => {
@@ -314,184 +347,180 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   };
 
   const ahoraMs = Date.now();
+  const hayBusqueda = buscarMov.trim() !== '';
+  const textoPeriodo = period === 'hoy' ? 'hoy' : period === 'todo' ? 'en total' : `en ${period === '7d' ? '7' : '30'} días`;
 
-  /** Badge/texto de método de pago para la línea de meta (null en gastos). */
+  /** Insignia/texto de método de pago para la línea de meta (null en gastos). */
   const metodoPago = (entry: LedgerEntry) => {
     if (entry.kind !== 'venta' || !entry.paymentMethod) return null;
     if (entry.paymentMethod === 'debe') {
       if (entry.settledAt) {
         return (
-          <span className="font-semibold text-green-600">
+          <Insignia tono="bien">
             debía {entry.debtorName || '—'} · cobrado{entry.settledMethod ? ` ${PAYMENT_LABELS[entry.settledMethod]}` : ''}
-          </span>
+          </Insignia>
         );
       }
-      return (
-        <span className={`${badgeClass} bg-amber-50 text-amber-700`}>Debe {entry.debtorName || '—'}</span>
-      );
+      return <Insignia tono={TONO_METODO.debe} punto>Debe {entry.debtorName || '—'}</Insignia>;
     }
-    return (
-      <span className={`${badgeClass} ${METHOD_BADGE[entry.paymentMethod]}`}>
-        {PAYMENT_LABELS[entry.paymentMethod]}
-      </span>
-    );
+    return <Insignia tono={TONO_METODO[entry.paymentMethod]}>{PAYMENT_LABELS[entry.paymentMethod]}</Insignia>;
   };
 
   return (
-    <div className="fade-in">
-      {/* Header: "Nueva venta" primero y a lo ancho en mobile; el resto en fila */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Caja</h1>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
-          <button
-            onClick={() => setVentaAbierta(true)}
-            className="order-first w-full sm:order-last sm:w-auto bg-lime-400 hover:bg-lime-300 text-navy-700 font-display font-bold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
-          >
-            <Plus size={18} strokeWidth={2.5} /> Nueva venta
-          </button>
-          <button
-            onClick={() => setGastoAbierto(true)}
-            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 text-red-500 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
-          >
-            <TrendingDown size={16} /> Gasto
-          </button>
-          <button
-            onClick={() => setPendienteEdit('nuevo')}
-            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
-          >
-            <CalendarClock size={16} /> Por pagar
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={exporting || loading}
-            className="flex-1 sm:flex-none justify-center bg-white hover:bg-gray-50 disabled:opacity-50 text-navy-700 border border-gray-200 font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
-          >
-            <FileDown size={16} /> {exporting ? 'Generando…' : 'Descargar Excel'}
-          </button>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="flex-1 sm:flex-none justify-center bg-navy-700 hover:bg-navy-800 disabled:bg-gray-400 text-white font-display font-semibold py-2.5 px-5 rounded-lg transition-colors flex items-center gap-2 text-sm"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
-          </button>
-        </div>
-      </div>
+    // pb extra en el celular: la barra fija de "Nueva venta" no tapa el último movimiento.
+    <div className="fade-in pb-24 md:pb-0">
+      <EncabezadoPagina
+        rotulo="Plata"
+        titulo="Caja"
+        descripcion="Ventas y gastos del bot de Telegram y de esta pantalla. Al anular una venta de catálogo, el stock se repone solo."
+        acciones={(
+          <>
+            <Boton variante="secundario" icono={<TrendingDown size={17} />} onClick={() => setGastoAbierto(true)} className="hidden md:inline-flex">
+              Gasto
+            </Boton>
+            <Boton variante="secundario" icono={<CalendarClock size={17} />} onClick={() => setPendienteEdit('nuevo')}>
+              Por pagar
+            </Boton>
+            <BotonIcono
+              etiqueta={exporting ? 'Generando el Excel…' : 'Descargar Excel'}
+              icono={exporting ? <RefreshCw size={18} className="animate-spin" /> : <FileDown size={18} />}
+              onClick={handleExport}
+              disabled={exporting || loading}
+              className="border border-gray-300 bg-white"
+            />
+            <BotonIcono
+              etiqueta="Actualizar"
+              icono={<RefreshCw size={18} className={loading ? 'animate-spin' : ''} />}
+              onClick={refresh}
+              disabled={loading}
+              className="border border-gray-300 bg-white"
+            />
+            <Boton icono={<Plus size={18} strokeWidth={2.5} />} onClick={() => setVentaAbierta(true)} className="hidden md:inline-flex">
+              Nueva venta
+            </Boton>
+          </>
+        )}
+      />
 
-      {/* Callout informativo */}
-      <div className="mb-6 flex items-start gap-2 rounded-xl bg-navy-50 px-4 py-2.5 text-xs text-navy-600">
-        <MessageCircle size={14} className="mt-0.5 flex-shrink-0" />
-        <p>
-          Ventas y gastos del <b>bot de Telegram</b> y de esta pantalla. Al anular una venta de catálogo, el stock se repone solo.
-        </p>
-      </div>
+      {/* Barra fija del celular: vender tiene que estar siempre a un pulgar,
+          aunque se haya scrolleado la lista. Portal a <body> porque .fade-in
+          anima con transform y eso rompe el position: fixed mientras dura. */}
+      {createPortal(
+        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-gray-200 bg-white/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+          <Boton variante="secundario" icono={<TrendingDown size={17} />} onClick={() => setGastoAbierto(true)}>
+            Gasto
+          </Boton>
+          <Boton icono={<Plus size={18} strokeWidth={2.5} />} onClick={() => setVentaAbierta(true)} className="flex-1">
+            Nueva venta
+          </Boton>
+        </div>,
+        document.body,
+      )}
 
-      {cargandoInicial ? (
-        /* Loading inicial: antes acá aparecía "Sin movimientos" mientras cargaba */
-        <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-          <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
-          <p className="font-display text-sm font-bold text-gray-500">Cargando la caja…</p>
-        </div>
+      <Segmentado
+        etiqueta="Período de los totales y la lista"
+        opciones={PERIODS}
+        valor={period}
+        alCambiar={setPeriod}
+        className="mb-4"
+      />
+
+      {cargandoInicial || (loadFailed && loading) ? (
+        <CargandoFilas filas={5} />
       ) : loadFailed ? (
-        !loading && (
-          <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-            <Info size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-            <p className="font-display text-sm font-bold text-gray-500">No se pudo cargar la caja</p>
-            <p className="mt-1 text-xs text-gray-400">Asegurate de haber entrado con el link mágico y probá "Actualizar".</p>
-          </div>
-        )
+        <ErrorEstado
+          mensaje="No se pudo cargar la caja. Si recién entraste, puede ser la sesión: probá de nuevo."
+          alReintentar={refresh}
+        />
       ) : (
         <>
-          {/* Totales con contexto */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-                <TrendingUp size={14} className="text-green-600" /> Ventas
-              </div>
-              <p className="font-display text-2xl font-bold text-green-600">{formatMoney(totals.ventas)}</p>
-              <p className="mt-0.5 text-[11px] text-gray-400">
-                {totals.countVentas} {totals.countVentas === 1 ? 'venta' : 'ventas'}
-              </p>
-            </div>
-            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-                <TrendingDown size={14} className="text-red-500" /> Gastos
-              </div>
-              <p className="font-display text-2xl font-bold text-red-500">{formatMoney(totals.gastos)}</p>
-              <p className="mt-0.5 text-[11px] text-gray-400">
-                {totals.countGastos} {totals.countGastos === 1 ? 'gasto' : 'gastos'}
-              </p>
-            </div>
-            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-                <Scale size={14} className="text-navy-700" /> Balance
-              </div>
-              <p className={`font-display text-2xl font-bold ${totals.balance >= 0 ? 'text-navy-700' : 'text-red-500'}`}>
-                {formatMoney(totals.balance)}
-              </p>
-              <p className="mt-0.5 text-[11px] text-gray-400">
-                sobre {totals.count} {totals.count === 1 ? 'movimiento' : 'movimientos'}
-              </p>
-            </div>
-            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <div className="flex items-center gap-2 text-xs font-display font-semibold text-gray-500 uppercase mb-1">
-                <Wallet size={14} className="text-amber-600" /> Por cobrar
-              </div>
-              <p className="font-display text-2xl font-bold text-amber-600">{formatMoney(porCobrar.total)}</p>
-              <p className="mt-0.5 text-[11px] text-gray-400">
-                {porCobrar.count > 0
-                  ? `${porCobrar.count} ${porCobrar.count === 1 ? 'fiado' : 'fiados'} sin cobrar`
-                  : 'nada pendiente'}
-              </p>
-            </div>
+          {/* Totales del período */}
+          <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Kpi
+              etiqueta="Ventas"
+              valor={totals.ventas}
+              plata
+              tono="bien"
+              icono={<TrendingUp size={15} />}
+              detalle={`${plural(totals.countVentas, 'venta', 'ventas')} ${textoPeriodo}`}
+            />
+            <Kpi
+              etiqueta="Gastos"
+              valor={totals.gastos}
+              plata
+              tono="alerta"
+              icono={<TrendingDown size={15} />}
+              detalle={`${plural(totals.countGastos, 'gasto', 'gastos')} ${textoPeriodo}`}
+            />
+            <Kpi
+              etiqueta="Balance"
+              valor={totals.balance}
+              plata
+              tono={totals.balance >= 0 ? 'neutro' : 'alerta'}
+              icono={<Scale size={15} />}
+              detalle={`sobre ${plural(totals.count, 'movimiento', 'movimientos')}`}
+            />
+            <Kpi
+              etiqueta="Por cobrar"
+              valor={porCobrar.total}
+              plata
+              tono="atencion"
+              icono={<Wallet size={15} />}
+              detalle={porCobrar.count > 0 ? `${plural(porCobrar.count, 'fiado', 'fiados')} sin cobrar` : 'nada pendiente'}
+            />
           </div>
 
           {/* Por pagar: lo que ya sabemos que hay que pagar y todavía no salió */}
           {porPagar.abiertos.length > 0 && (
             <div className="mb-6">
-              <h2 className={`${sectionTitleClass} flex flex-wrap items-center gap-2`}>
-                <span>Por pagar · {formatMoney(porPagar.total)}</span>
-                {porPagar.vencidos > 0 && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold normal-case tracking-normal text-red-600">
-                    {porPagar.vencidos} vencido{porPagar.vencidos === 1 ? '' : 's'}
-                  </span>
+              <Tarjeta
+                sinPadding
+                titulo="Por pagar"
+                acciones={(
+                  <div className="flex items-center gap-2">
+                    {porPagar.vencidos > 0 && (
+                      <Insignia tono="alerta" punto>{plural(porPagar.vencidos, 'vencido', 'vencidos')}</Insignia>
+                    )}
+                    <Plata monto={porPagar.total} className="font-display text-sm font-bold text-navy-700" />
+                  </div>
                 )}
-              </h2>
-              <div className="space-y-2">
-                {porPagar.abiertos.map(g => {
-                  const est = estadoVencimiento(g.venceEl, porPagar.hoy);
-                  const estilo = ESTILO_VENC[est];
-                  return (
-                    <div key={g.id} className={`flex items-center gap-3 rounded-xl border bg-white px-3 py-2.5 ${estilo.borde}`}>
-                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${estilo.chip}`}>
-                        {est === 'vencido' ? <AlertTriangle size={16} /> : <CalendarClock size={16} />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-display text-sm font-bold text-navy-700">{g.label}</p>
-                        <p className={`truncate text-[11px] ${estilo.texto}`}>
-                          {g.proveedor ? `${g.proveedor} · ` : ''}{TEXTO_VENC[est](g.venceEl || '')}
-                        </p>
-                      </div>
-                      <p className="whitespace-nowrap text-sm font-bold tabular-nums text-navy-700">{formatMoney(g.amount)}</p>
-                      <button
-                        onClick={() => setPendienteAPagar(g)}
-                        className="flex-shrink-0 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-lime-500"
-                      >
-                        Pagar
-                      </button>
-                      <button
-                        onClick={() => setPendienteEdit(g)}
-                        title={`Editar ${g.label}`}
-                        aria-label={`Editar ${g.label}`}
-                        className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700"
-                      >
-                        <Pencil size={16} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="mt-2 text-[11px] text-gray-400">
+              >
+                <ul className="divide-y divide-gray-100">
+                  {porPagar.abiertos.map(g => {
+                    const est = estadoVencimiento(g.venceEl, porPagar.hoy);
+                    return (
+                      <li key={g.id} className="flex items-center gap-3 px-4 py-3">
+                        <span className={cn('hidden h-9 w-9 shrink-0 items-center justify-center rounded-full sm:flex', ICONO_VENC[est])}>
+                          {est === 'vencido' ? <AlertTriangle size={16} /> : <CalendarClock size={16} />}
+                        </span>
+                        {/* Tocar el texto edita: un lápiz aparte le robaba 44px al nombre en el celular. */}
+                        <button
+                          type="button"
+                          onClick={() => setPendienteEdit(g)}
+                          aria-label={`Editar ${g.label}`}
+                          className="group min-w-0 flex-1 rounded-md text-left"
+                        >
+                          <span className="flex items-baseline justify-between gap-3">
+                            <span className="flex min-w-0 items-center gap-1.5 font-display text-sm font-bold text-navy-700">
+                              <span className="truncate group-hover:underline">{g.label}</span>
+                              <Pencil size={13} className="shrink-0 text-gray-400" aria-hidden />
+                            </span>
+                            <Plata monto={g.amount} className="shrink-0 text-sm font-bold text-navy-700" />
+                          </span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                            <Insignia tono={TONO_VENC[est]}>{TEXTO_VENC[est](g.venceEl || '')}</Insignia>
+                            {g.proveedor && <span className="truncate">{g.proveedor}</span>}
+                          </span>
+                        </button>
+                        <Boton variante="secundario" onClick={() => setPendienteAPagar(g)} className="shrink-0 px-4">
+                          Pagar
+                        </Boton>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Tarjeta>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
                 Estos gastos <b>no</b> entran en los totales de arriba: recién impactan la caja cuando
                 alguno de ustedes lo marca pagado, y ahí se registra quién puso la plata.
               </p>
@@ -501,212 +530,166 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           {/* Deudores */}
           {porCobrar.deudores.length > 0 && (
             <div className="mb-6">
-              <h2 className={sectionTitleClass}>
-                Por cobrar ({porCobrar.deudores.length} {porCobrar.deudores.length === 1 ? 'persona' : 'personas'})
-              </h2>
-              <div className="space-y-2">
-                {porCobrar.deudores.map(deudor => (
-                  <div key={deudor.nombre} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-white px-3 py-2.5">
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 font-display font-bold text-amber-700">
-                      {deudor.nombre.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-display text-sm font-bold text-navy-700">{deudor.nombre}</p>
-                      <p className="text-[11px] text-gray-400">
-                        {deudor.items} {deudor.items === 1 ? 'ítem' : 'ítems'} · desde {formatFechaCorta(deudor.desde)}
-                      </p>
-                    </div>
-                    <p className="text-sm font-bold tabular-nums text-amber-600 whitespace-nowrap">{formatMoney(deudor.total)}</p>
-                    <button
-                      onClick={() => setACobrar({ nombre: deudor.nombre, total: deudor.total })}
-                      className="flex-shrink-0 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-lime-500"
-                    >
-                      Cobrar
-                    </button>
-                    <button
-                      onClick={() => setABorrarDeuda(deudor)}
-                      title={`Borrar deudas de ${deudor.nombre}`}
-                      aria-label={`Borrar deudas de ${deudor.nombre}`}
-                      className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-[11px] text-gray-400">
+              <Tarjeta
+                sinPadding
+                titulo={`Por cobrar · ${plural(porCobrar.deudores.length, 'persona', 'personas')}`}
+                acciones={<Plata monto={porCobrar.total} className="font-display text-sm font-bold text-amber-700" />}
+              >
+                <ul className="divide-y divide-gray-100">
+                  {porCobrar.deudores.map(deudor => (
+                    <li key={deudor.nombre} className="flex items-center gap-3 px-4 py-3">
+                      <span aria-hidden className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 font-display text-sm font-bold text-amber-700 ring-1 ring-inset ring-amber-200 sm:flex">
+                        {deudor.nombre.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <p className="truncate font-display text-sm font-bold text-navy-700">{deudor.nombre}</p>
+                          <Plata monto={deudor.total} className="shrink-0 text-sm font-bold text-amber-700" />
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-gray-500">
+                          {plural(deudor.items, 'ítem', 'ítems')} · desde {formatFechaCorta(deudor.desde)}
+                        </p>
+                      </div>
+                      <Boton variante="secundario" onClick={() => setACobrar({ nombre: deudor.nombre, total: deudor.total })} className="shrink-0 px-4">
+                        Cobrar
+                      </Boton>
+                      <BotonIcono
+                        etiqueta={`Borrar deudas de ${deudor.nombre}`}
+                        icono={<Trash2 size={17} />}
+                        tono="peligro"
+                        onClick={() => setABorrarDeuda(deudor)}
+                        className="-ml-1"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </Tarjeta>
+              <p className="mt-2 text-xs leading-relaxed text-gray-500">
                 «Cobrar» = entró la plata. El tacho borra la deuda como si la venta nunca hubiera existido
-                (para las cargadas por error). También podés cobrar desde el bot: «cobré + nombre»
+                (para las cargadas por error). También podés cobrar desde el bot: «cobré + nombre».
               </p>
             </div>
           )}
 
-          {/* Filtros como chips */}
-          <div className="mb-6 flex flex-wrap items-center gap-2">
-            {PERIODS.map(p => (
-              <button
-                key={p.id}
-                onClick={() => setPeriod(p.id)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-display font-bold transition-colors ${
-                  period === p.id ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-                }`}
-              >
-                {p.label}
-              </button>
+          {/* Movimientos */}
+          <BarraFiltros
+            busqueda={buscarMov}
+            alBuscar={setBuscarMov}
+            placeholder="Buscar producto, persona…"
+            chips={KINDS.map(k => (
+              <Chip key={k.id} activo={kind === k.id} onClick={() => setKind(k.id)}>{k.label}</Chip>
             ))}
-            <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
-            {KINDS.map(k => (
-              <button
-                key={k.id}
-                onClick={() => setKind(k.id)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-display font-bold transition-colors ${
-                  kind === k.id ? 'bg-lime-400 text-navy-700' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-                }`}
-              >
-                {k.label}
-              </button>
-            ))}
-            <div className="relative w-full sm:ml-auto sm:w-64">
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={buscarMov}
-                onChange={e => setBuscarMov(e.target.value)}
-                placeholder="Buscar producto, persona…"
-                aria-label="Buscar movimientos"
-                className="w-full rounded-full border border-gray-200 py-1.5 pl-9 pr-8 text-xs focus:border-lime-400 outline-none"
-              />
-              {buscarMov !== '' && (
-                <button onClick={() => setBuscarMov('')} aria-label="Limpiar búsqueda"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy-700">✕</button>
-              )}
-            </div>
-          </div>
+          />
 
           {filtered.length === 0 ? (
             loading ? (
-              <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-                <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
-                <p className="font-display text-sm font-bold text-gray-500">Cargando la caja…</p>
-              </div>
+              <CargandoFilas filas={4} />
             ) : (
-              <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-                <Wallet size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-                <p className="font-display text-sm font-bold text-gray-500">
-                  {buscarMov.trim() !== ''
-                    ? <>Nada matchea «{buscarMov.trim()}» en este período</>
-                    : 'Sin movimientos en este período'}
-                </p>
-                <p className="mt-1 text-xs text-gray-400">
-                  {buscarMov.trim() !== ''
-                    ? 'Probá con otra palabra, o ampliá el período a «Todo».'
-                    : 'Registrá una con «Nueva venta» o desde el bot de Telegram.'}
-                </p>
-              </div>
+              <Vacio
+                icono={<Wallet size={22} />}
+                titulo={hayBusqueda
+                  ? `Nada coincide con «${buscarMov.trim()}»`
+                  : period === 'hoy' ? 'Todavía no hay movimientos hoy' : 'Sin movimientos en este período'}
+                descripcion={hayBusqueda
+                  ? 'Probá con otra palabra o ampliá el período.'
+                  : 'Registrá una con «Nueva venta» o desde el bot de Telegram.'}
+                accion={period !== 'todo' ? (
+                  <Boton variante="secundario" onClick={() => setPeriod(period === 'hoy' ? '7d' : 'todo')}>
+                    {period === 'hoy' ? 'Ver los últimos 7 días' : 'Ver todo'}
+                  </Boton>
+                ) : undefined}
+              />
             )
           ) : (
-            <div>
-              <h2 className={sectionTitleClass}>
-                Movimientos ({buscarMov.trim() !== '' ? `${filtered.length} de ${entries.length}` : filtered.length})
-              </h2>
-              <div className="space-y-2">
-                {filtered.map(entry => (
-                  <div
-                    key={entry.id}
-                    className={`flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 ${
-                      entry.reverted ? 'opacity-45' : ''
-                    }`}
-                  >
-                    <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
-                      entry.kind === 'venta' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
-                    }`}>
-                      {entry.kind === 'venta' ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`truncate font-display text-sm font-bold text-navy-700 ${entry.reverted ? 'line-through' : ''}`}>
-                        {entry.label}{entry.qty > 1 ? ` ×${entry.qty}` : ''}
-                      </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-                        <span>{fechaHumana(entry.createdAt, ahoraMs)}</span>
-                        {entry.variantKey && <span>{formatVariant(entry.variantKey)}</span>}
-                        {entry.kind === 'venta' && !entry.productId && <span>ítem suelto (sin stock)</span>}
-                        {metodoPago(entry)}
-                        {entry.socioSettledAt && !entry.reverted && (
-                          <span className={`${badgeClass} bg-teal-50 text-teal-600`}>✓ liquidado</span>
-                        )}
-                        {entry.reverted && (
-                          <span className={`${badgeClass} bg-gray-100 text-gray-500`}>Anulada</span>
-                        )}
-                        {entry.kind === 'gasto' && entry.paidBy && (
-                          <span className={`${badgeClass} bg-navy-50 text-navy-700`}>
-                            pagó {NOMBRES_SOCIOS[entry.paidBy]}
-                          </span>
-                        )}
-                        <span>por {entry.reportedBy}</span>
+            <Tarjeta
+              sinPadding
+              titulo={`Movimientos · ${hayBusqueda ? `${filtered.length} de ${entries.length}` : filtered.length}`}
+              acciones={loading ? <RefreshCw size={15} className="animate-spin text-gray-400" aria-label="Actualizando" /> : undefined}
+            >
+              <ul className="divide-y divide-gray-100">
+                {filtered.map(entry => {
+                  const esVenta = entry.kind === 'venta';
+                  return (
+                    <li key={entry.id} className={cn('flex items-start gap-3 py-3 pl-4 pr-2', entry.reverted && 'opacity-50')}>
+                      <span className={cn(
+                        'mt-0.5 hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg sm:flex',
+                        esVenta ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600',
+                      )}>
+                        {esVenta ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
+                      </span>
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className={cn('min-w-0 truncate font-display text-sm font-bold text-navy-700', entry.reverted && 'line-through')}>
+                            {entry.label}{entry.qty > 1 ? ` ×${entry.qty}` : ''}
+                          </p>
+                          <p className={cn(
+                            'shrink-0 font-display text-sm font-bold tabular-nums',
+                            entry.reverted ? 'text-gray-400 line-through' : esVenta ? 'text-emerald-700' : 'text-red-700',
+                          )}>
+                            {esVenta ? `+${formatoPlata(entry.amount)}` : formatoPlata(-entry.amount)}
+                          </p>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                          <span>{fechaHumana(entry.createdAt, ahoraMs)}</span>
+                          {entry.variantKey && <span>· {formatVariant(entry.variantKey)}</span>}
+                          {esVenta && !entry.productId && <span>· ítem suelto</span>}
+                          {metodoPago(entry)}
+                          {entry.socioSettledAt && !entry.reverted && (
+                            <Insignia tono="navy"><Check size={12} /> liquidado</Insignia>
+                          )}
+                          {entry.reverted && <Insignia>Anulada</Insignia>}
+                          {entry.kind === 'gasto' && entry.paidBy && (
+                            <Insignia tono="navy">pagó {NOMBRES_SOCIOS[entry.paidBy]}</Insignia>
+                          )}
+                          <span>por {entry.reportedBy}</span>
+                        </div>
                       </div>
-                    </div>
-                    <p className={`text-sm font-bold tabular-nums whitespace-nowrap ${
-                      entry.reverted ? 'text-gray-400 line-through' : entry.kind === 'venta' ? 'text-green-600' : 'text-red-500'
-                    }`}>
-                      {entry.kind === 'venta' ? '+' : '−'}{formatMoney(entry.amount)}
-                    </p>
-                    {!entry.reverted && (
-                      <button
-                        onClick={() => setAAnular(entry)}
-                        disabled={reverting !== null}
-                        className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-red-500 disabled:text-gray-200"
-                        title="Anular movimiento"
-                      >
-                        <Undo2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {entries.length >= 500 && (
-                <p className="mt-3 text-[11px] text-gray-400">
-                  Se muestran los últimos 500 movimientos: los totales de "Todo" pueden no incluir los más viejos.
-                </p>
-              )}
-            </div>
+                      {!entry.reverted ? (
+                        <BotonIcono
+                          etiqueta={`Anular ${esVenta ? 'venta' : 'gasto'} de ${formatoPlata(entry.amount)}`}
+                          icono={<Undo2 size={17} />}
+                          tono="peligro"
+                          onClick={() => setAAnular(entry)}
+                          disabled={reverting !== null}
+                          className="-my-1.5"
+                        />
+                      ) : (
+                        <span aria-hidden className="w-11 shrink-0" />
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Tarjeta>
+          )}
+          {entries.length >= 500 && (
+            <p className="mt-3 text-xs text-gray-500">
+              Se muestran los últimos 500 movimientos: los totales de «Todo» pueden no incluir los más viejos.
+            </p>
           )}
         </>
       )}
 
-      {/* Modal de anulación */}
+      {/* Anular: siempre con confirmación que dice qué y cuánto */}
       {aAnular && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0" onClick={() => reverting === null && setAAnular(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="font-display text-lg font-bold text-navy-700 mb-2">
-              {aAnular.kind === 'gasto' ? '¿Anular este gasto?' : '¿Anular esta venta?'}
-            </h3>
-            <p className="truncate text-sm font-semibold text-navy-700">
-              {aAnular.label}{aAnular.qty > 1 ? ` ×${aAnular.qty}` : ''} · {formatMoney(aAnular.amount)}
-            </p>
-            <p className="mt-2 mb-6 text-sm text-gray-500">
-              {aAnular.productId
-                ? 'Se anula y se repone el stock (igual que el deshacer del bot).'
-                : 'Se anula el movimiento (igual que el deshacer del bot).'}
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setAAnular(null)}
-                disabled={reverting !== null}
-                className="flex-1 border border-gray-200 hover:bg-gray-50 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => handleRevert(aAnular)}
-                disabled={reverting !== null}
-                className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white font-display font-semibold py-3 rounded-lg transition-colors"
-              >
-                {reverting === aAnular.id ? 'Anulando…' : 'Anular'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <Confirmar
+          abierto
+          titulo={`Anular ${aAnular.kind === 'gasto' ? 'gasto' : 'venta'} de ${formatoPlata(aAnular.amount)}`}
+          mensaje={(
+            <>
+              <p className="font-semibold text-navy-700">{aAnular.label}{aAnular.qty > 1 ? ` ×${aAnular.qty}` : ''}</p>
+              <p className="mt-1">
+                {aAnular.productId
+                  ? 'Se anula y se repone el stock (igual que el deshacer del bot).'
+                  : 'Se anula el movimiento (igual que el deshacer del bot).'}
+              </p>
+            </>
+          )}
+          textoConfirmar={aAnular.kind === 'gasto' ? 'Anular gasto' : 'Anular venta'}
+          cargando={reverting === aAnular.id}
+          alConfirmar={() => void handleRevert(aAnular)}
+          alCerrar={() => reverting === null && setAAnular(null)}
+        />
       )}
 
       {/* Modal de nueva venta */}
@@ -724,6 +707,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
           ]}
           onClose={() => setVentaAbierta(false)}
           onDone={() => { setVentaAbierta(false); refresh(); }}
+          onRefrescar={() => { refresh(); }}
         />
       )}
 
@@ -747,12 +731,29 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         />
       )}
 
+      {/* Borrar un pendiente: se abre encima del modal de edición, que queda quieto atrás.
+          Va ANTES en el JSX a propósito: si los dos se cierran juntos, React limpia en
+          este orden y cada Dialogo devuelve el scroll del body como lo encontró; al
+          revés, el body quedaba trabado con overflow hidden. */}
+      {aBorrarPendiente && (
+        <Confirmar
+          abierto
+          titulo={`Borrar «${aBorrarPendiente.label}» de ${formatoPlata(aBorrarPendiente.amount)}`}
+          mensaje="Se borra de la lista de pendientes. No afecta la caja, porque todavía no se pagó."
+          textoConfirmar="Borrar pendiente"
+          cargando={borrandoPendiente}
+          alConfirmar={() => void handleBorrarPendiente(aBorrarPendiente)}
+          alCerrar={() => !borrandoPendiente && setABorrarPendiente(null)}
+        />
+      )}
+
       {/* Alta / edición de un gasto pendiente */}
       {pendienteEdit !== null && (
         <GastoPendienteModal
           gasto={pendienteEdit === 'nuevo' ? null : pendienteEdit}
           guardar={saveGastoPendiente}
-          borrar={handleBorrarPendiente}
+          pedirBorrado={setABorrarPendiente}
+          bloqueado={aBorrarPendiente !== null}
           onClose={() => setPendienteEdit(null)}
           onDone={() => { setPendienteEdit(null); refresh(); }}
         />
@@ -798,7 +799,8 @@ function BorrarDeudaModal({ deudor, revertEntry, onClose, onDone }: {
 }) {
   const [borrando, setBorrando] = useState<string | null>(null);
   const [borrados, setBorrados] = useState<string[]>([]);
-  const [confirmarTodas, setConfirmarTodas] = useState(false);
+  // Cada borrado pasa por una confirmación que dice qué y cuánto se borra.
+  const [aConfirmar, setAConfirmar] = useState<{ ids: string[]; etiqueta: string; titulo: string; detalle: string } | null>(null);
 
   const pendientes = deudor.movs.filter(m => !borrados.includes(m.id));
   const totalPendiente = pendientes.reduce((s, m) => s + m.amount, 0);
@@ -830,81 +832,88 @@ function BorrarDeudaModal({ deudor, revertEntry, onClose, onDone }: {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="absolute inset-0" onClick={() => borrando === null && (borrados.length ? onDone() : onClose())} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Borrar deudas de ${deudor.nombre}`}
-        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
-      >
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-navy-700">Borrar deuda de {deudor.nombre}</h3>
-          <button
-            onClick={() => (borrados.length ? onDone() : onClose())}
-            disabled={borrando !== null}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <p className="mb-4 text-xs text-gray-500">
-          Se anula la venta: desaparece de la deuda <strong>y de los totales</strong>, como si nunca se hubiera
-          cargado. Si en realidad te pagó, cerrá esto y usá «Cobrar».
-        </p>
+  const confirmar = async () => {
+    if (!aConfirmar) return;
+    await borrar(aConfirmar.ids, aConfirmar.etiqueta);
+    setAConfirmar(null);
+  };
 
+  const cerrar = () => (borrados.length ? onDone() : onClose());
+
+  return (
+    <>
+      {/* Antes que el Dialogo a propósito (orden de limpieza del scroll del body, ver la Caja). */}
+      {aConfirmar && (
+        <Confirmar
+          abierto
+          titulo={aConfirmar.titulo}
+          mensaje={aConfirmar.detalle}
+          textoConfirmar={aConfirmar.ids.length === 1 ? 'Borrar deuda' : `Borrar ${aConfirmar.ids.length} deudas`}
+          cargando={borrando !== null}
+          alConfirmar={() => void confirmar()}
+          alCerrar={() => borrando === null && setAConfirmar(null)}
+        />
+      )}
+
+      <Dialogo
+        abierto
+        titulo={`Borrar deuda de ${deudor.nombre}`}
+        descripcion="Se anula la venta: desaparece de la deuda y de los totales, como si nunca se hubiera cargado. Si en realidad te pagó, cerrá esto y usá «Cobrar»."
+        alCerrar={cerrar}
+        ocupado={borrando !== null || aConfirmar !== null}
+        ancho="sm"
+        pie={(
+          <>
+            <Boton variante="secundario" onClick={cerrar} disabled={borrando !== null}>Listo</Boton>
+            {pendientes.length > 1 && (
+              <Boton
+                variante="peligro"
+                icono={<Trash2 size={16} />}
+                disabled={borrando !== null}
+                onClick={() => setAConfirmar({
+                  ids: pendientes.map(m => m.id),
+                  etiqueta: 'todas',
+                  titulo: `Borrar las ${pendientes.length} deudas de ${deudor.nombre}`,
+                  detalle: `Se anulan las ${pendientes.length} ventas fiadas, por ${formatoPlata(totalPendiente)} en total.`,
+                })}
+              >
+                Borrar las {pendientes.length} ({formatoPlata(totalPendiente)})
+              </Boton>
+            )}
+          </>
+        )}
+      >
         {pendientes.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-500">No queda ninguna deuda de {deudor.nombre}.</p>
         ) : (
-          <div className="space-y-2">
+          <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200">
             {pendientes.map(m => (
-              <div key={m.id} className="flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-2">
+              <li key={m.id} className="flex items-center gap-3 py-2 pl-3 pr-1">
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-display text-sm font-bold text-navy-700">
                     {m.label}{m.qty > 1 ? ` ×${m.qty}` : ''}
                   </p>
-                  <p className="text-[11px] text-gray-400">{formatFechaCorta(m.createdAt)} · por {m.reportedBy}</p>
+                  <p className="text-xs text-gray-500">{formatFechaCorta(m.createdAt)} · por {m.reportedBy}</p>
                 </div>
-                <p className="text-sm font-bold tabular-nums text-amber-600 whitespace-nowrap">{formatMoney(m.amount)}</p>
-                <button
-                  onClick={() => void borrar([m.id], m.id)}
+                <Plata monto={m.amount} className="shrink-0 text-sm font-bold text-amber-700" />
+                <BotonIcono
+                  etiqueta={`Borrar ${m.label} (${formatoPlata(m.amount)})`}
+                  icono={borrando === m.id ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={17} />}
+                  tono="peligro"
                   disabled={borrando !== null}
-                  title="Borrar esta deuda"
-                  aria-label={`Borrar ${m.label}`}
-                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:text-gray-200"
-                >
-                  {borrando === m.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                </button>
-              </div>
+                  onClick={() => setAConfirmar({
+                    ids: [m.id],
+                    etiqueta: m.id,
+                    titulo: `Borrar deuda de ${formatoPlata(m.amount)}`,
+                    detalle: `${m.label}${m.qty > 1 ? ` ×${m.qty}` : ''} (${formatFechaCorta(m.createdAt)}). Se anula la venta, no se registra un cobro.`,
+                  })}
+                />
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-
-        {pendientes.length > 1 && (
-          confirmarTodas ? (
-            <button
-              onClick={() => void borrar(pendientes.map(m => m.id), 'todas')}
-              disabled={borrando !== null}
-              className="mt-4 w-full rounded-lg bg-red-500 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-red-300"
-            >
-              {borrando === 'todas'
-                ? 'Borrando…'
-                : `Sí, borrar las ${pendientes.length} (${formatMoney(totalPendiente)})`}
-            </button>
-          ) : (
-            <button
-              onClick={() => setConfirmarTodas(true)}
-              disabled={borrando !== null}
-              className="mt-4 w-full rounded-lg border border-red-200 py-2.5 font-display text-sm font-bold text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
-            >
-              Borrar las {pendientes.length} deudas ({formatMoney(totalPendiente)})
-            </button>
-          )
-        )}
-      </div>
-    </div>
+      </Dialogo>
+    </>
   );
 }
 
@@ -919,11 +928,11 @@ function CobroModal({ deudor, cobrar, onClose, onDone }: {
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [monto, setMonto] = useState(String(deudor.total));
+  const [monto, setMonto] = useState<number | null>(deudor.total);
   const [metodo, setMetodo] = useState<'mp' | 'efectivo' | 'transferencia' | null>(null);
   const [cobrando, setCobrando] = useState(false);
 
-  const montoNum = Number(monto);
+  const montoNum = monto ?? NaN;
   const listo = Number.isFinite(montoNum) && montoNum > 0 && montoNum <= deudor.total && !!metodo;
   const esParcial = listo && montoNum < deudor.total;
 
@@ -937,9 +946,9 @@ function CobroModal({ deudor, cobrar, onClose, onDone }: {
         return;
       }
       if (result.restante && result.restante > 0) {
-        toast.success(`Cobrado ${formatMoney(montoNum)} de ${deudor.nombre} — quedan ${formatMoney(result.restante)} pendientes`);
+        toast.success(`Cobrado ${formatoPlata(montoNum)} de ${deudor.nombre} — quedan ${formatoPlata(result.restante)} pendientes`);
       } else {
-        toast.success(`Deuda de ${deudor.nombre} saldada ✓`);
+        toast.success(`Deuda de ${deudor.nombre} saldada`);
       }
       onDone();
     } catch (e) {
@@ -950,73 +959,43 @@ function CobroModal({ deudor, cobrar, onClose, onDone }: {
     }
   };
 
-  const METODOS_COBRO: Array<{ id: 'mp' | 'efectivo' | 'transferencia'; label: string }> = [
-    { id: 'mp', label: 'MP' },
-    { id: 'efectivo', label: 'Efectivo' },
-    { id: 'transferencia', label: 'Transferencia' },
-  ];
+  const errorMonto = Number.isFinite(montoNum) && montoNum > deudor.total ? 'No puede pagar más de lo que debe.' : null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={() => !cobrando && onClose()} />
-      <div role="dialog" aria-modal="true" aria-label={`Cobrar a ${deudor.nombre}`} className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-navy-700">Cobrar a {deudor.nombre}</h3>
-          <button onClick={onClose} disabled={cobrando} aria-label="Cerrar" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="mb-4 text-sm text-gray-500">Debe <strong className="text-amber-600 tabular-nums">{formatMoney(deudor.total)}</strong> en total.</p>
-        <div className="space-y-3">
-          <div>
-            <label htmlFor="cobro-monto" className={labelClass}>¿Cuánto paga ahora?</label>
-            <input
-              id="cobro-monto"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={deudor.total}
-              value={monto}
-              onChange={e => setMonto(e.target.value)}
-              className={inputClass}
-            />
-            {esParcial && (
-              <p className="mt-1 text-[11px] text-amber-600">
-                Pago parcial: quedan {formatMoney(deudor.total - montoNum)} pendientes (se cancelan las deudas más viejas primero).
-              </p>
-            )}
-            {Number.isFinite(montoNum) && montoNum > deudor.total && (
-              <p className="mt-1 text-[11px] text-red-500">No puede pagar más de lo que debe.</p>
-            )}
-          </div>
-          <div>
-            <span className={labelClass}>¿Cómo paga?</span>
-            <div className="grid grid-cols-3 gap-2">
-              {METODOS_COBRO.map(m => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setMetodo(m.id)}
-                  aria-pressed={metodo === m.id}
-                  className={`rounded-xl border px-2 py-2.5 font-display text-sm font-bold transition-colors ${
-                    metodo === m.id ? 'border-lime-400 bg-lime-50 text-navy-700' : 'border-gray-200 bg-white text-gray-500 hover:border-lime-400'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <button
-            onClick={handleCobrar}
-            disabled={!listo || cobrando}
-            className="w-full rounded-xl bg-lime-400 py-3 font-display font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {cobrando ? 'Cobrando…' : esParcial ? `Cobrar ${formatMoney(montoNum)} (parcial)` : 'Cobrar todo'}
-          </button>
+    <Dialogo
+      abierto
+      titulo={`Cobrar a ${deudor.nombre}`}
+      descripcion={<>Debe <b className="tabular-nums text-amber-700">{formatoPlata(deudor.total)}</b> en total.</>}
+      alCerrar={onClose}
+      ocupado={cobrando}
+      ancho="sm"
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={onClose} disabled={cobrando}>Cancelar</Boton>
+          <Boton onClick={handleCobrar} disabled={!listo} cargando={cobrando}>
+            {!metodo ? 'Elegí cómo paga'
+              : esParcial ? `Cobrar ${formatoPlata(montoNum)} (parcial)`
+              : `Cobrar todo · ${formatoPlata(deudor.total)}`}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        <Campo
+          etiqueta="¿Cuánto paga ahora?"
+          error={errorMonto}
+          ayuda={esParcial
+            ? `Pago parcial: quedan ${formatoPlata(deudor.total - montoNum)} pendientes (se cancelan las deudas más viejas primero).`
+            : undefined}
+        >
+          <EntradaPlata valor={monto} alCambiar={setMonto} />
+        </Campo>
+        <div>
+          <span className={claseRotulo}>¿Cómo paga?</span>
+          <Segmentado etiqueta="¿Cómo paga?" opciones={METODOS_COBRO} valor={metodo} alCambiar={setMetodo} anchoCompleto />
         </div>
       </div>
-    </div>
+    </Dialogo>
   );
 }
 
@@ -1025,12 +1004,12 @@ function FotoProducto({ producto }: { producto: Product }) {
   const url = producto.images?.[0];
   if (!url) {
     return (
-      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-300">
+      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400">
         <Shirt size={18} />
       </div>
     );
   }
-  return <img src={url} alt="" className="h-10 w-10 flex-shrink-0 rounded-lg bg-gray-100 object-cover" />;
+  return <img src={url} alt="" className="h-11 w-11 flex-shrink-0 rounded-lg bg-gray-100 object-cover" />;
 }
 
 /**
@@ -1038,7 +1017,7 @@ function FotoProducto({ producto }: { producto: Product }) {
  * el bot) o ítem suelto. Si la RPC falla (ej: "sin stock: quedan N"), el modal
  * queda abierto para corregir.
  */
-function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, padron, onClose, onDone }: {
+function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, padron, onClose, onDone, onRefrescar }: {
   products: Product[];
   registrar: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
   /** Deudores con deuda abierta (nombre + saldo), para elegir con un toque. */
@@ -1049,18 +1028,20 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
   padron: JugadorPadron[];
   onClose: () => void;
   onDone: () => void;
+  /** Relee la caja sin cerrar el modal ("Registrar y otra", resultado dudoso). */
+  onRefrescar: () => void;
 }) {
   const [pestana, setPestana] = useState<'catalogo' | 'suelto'>('catalogo');
   const [busqueda, setBusqueda] = useState('');
   const [producto, setProducto] = useState<Product | null>(null);
   const [variante, setVariante] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
-  // Precio como texto editable: arranca en precio de lista × cantidad y se
-  // recalcula al cambiar la cantidad SOLO si el admin no lo tocó a mano.
-  const [precio, setPrecio] = useState('');
+  // Precio total: arranca en precio de lista × cantidad y se recalcula al cambiar
+  // la cantidad SOLO si el admin no lo tocó a mano.
+  const [precio, setPrecio] = useState<number | null>(null);
   const [precioTocado, setPrecioTocado] = useState(false);
   const [nombreSuelto, setNombreSuelto] = useState('');
-  const [montoSuelto, setMontoSuelto] = useState('');
+  const [montoSuelto, setMontoSuelto] = useState<number | null>(null);
   // Botonera de ventas rápidas como CARRITO: cada toque suma su ítem sin pisar
   // los anteriores (mismo botón otra vez = más cantidad). Editar los campos a
   // mano corta la acumulación (el carrito se vacía en los onChange).
@@ -1073,16 +1054,23 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     setCarrito(nuevo);
     const r = resumenCarrito(nuevo);
     setNombreSuelto(r.nombre);
-    setMontoSuelto(String(r.monto));
+    setMontoSuelto(r.monto);
   };
   const vaciarCarrito = () => {
     setCarrito([]);
     setNombreSuelto('');
-    setMontoSuelto('');
+    setMontoSuelto(null);
   };
   const [metodo, setMetodo] = useState<VentaCajaInput['payment'] | null>(null);
   const [deudor, setDeudor] = useState('');
   const [registrando, setRegistrando] = useState(false);
+  // La conexión se cortó a mitad de camino: la venta pudo haber entrado. Hasta
+  // que alguien mire la lista, reintentar está bloqueado (duplicaría venta y stock).
+  const [incierto, setIncierto] = useState(false);
+  const avisoIncierto = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (incierto) avisoIncierto.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [incierto]);
 
   // Sugerencias de deudor: matching sin tildes y tolerante a typos, deudores
   // abiertos primero con su saldo. Si el texto ya es exactamente un nombre
@@ -1114,7 +1102,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     setVariante(vs.length === 1 ? vs[0].key : null);
     setQty(1);
     setPrecioTocado(false);
-    setPrecio(String(p.price));
+    setPrecio(p.price);
   };
 
   const cambiarCantidad = (nueva: number) => {
@@ -1122,14 +1110,20 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     const tope = Math.max(1, stockVariante || 1);
     const clamped = Math.min(tope, Math.max(1, nueva));
     setQty(clamped);
-    if (!precioTocado) setPrecio(String(producto.price * clamped));
+    if (!precioTocado) setPrecio(producto.price * clamped);
   };
 
   const elegirVariante = (key: string, stock: number) => {
     setVariante(key);
     const clamped = Math.min(Math.max(1, qty), stock);
     setQty(clamped);
-    if (producto && !precioTocado) setPrecio(String(producto.price * clamped));
+    if (producto && !precioTocado) setPrecio(producto.price * clamped);
+  };
+
+  const volverAPrecioLista = () => {
+    if (!producto) return;
+    setPrecioTocado(false);
+    setPrecio(producto.price * qty);
   };
 
   // Jugador del padrón cuyo nombre coincide con lo escrito: si hay match, la
@@ -1140,16 +1134,36 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     return padron.find(j => normalizar(j.nombre) === q || j.alias.some(a => normalizar(a) === q)) ?? null;
   }, [deudor, padron]);
 
-  const precioNum = Number(precio);
-  const montoNum = Number(montoSuelto);
+  const precioNum = precio ?? NaN;
+  const montoNum = montoSuelto ?? NaN;
   const faltaDeudor = metodo === 'debe' && deudor.trim() === '';
   const listo = pestana === 'catalogo'
     ? !!producto && !!variante && qty >= 1 && qty <= stockVariante
       && Number.isFinite(precioNum) && precioNum > 0 && !!metodo && !faltaDeudor
     : nombreSuelto.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0 && !!metodo && !faltaDeudor;
 
-  const handleRegistrar = async () => {
-    if (!listo || registrando || !metodo) return;
+  // Precio de lista vs. lo tipeado: el descuento tiene que verse, no adivinarse.
+  const precioLista = producto ? producto.price * qty : null;
+  const diferenciaLista = precioLista !== null && Number.isFinite(precioNum) ? precioNum - precioLista : 0;
+
+  /** Deja el modal listo para la próxima venta (la cola del mostrador). */
+  const reiniciar = () => {
+    setProducto(null);
+    setVariante(null);
+    setQty(1);
+    setPrecio(null);
+    setPrecioTocado(false);
+    setBusqueda('');
+    setCarrito([]);
+    setNombreSuelto('');
+    setMontoSuelto(null);
+    // Sin método por defecto también en la siguiente: cada cliente paga como paga.
+    setMetodo(null);
+    setDeudor('');
+  };
+
+  const handleRegistrar = async (otra: boolean) => {
+    if (!listo || registrando || !metodo || incierto) return;
     const input: VentaCajaInput = pestana === 'catalogo'
       ? {
           label: producto!.name,
@@ -1172,359 +1186,371 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     try {
       const result = await registrar(input);
       if (!result.ok) {
-        // Modal abierto: se corrige (otra variante, menos cantidad) y se reintenta.
+        if (resultadoIncierto(result.error)) {
+          setIncierto(true);
+          onRefrescar();
+          return;
+        }
+        // Rechazo claro: el modal sigue abierto para corregir (otra variante, menos cantidad).
         toast.error(result.error || 'No se pudo registrar la venta');
         return;
       }
-      toast.success('Venta registrada ✓');
-      onDone();
+      toast.success(`Venta registrada · ${formatoPlata(input.amount)}`);
+      if (otra) {
+        reiniciar();
+        onRefrescar();
+      } else {
+        onDone();
+      }
     } catch (e) {
-      // Un throw inesperado no puede dejar el botón girando para siempre.
+      // Un throw a mitad de camino tampoco dice si la RPC llegó: mismo aviso que el corte.
       console.error('Error registrando venta:', e);
-      toast.error('No se pudo registrar la venta. Probá de nuevo.');
+      setIncierto(true);
+      onRefrescar();
     } finally {
       setRegistrando(false);
     }
   };
 
-  const chipPestana = (id: 'catalogo' | 'suelto', label: string) => (
-    <button
-      onClick={() => setPestana(id)}
-      aria-pressed={pestana === id}
-      className={`flex-1 rounded-md py-2 font-display text-sm font-bold transition-colors ${
-        pestana === id ? 'bg-white text-navy-700 shadow-sm' : 'text-gray-500 hover:text-navy-700'
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const montoVenta = pestana === 'catalogo' ? precioNum : montoNum;
+  const hayMonto = Number.isFinite(montoVenta) && montoVenta > 0;
+  const textoCobrar = incierto ? 'Revisá la lista primero'
+    : metodo === null ? 'Elegí cómo pagaron'
+    : !hayMonto ? 'Cobrar'
+    : metodo === 'debe' ? `Anotar deuda · ${formatoPlata(montoVenta)}`
+    : `Cobrar ${formatoPlata(montoVenta)} · ${PAYMENT_LABELS[metodo]}`;
+
+  const sucio = !incierto && (producto !== null || nombreSuelto.trim() !== '' || montoSuelto !== null || metodo !== null || deudor.trim() !== '');
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={() => !registrando && onClose()} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Nueva venta"
-        className="relative flex max-h-[92dvh] w-full max-w-md flex-col rounded-2xl bg-white shadow-2xl"
-      >
-        <div className="flex items-center justify-between px-5 pt-5">
-          <h3 className="font-display text-lg font-bold text-navy-700">Nueva venta</h3>
-          <button
-            onClick={onClose}
-            disabled={registrando}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-5 pt-4">
-          {/* Pestañas Catálogo | Suelto */}
-          <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-            {chipPestana('catalogo', 'Catálogo')}
-            {chipPestana('suelto', 'Suelto')}
+    <Dialogo
+      abierto
+      titulo="Nueva venta"
+      alCerrar={onClose}
+      ocupado={registrando}
+      sucio={sucio}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={() => void handleRegistrar(true)} disabled={!listo || registrando || incierto}>
+            Registrar y otra
+          </Boton>
+          <Boton onClick={() => void handleRegistrar(false)} disabled={!listo || incierto} cargando={registrando} className="sm:min-w-[15rem]">
+            {registrando ? 'Registrando…' : textoCobrar}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-5">
+        {incierto && (
+          <div ref={avisoIncierto} role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <p className="flex items-center gap-2 font-display text-sm font-bold text-amber-900">
+              <AlertTriangle size={17} className="shrink-0" /> No sabemos si la venta entró
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-amber-900/80">
+              La conexión se cortó antes de la respuesta. Revisá la lista de movimientos antes de
+              reintentar: si entró y la cargás de nuevo, queda duplicada y el stock se descuenta dos veces.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Boton variante="secundario" onClick={onClose}>Cerrar y revisar la lista</Boton>
+              <Boton variante="fantasma" onClick={() => setIncierto(false)}>No entró, reintentar</Boton>
+            </div>
           </div>
+        )}
 
-          {pestana === 'catalogo' ? (
-            !producto ? (
-              <div>
-                <label htmlFor="venta-buscador" className={labelClass}>Producto</label>
-                <div className="relative">
-                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    id="venta-buscador"
-                    type="search"
-                    value={busqueda}
-                    onChange={e => setBusqueda(e.target.value)}
-                    placeholder="Buscar por nombre…"
-                    autoFocus
-                    className={`${inputClass} pl-9`}
-                  />
-                </div>
-                <div className="mt-2 max-h-60 space-y-1 overflow-y-auto">
-                  {candidatos.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-gray-400">
-                      No hay productos activos con stock que coincidan.
-                    </p>
-                  ) : (
-                    candidatos.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => elegirProducto(p)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2 text-left transition-colors hover:border-lime-300 hover:bg-lime-50"
-                      >
-                        <FotoProducto producto={p} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-display text-sm font-bold text-navy-700">{p.name}</p>
-                          <p className="text-[11px] text-gray-400">
-                            {formatMoney(p.price)} · {stockTotal(p.stockBySize)} en stock
-                          </p>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Producto elegido */}
-                <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                  <FotoProducto producto={producto} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-display text-sm font-bold text-navy-700">{producto.name}</p>
-                    <p className="text-[11px] text-gray-400">lista: {formatMoney(producto.price)} c/u</p>
-                  </div>
-                  <button
-                    onClick={() => { setProducto(null); setVariante(null); setPrecio(''); setPrecioTocado(false); setQty(1); }}
-                    className="flex-shrink-0 font-display text-xs font-bold text-navy-500 hover:text-navy-700"
-                  >
-                    Cambiar
-                  </button>
-                </div>
+        <Segmentado
+          etiqueta="Tipo de venta"
+          opciones={[{ valor: 'catalogo', texto: 'Catálogo' }, { valor: 'suelto', texto: 'Suelto' }]}
+          valor={pestana}
+          alCambiar={setPestana}
+          anchoCompleto
+        />
 
-                {/* Variantes con stock */}
-                <div>
-                  <span className={labelClass}>Variante</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {variantes.map(v => (
-                      <button
-                        key={v.key}
-                        onClick={() => elegirVariante(v.key, v.stock)}
-                        aria-pressed={variante === v.key}
-                        className={`rounded-full px-3 py-1.5 text-xs font-display font-bold transition-colors ${
-                          variante === v.key ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-600 hover:text-navy-700'
-                        }`}
-                      >
-                        {v.label} ({v.stock})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Cantidad + precio */}
-                <div className="flex gap-3">
-                  <div>
-                    <span className={labelClass}>Cantidad</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => cambiarCantidad(qty - 1)}
-                        disabled={qty <= 1}
-                        aria-label="Una menos"
-                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-navy-700 transition-colors hover:bg-gray-50 disabled:text-gray-300"
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <span className="w-9 text-center font-display text-base font-bold tabular-nums text-navy-700" aria-live="polite">
-                        {qty}
-                      </span>
-                      <button
-                        onClick={() => cambiarCantidad(qty + 1)}
-                        disabled={!variante || qty >= stockVariante}
-                        aria-label="Una más"
-                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-navy-700 transition-colors hover:bg-gray-50 disabled:text-gray-300"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <label htmlFor="venta-precio" className={labelClass}>Precio total ($)</label>
-                    <input
-                      id="venta-precio"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      value={precio}
-                      onChange={e => { setPrecio(e.target.value); setPrecioTocado(true); }}
-                      className={inputClass}
-                    />
-                  </div>
-                </div>
-              </div>
-            )
-          ) : (
-            /* Ítem suelto: no toca stock */
-            <div className="space-y-3">
-              {/* Lo que más se vende suelto (lista real del ledger), a un toque.
-                  Funciona como carrito: cada botón suma su ítem sin pisar los otros. */}
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className={labelClass}>Lo de siempre</span>
-                  {carrito.length > 0 && (
-                    <button type="button" onClick={vaciarCarrito}
-                      className="text-[11px] font-bold text-gray-400 hover:text-red-500">
-                      vaciar carrito
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {VENTAS_RAPIDAS.map(v => {
-                    const enCarrito = carrito.find(i => i.nombre === v.nombre);
-                    return (
-                      <button
-                        key={v.nombre}
-                        type="button"
-                        onClick={() => tocarRapida(v)}
-                        className={`rounded-xl border px-2 py-2.5 text-center transition-colors ${
-                          enCarrito ? 'border-lime-400 bg-lime-50' : 'border-gray-200 bg-white hover:border-lime-400'
-                        }`}
-                        aria-label={`${v.nombre} $${v.precio}${enCarrito ? `, ${enCarrito.veces} en el carrito` : ''}`}
-                      >
-                        <span className="block text-xl leading-none">{v.emoji}</span>
-                        <span className="block text-xs font-bold text-navy-700 mt-1 truncate">
-                          {enCarrito && enCarrito.veces > 1 ? `${enCarrito.veces}× ` : ''}{v.nombre}
-                        </span>
-                        <span className="block text-[11px] text-gray-400">${v.precio}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label htmlFor="venta-suelto-nombre" className={labelClass}>¿Qué se vendió?</label>
-                <input
-                  id="venta-suelto-nombre"
-                  type="text"
-                  value={nombreSuelto}
-                  onChange={e => { setNombreSuelto(e.target.value); setCarrito([]); }}
-                  placeholder="Ej: alquiler de paleta"
-                  className={inputClass}
+        {pestana === 'catalogo' ? (
+          !producto ? (
+            <div>
+              <label htmlFor="venta-buscador" className={claseRotulo}>Producto</label>
+              <div className="relative">
+                <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Entrada
+                  id="venta-buscador"
+                  type="search"
+                  value={busqueda}
+                  onChange={e => setBusqueda(e.target.value)}
+                  placeholder="Buscar por nombre…"
+                  className="pl-10"
                 />
               </div>
-              <div>
-                <label htmlFor="venta-suelto-monto" className={labelClass}>Monto ($)</label>
-                <input
-                  id="venta-suelto-monto"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  value={montoSuelto}
-                  onChange={e => { setMontoSuelto(e.target.value); setCarrito([]); }}
-                  className={inputClass}
-                />
-              </div>
-              <p className="text-[11px] text-gray-400">Los ítems sueltos no descuentan stock del catálogo.</p>
-            </div>
-          )}
-
-          {/* Método de pago */}
-          <div>
-            <span className={labelClass}>¿Cómo pagaron?</span>
-            <div className="grid grid-cols-2 gap-2">
-              {METODOS_VENTA.map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => setMetodo(m.id)}
-                  aria-pressed={metodo === m.id}
-                  className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
-                    metodo === m.id ? m.activo : 'border-gray-200 bg-white text-gray-500 hover:text-navy-700'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            {/* El comprador se puede marcar SIEMPRE (con Debe es obligatorio):
-                si matchea con el padrón, la venta queda en su ficha. */}
-            {(metodo !== null || deudor !== '') && (
-              <div className="mt-2">
-                <label htmlFor="venta-deudor" className={labelClass}>
-                  {metodo === 'debe' ? '¿Quién debe?' : '¿Quién compró? (opcional)'}
-                </label>
-                {deudor.trim() === '' && deudoresAbiertos.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {deudoresAbiertos.slice(0, 8).map(d => (
-                      <button
-                        key={d.nombre}
-                        type="button"
-                        onClick={() => setDeudor(d.nombre)}
-                        className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100"
-                      >
-                        {d.nombre} · {formatMoney(d.saldo)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <input
-                  id="venta-deudor"
-                  type="text"
-                  value={deudor}
-                  onChange={e => setDeudor(e.target.value)}
-                  placeholder="Nombre y apellido"
-                  className={inputClass}
-                />
-                {sugerenciasDeudor.length > 0 && (
-                  <div className="mt-1 overflow-hidden rounded-lg border border-gray-200 bg-white">
-                    {sugerenciasDeudor.map(s => (
-                      <button
-                        key={s.nombre}
-                        type="button"
-                        onClick={() => setDeudor(s.nombre)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
-                      >
-                        <span className="font-semibold text-navy-700">{s.nombre}</span>
-                        {s.saldo !== null && (
-                          <span className="whitespace-nowrap text-xs font-bold text-amber-600">ya debe {formatMoney(s.saldo)}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {compradorVinculado ? (
-                  <p className="mt-1 text-[11px] font-semibold text-lime-700">
-                    ✓ Queda en la ficha de {compradorVinculado.nombre}
+              <div className="mt-2 space-y-1.5 sm:max-h-72 sm:overflow-y-auto sm:pr-1">
+                {candidatos.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500">
+                    No hay productos activos con stock que coincidan.
                   </p>
                 ) : (
-                  <p className="mt-1 text-[11px] text-gray-400">
-                    {metodo === 'debe'
-                      ? 'Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona).'
-                      : 'Si elegís un jugador del padrón, la compra queda en su historial.'}
-                  </p>
+                  candidatos.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => elegirProducto(p)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-2 pr-3 text-left transition-colors hover:border-navy-700"
+                    >
+                      <FotoProducto producto={p} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-display text-sm font-bold text-navy-700">{p.name}</p>
+                        <p className="text-xs text-gray-500">
+                          <span className="tabular-nums">{formatoPlata(p.price)}</span> · {stockTotal(p.stockBySize)} en stock
+                        </p>
+                      </div>
+                    </button>
+                  ))
                 )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Producto elegido */}
+              <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-2 pl-2">
+                <FotoProducto producto={producto} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-display text-sm font-bold text-navy-700">{producto.name}</p>
+                  <p className="text-xs text-gray-500">lista <span className="tabular-nums">{formatoPlata(producto.price)}</span> c/u</p>
+                </div>
+                <Boton
+                  variante="fantasma"
+                  chico
+                  onClick={() => { setProducto(null); setVariante(null); setPrecio(null); setPrecioTocado(false); setQty(1); }}
+                >
+                  Cambiar
+                </Boton>
+              </div>
 
-        <div className="border-t border-gray-100 p-5 pt-4">
-          <button
-            onClick={handleRegistrar}
-            disabled={!listo || registrando}
-            className="w-full rounded-lg bg-lime-400 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {registrando ? 'Registrando…' : 'Registrar venta'}
-          </button>
+              {/* Variantes con stock */}
+              <div>
+                <span className={claseRotulo}>Variante</span>
+                <div className="flex flex-wrap gap-2">
+                  {variantes.map(v => (
+                    <Chip key={v.key} activo={variante === v.key} onClick={() => elegirVariante(v.key, v.stock)} cantidad={v.stock}>
+                      {v.label}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cantidad + precio */}
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <span className={claseRotulo}>Cantidad</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => cambiarCantidad(qty - 1)}
+                      disabled={qty <= 1}
+                      aria-label="Una menos"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg border border-gray-300 bg-white text-navy-700 transition-colors hover:border-navy-700 disabled:border-gray-200 disabled:text-gray-300"
+                    >
+                      <Minus size={17} />
+                    </button>
+                    <span className="w-10 text-center font-display text-lg font-bold tabular-nums text-navy-700" aria-live="polite">
+                      {qty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => cambiarCantidad(qty + 1)}
+                      disabled={!variante || qty >= stockVariante}
+                      aria-label="Una más"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg border border-gray-300 bg-white text-navy-700 transition-colors hover:border-navy-700 disabled:border-gray-200 disabled:text-gray-300"
+                    >
+                      <Plus size={17} />
+                    </button>
+                  </div>
+                </div>
+                <Campo etiqueta="Precio total" className="min-w-[9rem] flex-1">
+                  <EntradaPlata
+                    valor={precio}
+                    alCambiar={n => { setPrecio(n); setPrecioTocado(true); }}
+                  />
+                </Campo>
+              </div>
+
+              {/* De dónde sale el total: lista × cantidad, y si hay descuento que se vea */}
+              {precioLista !== null && (
+                <div className="rounded-lg bg-gray-50 px-3 py-2.5 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <span className="tabular-nums text-gray-600">
+                      Lista {formatoPlata(producto.price)} × {qty} = <b className="text-navy-700">{formatoPlata(precioLista)}</b>
+                    </span>
+                    {diferenciaLista !== 0 && (
+                      <Insignia tono="atencion">
+                        {diferenciaLista < 0 ? `descuento ${formatoPlata(diferenciaLista)}` : `recargo +${formatoPlata(diferenciaLista)}`}
+                      </Insignia>
+                    )}
+                  </div>
+                  {precioTocado && (
+                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-gray-500">Total editado a mano: cambiar la cantidad ya no lo recalcula.</p>
+                      <button
+                        type="button"
+                        onClick={volverAPrecioLista}
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2 text-xs font-bold text-navy-700 hover:bg-white"
+                      >
+                        <RotateCcw size={13} /> Volver al precio de lista
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        ) : (
+          /* Ítem suelto: no toca stock */
+          <div className="space-y-4">
+            {/* Lo que más se vende suelto (lista real del ledger), a un toque.
+                Funciona como carrito: cada botón suma su ítem sin pisar los otros. */}
+            <div>
+              <div className="mb-1.5 flex min-h-[28px] items-center justify-between">
+                <span className="text-[13px] font-semibold text-navy-700">Lo de siempre</span>
+                {carrito.length > 0 && (
+                  <button type="button" onClick={vaciarCarrito}
+                    className="inline-flex min-h-[32px] items-center rounded-md px-2 text-xs font-bold text-gray-500 hover:bg-red-50 hover:text-red-600">
+                    Vaciar carrito
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {VENTAS_RAPIDAS.map(v => {
+                  const enCarrito = carrito.find(i => i.nombre === v.nombre);
+                  return (
+                    <button
+                      key={v.nombre}
+                      type="button"
+                      onClick={() => tocarRapida(v)}
+                      className={cn(
+                        'relative rounded-xl border px-2 py-2.5 text-center transition-colors',
+                        enCarrito ? 'border-navy-700 bg-navy-50' : 'border-gray-200 bg-white hover:border-navy-700',
+                      )}
+                      aria-label={`${v.nombre} ${formatoPlata(v.precio)}${enCarrito ? `, ${enCarrito.veces} en el carrito` : ''}`}
+                    >
+                      {enCarrito && (
+                        <span className="absolute right-1.5 top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-navy-700 px-1 text-[11px] font-bold tabular-nums text-white">
+                          {enCarrito.veces}
+                        </span>
+                      )}
+                      <span aria-hidden className="block text-xl leading-none">{v.emoji}</span>
+                      <span className="mt-1 block truncate text-xs font-bold text-navy-700">{v.nombre}</span>
+                      <span className="block text-[11px] tabular-nums text-gray-500">{formatoPlata(v.precio)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <Campo etiqueta="¿Qué se vendió?">
+              <Entrada
+                type="text"
+                value={nombreSuelto}
+                onChange={e => { setNombreSuelto(e.target.value); setCarrito([]); }}
+                placeholder="Ej: alquiler de paleta"
+              />
+            </Campo>
+            <Campo etiqueta="Monto" ayuda="Los ítems sueltos no descuentan stock del catálogo.">
+              <EntradaPlata valor={montoSuelto} alCambiar={n => { setMontoSuelto(n); setCarrito([]); }} />
+            </Campo>
+          </div>
+        )}
+
+        {/* Método de pago: sin default, se elige siempre */}
+        <div>
+          <span className={claseRotulo}>¿Cómo pagaron?</span>
+          <Segmentado etiqueta="¿Cómo pagaron?" opciones={METODOS_VENTA} valor={metodo} alCambiar={setMetodo} anchoCompleto />
+          {/* El comprador se puede marcar SIEMPRE (con Debe es obligatorio):
+              si matchea con el padrón, la venta queda en su ficha. */}
+          {(metodo !== null || deudor !== '') && (
+            <div className="mt-4">
+              <label htmlFor="venta-deudor" className={claseRotulo}>
+                {metodo === 'debe' ? '¿Quién debe?' : '¿Quién compró? (opcional)'}
+              </label>
+              {deudor.trim() === '' && deudoresAbiertos.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {deudoresAbiertos.slice(0, 8).map(d => (
+                    <button
+                      key={d.nombre}
+                      type="button"
+                      onClick={() => setDeudor(d.nombre)}
+                      className="inline-flex h-9 items-center rounded-full border border-amber-200 bg-amber-50 px-3 text-[13px] font-semibold text-amber-800 transition-colors hover:border-amber-400"
+                    >
+                      {d.nombre} · <span className="ml-1 tabular-nums">{formatoPlata(d.saldo)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Entrada
+                id="venta-deudor"
+                type="text"
+                value={deudor}
+                onChange={e => setDeudor(e.target.value)}
+                placeholder="Nombre y apellido"
+                aria-invalid={faltaDeudor || undefined}
+              />
+              {sugerenciasDeudor.length > 0 && (
+                <div className="mt-1 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  {sugerenciasDeudor.map(s => (
+                    <button
+                      key={s.nombre}
+                      type="button"
+                      onClick={() => setDeudor(s.nombre)}
+                      className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 text-left text-sm hover:bg-gray-50"
+                    >
+                      <span className="font-semibold text-navy-700">{s.nombre}</span>
+                      {s.saldo !== null && (
+                        <span className="whitespace-nowrap text-xs font-bold text-amber-700">ya debe <span className="tabular-nums">{formatoPlata(s.saldo)}</span></span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {compradorVinculado ? (
+                <p className="mt-1.5 flex items-center gap-1 text-[13px] font-semibold text-emerald-700">
+                  <Check size={14} /> Queda en la ficha de {compradorVinculado.nombre}
+                </p>
+              ) : (
+                <p className="mt-1.5 text-[13px] text-gray-500">
+                  {metodo === 'debe'
+                    ? 'Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona).'
+                    : 'Si elegís un jugador del padrón, la compra queda en su historial.'}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
-    </div>
+    </Dialogo>
   );
 }
 
-/** Gasto rápido: descripción + monto (sin stock ni método de pago). */
 /**
- * Alta y edicion de un gasto pendiente. Lo unico obligatorio es que es y cuanto:
+ * Alta y edición de un gasto pendiente. Lo único obligatorio es qué es y cuánto:
  * si se exigiera vencimiento, la mitad de los gastos que no tienen fecha cierta
- * ("hay que pagarle al taller") no se cargarian nunca.
+ * ("hay que pagarle al taller") no se cargarían nunca.
  */
-function GastoPendienteModal({ gasto, guardar, borrar, onClose, onDone }: {
+function GastoPendienteModal({ gasto, guardar, pedirBorrado, bloqueado, onClose, onDone }: {
   gasto: GastoPendiente | null;
   guardar: (g: GastoPendienteInput) => Promise<{ ok: boolean; error?: string }>;
-  borrar: (g: GastoPendiente) => Promise<void>;
+  /** Abre la confirmación de borrado (la maneja la pestaña, encima de este modal). */
+  pedirBorrado: (g: GastoPendiente) => void;
+  /** Hay una confirmación abierta encima: este modal no se cierra mientras tanto. */
+  bloqueado: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
   const [descripcion, setDescripcion] = useState(gasto?.label ?? '');
-  const [monto, setMonto] = useState(gasto ? String(gasto.amount) : '');
+  const [monto, setMonto] = useState<number | null>(gasto ? gasto.amount : null);
   const [vence, setVence] = useState(gasto?.venceEl ?? '');
   const [proveedor, setProveedor] = useState(gasto?.proveedor ?? '');
   const [notas, setNotas] = useState(gasto?.notas ?? '');
   const [guardando, setGuardando] = useState(false);
-  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
 
-  const montoNum = Number(monto);
+  const montoNum = monto ?? NaN;
   const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0;
+  const sucio = descripcion !== (gasto?.label ?? '') || monto !== (gasto ? gasto.amount : null)
+    || vence !== (gasto?.venceEl ?? '') || proveedor !== (gasto?.proveedor ?? '') || notas !== (gasto?.notas ?? '');
 
   const handleGuardar = async () => {
     if (!listo || guardando) return;
@@ -1542,145 +1568,84 @@ function GastoPendienteModal({ gasto, guardar, borrar, onClose, onDone }: {
         toast.error(result.error || 'No se pudo guardar el gasto');
         return;
       }
-      toast.success(gasto ? 'Gasto actualizado ✓' : 'Gasto pendiente agregado ✓');
+      toast.success(gasto ? 'Gasto actualizado' : 'Gasto pendiente agregado');
       onDone();
     } catch (e) {
       console.error('Error guardando gasto pendiente:', e);
-      toast.error('No se pudo guardar. Proba de nuevo.');
+      toast.error('No se pudo guardar. Probá de nuevo.');
     } finally {
       setGuardando(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={() => !guardando && onClose()} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={gasto ? 'Editar gasto pendiente' : 'Nuevo gasto pendiente'}
-        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-navy-700">
-            {gasto ? 'Editar pendiente' : 'Gasto por pagar'}
-          </h3>
-          <button
-            onClick={onClose}
-            disabled={guardando}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label htmlFor="pend-descripcion" className={labelClass}>¿Que hay que pagar?</label>
-            <input
-              id="pend-descripcion"
-              type="text"
-              value={descripcion}
-              onChange={e => setDescripcion(e.target.value)}
-              placeholder="Ej: sublimacion de remeras, alquiler de canchas"
-              autoFocus
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor="pend-monto" className={labelClass}>Monto ($)</label>
-            <input
-              id="pend-monto"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={monto}
-              onChange={e => setMonto(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor="pend-vence" className={labelClass}>¿Para cuando? (opcional)</label>
-            <input
-              id="pend-vence"
-              type="date"
-              value={vence}
-              onChange={e => setVence(e.target.value)}
-              className={inputClass}
-            />
-            <p className="mt-1.5 text-[11px] text-gray-400">
-              Si lo dejas vacio queda como pendiente sin fecha, al final de la lista.
-            </p>
-          </div>
-          <div>
-            <label htmlFor="pend-proveedor" className={labelClass}>¿A quien? (opcional)</label>
-            <input
-              id="pend-proveedor"
-              type="text"
-              value={proveedor}
-              onChange={e => setProveedor(e.target.value)}
-              placeholder="Ej: taller, club, imprenta"
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor="pend-notas" className={labelClass}>Nota (opcional)</label>
-            <input
-              id="pend-notas"
-              type="text"
-              value={notas}
-              onChange={e => setNotas(e.target.value)}
-              placeholder="Cualquier detalle que convenga recordar"
-              className={inputClass}
-            />
-          </div>
-        </div>
-        <button
-          onClick={handleGuardar}
-          disabled={!listo || guardando}
-          className="mt-5 w-full rounded-lg bg-navy-700 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400"
-        >
-          {guardando ? 'Guardando…' : gasto ? 'Guardar cambios' : 'Agregar a por pagar'}
-        </button>
-        {gasto && (
-          confirmarBorrado ? (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
-              <p className="text-xs text-red-700">
-                Se borra de la lista de pendientes. No afecta la caja, porque todavia no se pago.
-              </p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  onClick={() => borrar(gasto)}
-                  className="flex-1 rounded-lg bg-red-500 py-2 font-display text-xs font-bold text-white transition-colors hover:bg-red-600"
-                >
-                  Si, borrar
-                </button>
-                <button
-                  onClick={() => setConfirmarBorrado(false)}
-                  className="flex-1 rounded-lg border border-gray-200 py-2 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-gray-50"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmarBorrado(true)}
+    <Dialogo
+      abierto
+      titulo={gasto ? 'Editar pendiente' : 'Gasto por pagar'}
+      descripcion={gasto ? undefined : 'Algo que hay que pagar y todavía no salió de la caja.'}
+      alCerrar={onClose}
+      ocupado={guardando || bloqueado}
+      sucio={sucio}
+      ancho="sm"
+      pie={(
+        <>
+          {gasto && (
+            <Boton
+              variante="fantasma"
+              icono={<Trash2 size={16} />}
+              onClick={() => pedirBorrado(gasto)}
               disabled={guardando}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2 font-display text-xs font-bold text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+              className="text-red-600 hover:bg-red-50 sm:mr-auto"
             >
-              <Trash2 size={14} /> Borrar este pendiente
-            </button>
-          )
-        )}
+              Borrar
+            </Boton>
+          )}
+          <Boton variante="secundario" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+          <Boton onClick={handleGuardar} disabled={!listo} cargando={guardando}>
+            {gasto ? 'Guardar cambios' : 'Agregar a por pagar'}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        <Campo etiqueta="¿Qué hay que pagar?" requerido>
+          <Entrada
+            type="text"
+            value={descripcion}
+            onChange={e => setDescripcion(e.target.value)}
+            placeholder="Ej: sublimación de remeras, alquiler de canchas"
+          />
+        </Campo>
+        <Campo etiqueta="Monto" requerido>
+          <EntradaPlata valor={monto} alCambiar={setMonto} />
+        </Campo>
+        <Campo etiqueta="¿Para cuándo? (opcional)" ayuda="Si lo dejás vacío queda como pendiente sin fecha, al final de la lista.">
+          <Entrada type="date" value={vence} onChange={e => setVence(e.target.value)} />
+        </Campo>
+        <Campo etiqueta="¿A quién? (opcional)">
+          <Entrada
+            type="text"
+            value={proveedor}
+            onChange={e => setProveedor(e.target.value)}
+            placeholder="Ej: taller, club, imprenta"
+          />
+        </Campo>
+        <Campo etiqueta="Nota (opcional)">
+          <Entrada
+            type="text"
+            value={notas}
+            onChange={e => setNotas(e.target.value)}
+            placeholder="Cualquier detalle que convenga recordar"
+          />
+        </Campo>
       </div>
-    </div>
+    </Dialogo>
   );
 }
 
 /**
- * Marca pagado un pendiente. Aca se pide quien puso la plata porque es el dato
- * que recien existe al pagar, y el que necesita el reparto 50/25/25. El gasto
+ * Marca pagado un pendiente. Acá se pide quién puso la plata porque es el dato
+ * que recién existe al pagar, y el que necesita el reparto 50/25/25. El gasto
  * entra a la caja con la fecha de hoy, no con la del vencimiento.
  */
 function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
@@ -1702,78 +1667,53 @@ function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
         toast.error(result.error || 'No se pudo marcar como pagado');
         return;
       }
-      toast.success('Pagado ✓ Ya figura como gasto en la caja');
+      toast.success('Pagado. Ya figura como gasto en la caja');
       onDone();
     } catch (e) {
       console.error('Error pagando gasto pendiente:', e);
-      toast.error('No se pudo marcar como pagado. Proba de nuevo.');
+      toast.error('No se pudo marcar como pagado. Probá de nuevo.');
     } finally {
       setPagando(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={() => !pagando && onClose()} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Marcar gasto como pagado"
-        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-navy-700">Marcar pagado</h3>
-          <button
-            onClick={onClose}
-            disabled={pagando}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="rounded-xl bg-gray-50 px-4 py-3">
+    <Dialogo
+      abierto
+      titulo="Marcar pagado"
+      alCerrar={onClose}
+      ocupado={pagando}
+      ancho="sm"
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={onClose} disabled={pagando}>Cancelar</Boton>
+          <Boton onClick={handlePagar} disabled={!pagador} cargando={pagando}>
+            {pagador === null ? 'Elegí quién pagó' : `Confirmar pago · ${formatoPlata(gasto.amount)}`}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-5">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
           <p className="font-display text-sm font-bold text-navy-700">{gasto.label}</p>
           {gasto.proveedor && <p className="text-xs text-gray-500">{gasto.proveedor}</p>}
-          <p className="mt-1 font-display text-2xl font-bold text-red-500">{formatMoney(gasto.amount)}</p>
+          <Plata monto={gasto.amount} className="mt-1 block font-display text-2xl font-black text-navy-700" />
         </div>
-        <div className="mt-4">
-          <span className={labelClass}>¿Quien puso la plata?</span>
-          <div className="grid grid-cols-3 gap-2">
-            {SOCIOS.map(s => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setPagador(s)}
-                aria-pressed={pagador === s}
-                className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
-                  pagador === s
-                    ? 'border-navy-700 bg-navy-700 text-white'
-                    : 'border-gray-200 text-navy-700 hover:border-navy-700'
-                }`}
-              >
-                {NOMBRES_SOCIOS[s]}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-gray-400">
+        <div>
+          <span className={claseRotulo}>¿Quién puso la plata?</span>
+          <Segmentado etiqueta="¿Quién puso la plata?" opciones={OPCIONES_SOCIOS} valor={pagador} alCambiar={setPagador} anchoCompleto />
+          <p className="mt-1.5 text-[13px] text-gray-500">
             {pagador === null
-              ? 'Elegi de quien salio la plata: define el reparto 50/25/25.'
+              ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
               : `Entra a la caja como gasto de hoy, a nombre de ${NOMBRES_SOCIOS[pagador]}.`}
           </p>
         </div>
-        <button
-          onClick={handlePagar}
-          disabled={!pagador || pagando}
-          className="mt-5 w-full rounded-lg bg-lime-400 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:bg-gray-200 disabled:text-gray-400"
-        >
-          {pagando ? 'Registrando…' : pagador === null ? 'Elegi quien pago' : 'Confirmar pago'}
-        </button>
       </div>
-    </div>
+    </Dialogo>
   );
 }
 
+/** Gasto rápido: descripción + monto + quién puso la plata (sin stock ni método de pago). */
 function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
   registrar: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
   /** Socio deducido del admin logueado; null con la cuenta compartida ("VOLEA Team"). */
@@ -1782,13 +1722,13 @@ function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
   onDone: () => void;
 }) {
   const [descripcion, setDescripcion] = useState('');
-  const [monto, setMonto] = useState('');
+  const [monto, setMonto] = useState<number | null>(null);
   // Si no se puede deducir de la sesión, se elige a mano: sin esto el gasto se le
   // asentaba a Gastón por descarte y el reparto 50/25/25 salía mal.
   const [pagador, setPagador] = useState<SocioName | null>(socioSugerido);
   const [registrando, setRegistrando] = useState(false);
 
-  const montoNum = Number(monto);
+  const montoNum = monto ?? NaN;
   const listo = descripcion.trim() !== '' && Number.isFinite(montoNum) && montoNum > 0 && pagador !== null;
 
   const handleRegistrar = async () => {
@@ -1800,7 +1740,7 @@ function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
         toast.error(result.error || 'No se pudo registrar el gasto');
         return;
       }
-      toast.success('Gasto registrado ✓');
+      toast.success(`Gasto registrado · ${formatoPlata(montoNum)}`);
       onDone();
     } catch (e) {
       // Un throw inesperado no puede dejar el botón girando para siempre.
@@ -1812,86 +1752,46 @@ function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={() => !registrando && onClose()} />
-      {/* max-h + scroll como VentaModal: el modal creció con los botones de socio y en el
-          celular, con el teclado abierto, el submit quedaba abajo del fold. */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Registrar gasto"
-        className="relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-display text-lg font-bold text-navy-700">Gasto</h3>
-          <button
-            onClick={onClose}
-            disabled={registrando}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
+    <Dialogo
+      abierto
+      titulo="Registrar gasto"
+      alCerrar={onClose}
+      ocupado={registrando}
+      sucio={descripcion.trim() !== '' || monto !== null}
+      ancho="sm"
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={onClose} disabled={registrando}>Cancelar</Boton>
+          <Boton onClick={handleRegistrar} disabled={!listo} cargando={registrando}>
+            {pagador === null ? 'Elegí quién pagó'
+              : Number.isFinite(montoNum) && montoNum > 0 ? `Registrar gasto · ${formatoPlata(montoNum)}`
+              : 'Registrar gasto'}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        <Campo etiqueta="¿En qué se gastó?">
+          <Entrada
+            type="text"
+            value={descripcion}
+            onChange={e => setDescripcion(e.target.value)}
+            placeholder="Ej: pelotas, hielo, nafta"
+          />
+        </Campo>
+        <Campo etiqueta="Monto">
+          <EntradaPlata valor={monto} alCambiar={setMonto} />
+        </Campo>
+        <div>
+          <span className={claseRotulo}>¿Quién puso la plata?</span>
+          <Segmentado etiqueta="¿Quién puso la plata?" opciones={OPCIONES_SOCIOS} valor={pagador} alCambiar={setPagador} anchoCompleto />
+          <p className="mt-1.5 text-[13px] text-gray-500">
+            {pagador === null
+              ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
+              : `El gasto se le asienta a ${NOMBRES_SOCIOS[pagador]} y se reparte 50/25/25.`}
+          </p>
         </div>
-        <div className="space-y-3">
-          <div>
-            <label htmlFor="gasto-descripcion" className={labelClass}>¿En qué se gastó?</label>
-            <input
-              id="gasto-descripcion"
-              type="text"
-              value={descripcion}
-              onChange={e => setDescripcion(e.target.value)}
-              placeholder="Ej: pelotas, hielo, nafta"
-              autoFocus
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor="gasto-monto" className={labelClass}>Monto ($)</label>
-            <input
-              id="gasto-monto"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={monto}
-              onChange={e => setMonto(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <span className={labelClass}>¿Quién puso la plata?</span>
-            <div className="grid grid-cols-3 gap-2">
-              {SOCIOS.map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setPagador(s)}
-                  aria-pressed={pagador === s}
-                  className={`rounded-lg border py-2.5 font-display text-sm font-bold transition-colors ${
-                    pagador === s
-                      ? 'border-navy-700 bg-navy-700 text-white'
-                      : 'border-gray-200 text-navy-700 hover:border-navy-700'
-                  }`}
-                >
-                  {NOMBRES_SOCIOS[s]}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] text-gray-400">
-              {pagador === null
-                ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
-                : `El gasto se le asienta a ${NOMBRES_SOCIOS[pagador]} y se reparte 50/25/25.`}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={handleRegistrar}
-          disabled={!listo || registrando}
-          className="mt-5 w-full rounded-lg bg-red-500 py-3 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-gray-200 disabled:text-gray-400"
-        >
-          {registrando ? 'Registrando…' : pagador === null ? 'Elegí quién pagó' : 'Registrar gasto'}
-        </button>
       </div>
-    </div>
+    </Dialogo>
   );
 }

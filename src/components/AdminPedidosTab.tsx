@@ -1,14 +1,14 @@
 /**
- * Pestaña "Pedidos" del panel: pedidos a proveedores y trabajos de sublimación.
+ * Pestaña "Compras" del panel: compras a proveedores y trabajos de sublimación.
  * Es una sola entidad (cambia `tipo`) porque el flujo es el mismo: se pide, se
  * sigue, se recibe. Lo importante de verdad es el cotejo de recepción: es el
  * único lugar donde entra stock, y lo hace la RPC (acá no se toca stock a mano).
+ * (El archivo conserva el nombre viejo "Pedidos"; los pedidos de clientes son otra pestaña.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  Package, PackageCheck, RefreshCw, Plus, Loader2, Info, Pencil, Trash2, Shirt, Truck,
+  Package, PackageCheck, RefreshCw, Plus, Loader2, Pencil, Trash2, Shirt, Truck,
   AlertTriangle, CheckCheck, Upload, X, Search, ImagePlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,24 +16,39 @@ import type {
   Compra, CompraArchivo, CompraEstado, CompraItem, CompraTipo, Product, RecepcionItem,
 } from '../types';
 import { SupabaseService } from '../services/supabaseService';
+import { cn } from '../lib/cn';
+import {
+  Boton, BotonIcono, Campo, Entrada, Selector, AreaTexto, EntradaPlata, Dialogo, Confirmar, EncabezadoPagina,
+  Tarjeta, Plata, Insignia, Segmentado, BarraFiltros, Chip, Vacio, CargandoFilas, ErrorEstado, formatoPlata,
+  type TonoInsignia,
+} from '../admin/ui';
+import { plural } from '../admin/ui-ventas/ventas';
 
 // ─── Constantes y helpers ────────────────────────────────────────────────────
 
-interface EstadoInfo { id: CompraEstado; label: string; chip: string }
+interface EstadoInfo { id: CompraEstado; label: string; tono: TonoInsignia }
 
+// Un solo mapa estado → tono (clases literales en el kit, ver tailwindClases.test).
 const ESTADOS: EstadoInfo[] = [
-  { id: 'borrador', label: 'Borrador', chip: 'bg-gray-100 text-gray-500' },
-  { id: 'pedido', label: 'Pedido', chip: 'bg-blue-50 text-blue-600' },
-  { id: 'en_proceso', label: 'En proceso', chip: 'bg-amber-50 text-amber-700' },
-  { id: 'en_camino', label: 'En camino', chip: 'bg-navy-50 text-navy-700' },
-  { id: 'recibido', label: 'Recibido', chip: 'bg-green-50 text-green-700' },
-  { id: 'cancelado', label: 'Cancelado', chip: 'bg-red-50 text-red-500' },
+  { id: 'borrador', label: 'Borrador', tono: 'neutro' },
+  { id: 'pedido', label: 'Pedido', tono: 'info' },
+  { id: 'en_proceso', label: 'En proceso', tono: 'atencion' },
+  { id: 'en_camino', label: 'En camino', tono: 'navy' },
+  { id: 'recibido', label: 'Recibido', tono: 'bien' },
+  { id: 'cancelado', label: 'Cancelado', tono: 'alerta' },
 ];
 
 const ESTADO_INFO: Record<CompraEstado, EstadoInfo> = ESTADOS.reduce((acc, e) => {
   acc[e.id] = e;
   return acc;
 }, {} as Record<CompraEstado, EstadoInfo>);
+
+/**
+ * Los que se eligen a mano al editar. «Recibido» NO: marcarlo a mano escondía el
+ * botón «Recibir» y la mercadería nunca entraba al stock. Ese estado lo pone solo
+ * la recepción (la RPC), que es la que carga el stock.
+ */
+const ESTADOS_MANUALES = ESTADOS.filter(e => e.id !== 'recibido');
 
 /** Solo desde estos estados tiene sentido cotejar mercadería. */
 const RECIBIBLES: CompraEstado[] = ['pedido', 'en_proceso', 'en_camino'];
@@ -42,7 +57,7 @@ type FiltroTipo = 'todos' | CompraTipo;
 type FiltroEstado = 'todos' | CompraEstado;
 
 const TIPOS: { id: FiltroTipo; label: string }[] = [
-  { id: 'todos', label: 'Todos' },
+  { id: 'todos', label: 'Todas' },
   { id: 'proveedor', label: 'Proveedores' },
   { id: 'sublimacion', label: 'Sublimación' },
 ];
@@ -52,12 +67,12 @@ const TIPO_LABEL: Record<CompraTipo, string> = {
   sublimacion: 'sublimación',
 };
 
-const badgeClass = 'rounded-full px-2 py-0.5 font-semibold';
-const sectionTitleClass = 'mb-2 font-display text-sm font-bold uppercase tracking-wide text-gray-500';
-const inputClass = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 focus:border-lime-400 outline-none';
-const labelClass = 'mb-1 block font-display text-xs font-bold uppercase tracking-wide text-gray-500';
-const btnPrimario = 'rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400';
-const btnSecundario = 'rounded-lg border border-gray-200 bg-white px-4 py-2.5 font-display text-sm font-semibold text-navy-700 transition-colors hover:bg-gray-50 disabled:opacity-50';
+/** Rótulo chico de un grupo de controles sin <label> propio. */
+const claseRotulo = 'mb-1.5 block text-[13px] font-semibold text-navy-700';
+
+/** Input de cantidad (entero chico, centrado). Sigue siendo type=number: no es plata. */
+const claseCantidad =
+  'h-11 w-20 shrink-0 rounded-lg border border-gray-300 bg-white px-2 text-center text-base font-bold tabular-nums text-navy-700 focus:border-navy-700 focus:outline-none focus:ring-2 focus:ring-navy-700/15 disabled:bg-gray-50 sm:text-sm';
 
 /**
  * "31/8/26" desde un YYYY-MM-DD partido a mano: `new Date('2026-08-31')` se lee
@@ -90,6 +105,18 @@ const aEntero = (txt: string): number => {
 };
 
 /**
+ * Plata guardada como texto en el formulario ("1200", "12.5": el formato de JS,
+ * que es lo que después leen las cuentas de guardado). Para el EntradaPlata.
+ */
+const textoAPlata = (txt: string): number | null => {
+  const t = txt.trim();
+  if (t === '') return null;
+  const n = Number(t.replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+};
+const plataATexto = (n: number | null): string => (n === null ? '' : String(n));
+
+/**
  * Todas las variantes del producto, incluidas las que están en 0: justamente
  * lo que más se repone es lo que no queda. (`variantesConStock` de utils/caja
  * filtra las vacías y acá serviría de poco.)
@@ -109,6 +136,17 @@ const resumenItems = (items: CompraItem[]): { pedidas: number; recibidas: number
     recibidas += it.cantidadRecibida;
   }
   return { pedidas, recibidas };
+};
+
+/** Costo de la compra según las líneas (no hay columna de total en `compras`). */
+const costoDeCompra = (items: CompraItem[]): { total: number; sinCosto: number } => {
+  let total = 0;
+  let sinCosto = 0;
+  for (const it of items) {
+    if (it.costoUnitario === null) sinCosto++;
+    else total += it.costoUnitario * it.cantidad;
+  }
+  return { total: Math.round(total * 100) / 100, sinCosto };
 };
 
 /** Una línea suma stock solo si apunta a un producto Y a una variante concreta. */
@@ -152,7 +190,7 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
   const [compras, setCompras] = useState<Compra[]>([]);
   const [loading, setLoading] = useState(true);
   // Hasta que no resuelve el primer load no se muestra el vacío: si no, aparece
-  // "Sin pedidos" mientras carga, que es mentira.
+  // "Sin compras" mientras carga, que es mentira.
   const [cargandoInicial, setCargandoInicial] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>('todos');
@@ -172,7 +210,7 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
     if (seq !== fetchSeq.current) return;
     if (data === null) {
       setLoadFailed(true);
-      toast.error('No se pudieron cargar los pedidos. Verificá tu sesión de admin.');
+      toast.error('No se pudieron cargar las compras. Verificá tu sesión de admin.');
     } else {
       setLoadFailed(false);
       setCompras(data);
@@ -195,14 +233,26 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
     [compras, filtroTipo, filtroEstado],
   );
 
+  // Cuántas hay en cada estado (dentro del tipo elegido): el chip dice si vale la pena tocarlo.
+  const porEstado = useMemo(() => {
+    const n: Partial<Record<CompraEstado, number>> = {};
+    for (const c of compras) {
+      if (filtroTipo !== 'todos' && c.tipo !== filtroTipo) continue;
+      n[c.estado] = (n[c.estado] ?? 0) + 1;
+    }
+    return n;
+  }, [compras, filtroTipo]);
+
   const handleBorrar = async () => {
     if (!aBorrar || borrando) return;
     setBorrando(true);
     try {
       const ok = await SupabaseService.deleteCompra(aBorrar.id);
-      if (!ok) { toast.error('No se pudo borrar el pedido'); return; }
-      toast.success('Pedido borrado');
+      if (!ok) { toast.error('No se pudo borrar la compra'); return; }
+      toast.success('Compra borrada');
+      const borrada = aBorrar.id;
       setABorrar(null);
+      setEditando(e => (e && e.id === borrada ? null : e));
       void refresh();
     } finally {
       setBorrando(false);
@@ -219,7 +269,7 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
     );
     if (pendientes > 0) {
       toast(
-        `Quedan ${pendientes} ${pendientes === 1 ? 'línea incompleta' : 'líneas incompletas'}: el pedido sigue «en camino» con el saldo.`,
+        `Quedan ${pendientes} ${pendientes === 1 ? 'línea incompleta' : 'líneas incompletas'}: la compra sigue «en camino» con el saldo.`,
         { duration: 6000 },
       );
     }
@@ -230,118 +280,79 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
 
   return (
     <div className="fade-in">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Pedidos</h1>
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
-          <button
-            onClick={() => setEditando(compraVacia('proveedor', adminEmail))}
-            className="order-first flex w-full items-center justify-center gap-2 rounded-lg bg-lime-400 px-6 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 sm:order-last sm:w-auto"
-          >
-            <Plus size={18} strokeWidth={2.5} /> Nuevo pedido
-          </button>
-          <button
-            onClick={() => setEditando(compraVacia('sublimacion', adminEmail))}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 font-display text-sm font-semibold text-navy-700 transition-colors hover:bg-gray-50 sm:flex-none"
-          >
-            <Shirt size={16} /> Sublimación
-          </button>
-          <button
-            onClick={() => void refresh()}
-            disabled={loading}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-navy-700 px-5 py-2.5 font-display text-sm font-semibold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-400 sm:flex-none"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
-          </button>
-        </div>
-      </div>
+      <EncabezadoPagina
+        rotulo="Tienda"
+        titulo="Compras"
+        descripcion="Compras a proveedores y encargos de sublimación. Al recibir se cotejan las cantidades y el stock de cada variante se actualiza solo."
+        acciones={(
+          <>
+            <Boton variante="secundario" icono={<Shirt size={17} />} onClick={() => setEditando(compraVacia('sublimacion', adminEmail))}>
+              Sublimación
+            </Boton>
+            <BotonIcono
+              etiqueta="Actualizar"
+              icono={<RefreshCw size={18} className={loading ? 'animate-spin' : ''} />}
+              onClick={() => void refresh()}
+              disabled={loading}
+              className="border border-gray-300 bg-white"
+            />
+            <Boton icono={<Plus size={18} strokeWidth={2.5} />} onClick={() => setEditando(compraVacia('proveedor', adminEmail))} className="grow sm:grow-0">
+              Nueva compra
+            </Boton>
+          </>
+        )}
+      />
 
-      <div className="mb-6 flex items-start gap-2 rounded-xl bg-navy-50 px-4 py-2.5 text-xs text-navy-600">
-        <Info size={14} className="mt-0.5 flex-shrink-0" />
-        <p>
-          Pedidos a proveedores y trabajos de sublimación. Al <b>recibir</b> se cotejan las cantidades
-          y el stock de cada variante se actualiza solo: las líneas sin producto o sin variante no lo tocan.
-        </p>
-      </div>
-
-      {cargandoInicial ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-          <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
-          <p className="font-display text-sm font-bold text-gray-500">Cargando los pedidos…</p>
-        </div>
+      {cargandoInicial || (loadFailed && loading) ? (
+        <CargandoFilas filas={4} />
       ) : loadFailed ? (
-        !loading && (
-          <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-            <Info size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-            <p className="font-display text-sm font-bold text-gray-500">No se pudieron cargar los pedidos</p>
-            <p className="mt-1 text-xs text-gray-400">Asegurate de haber entrado como admin y probá «Actualizar».</p>
-          </div>
-        )
+        <ErrorEstado mensaje="No se pudieron cargar las compras. Si recién entraste, puede ser la sesión: probá de nuevo." alReintentar={() => void refresh()} />
       ) : (
         <>
-          {/* Filtros como chips: tipo (lime) y estado (navy) */}
-          <div className="mb-6 flex flex-wrap items-center gap-2">
-            {TIPOS.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setFiltroTipo(t.id)}
-                className={`rounded-full px-3.5 py-1.5 font-display text-xs font-bold transition-colors ${
-                  filtroTipo === t.id ? 'bg-lime-400 text-navy-700' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-            <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
-            <button
-              onClick={() => setFiltroEstado('todos')}
-              className={`rounded-full px-3.5 py-1.5 font-display text-xs font-bold transition-colors ${
-                filtroEstado === 'todos' ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-              }`}
-            >
-              Todo estado
-            </button>
-            {ESTADOS.map(e => (
-              <button
-                key={e.id}
-                onClick={() => setFiltroEstado(e.id)}
-                className={`rounded-full px-3.5 py-1.5 font-display text-xs font-bold transition-colors ${
-                  filtroEstado === e.id ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-                }`}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+          {/* Filtros en una sola fila que se desliza en el celular */}
+          <BarraFiltros
+            chips={(
+              <>
+                {TIPOS.map(t => (
+                  <Chip key={t.id} activo={filtroTipo === t.id} onClick={() => setFiltroTipo(t.id)}>{t.label}</Chip>
+                ))}
+                <span aria-hidden className="mx-1 w-px shrink-0 self-stretch bg-gray-200" />
+                <Chip activo={filtroEstado === 'todos'} onClick={() => setFiltroEstado('todos')}>Todo estado</Chip>
+                {ESTADOS.map(e => (
+                  <Chip key={e.id} activo={filtroEstado === e.id} onClick={() => setFiltroEstado(e.id)} cantidad={porEstado[e.id] ?? 0}>
+                    {e.label}
+                  </Chip>
+                ))}
+              </>
+            )}
+          />
 
           {filtrados.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-              {loading ? (
-                <>
-                  <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
-                  <p className="font-display text-sm font-bold text-gray-500">Cargando los pedidos…</p>
-                </>
-              ) : (
-                <>
-                  <Package size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-                  <p className="font-display text-sm font-bold text-gray-500">
-                    {compras.length === 0 ? 'Todavía no hay pedidos' : 'Ningún pedido con estos filtros'}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {compras.length === 0
-                      ? 'Cargá el primero con «Nuevo pedido» o «Sublimación».'
-                      : 'Probá con otro tipo o estado.'}
-                  </p>
-                </>
-              )}
-            </div>
+            loading ? (
+              <CargandoFilas filas={3} />
+            ) : (
+              <Vacio
+                icono={<Package size={22} />}
+                titulo={compras.length === 0 ? 'Todavía no hay compras' : 'Ninguna compra con estos filtros'}
+                descripcion={compras.length === 0
+                  ? 'Cargá la primera con «Nueva compra» o «Sublimación».'
+                  : 'Probá con otro tipo o estado.'}
+                accion={compras.length === 0 ? (
+                  <Boton icono={<Plus size={18} />} onClick={() => setEditando(compraVacia('proveedor', adminEmail))}>Nueva compra</Boton>
+                ) : (
+                  <Boton variante="secundario" onClick={() => { setFiltroTipo('todos'); setFiltroEstado('todos'); }}>Ver todas</Boton>
+                )}
+              />
+            )
           ) : (
-            <div>
-              <h2 className={sectionTitleClass}>
-                Pedidos ({filtrados.length === compras.length ? filtrados.length : `${filtrados.length} de ${compras.length}`})
-              </h2>
-              <div className="space-y-2">
+            <Tarjeta
+              sinPadding
+              titulo={`Compras · ${filtrados.length === compras.length ? filtrados.length : `${filtrados.length} de ${compras.length}`}`}
+              acciones={loading ? <RefreshCw size={15} className="animate-spin text-gray-400" aria-label="Actualizando" /> : undefined}
+            >
+              <ul className="divide-y divide-gray-100">
                 {filtrados.map(c => (
-                  <FilaPedido
+                  <FilaCompra
                     key={c.id}
                     compra={c}
                     onEditar={() => setEditando(c)}
@@ -349,18 +360,41 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
                     onBorrar={() => setABorrar(c)}
                   />
                 ))}
-              </div>
-            </div>
+              </ul>
+            </Tarjeta>
           )}
         </>
       )}
 
+      {/* Antes que los modales a propósito: si se cierran juntos (borrar desde la edición),
+          React limpia en este orden y el scroll del body vuelve bien. */}
+      {aBorrar && (
+        <Confirmar
+          abierto
+          titulo={`Borrar la compra a ${aBorrar.proveedor || 'sin proveedor'}`}
+          mensaje={(
+            <>
+              {aBorrar.referencia && <p className="font-semibold text-navy-700">#{aBorrar.referencia}</p>}
+              <p className={aBorrar.referencia ? 'mt-1' : ''}>
+                Se borra con todas sus líneas y no se puede deshacer.
+                {resumenItems(aBorrar.items).recibidas > 0 && ' El stock que ya entró queda como está: esto no lo descuenta.'}
+              </p>
+            </>
+          )}
+          textoConfirmar="Borrar compra"
+          cargando={borrando}
+          alConfirmar={() => void handleBorrar()}
+          alCerrar={() => !borrando && setABorrar(null)}
+        />
+      )}
       {editando && (
         <PedidoModal
           compra={editando}
           products={products}
           onClose={() => setEditando(null)}
           onGuardado={() => { setEditando(null); void refresh(); }}
+          onBorrar={editando.id ? () => setABorrar(editando) : undefined}
+          bloqueado={aBorrar !== null}
         />
       )}
 
@@ -373,21 +407,13 @@ export default function AdminPedidosTab({ products, adminEmail, onStockChanged }
         />
       )}
 
-      {aBorrar && (
-        <ConfirmarBorrado
-          compra={aBorrar}
-          borrando={borrando}
-          onCancelar={() => !borrando && setABorrar(null)}
-          onConfirmar={() => void handleBorrar()}
-        />
-      )}
     </div>
   );
 }
 
 // ─── Fila de la lista ────────────────────────────────────────────────────────
 
-function FilaPedido({ compra, onEditar, onRecibir, onBorrar }: {
+function FilaCompra({ compra, onEditar, onRecibir, onBorrar }: {
   compra: Compra;
   onEditar: () => void;
   onRecibir: () => void;
@@ -398,75 +424,76 @@ function FilaPedido({ compra, onEditar, onRecibir, onBorrar }: {
   const completo = pedidas > 0 && recibidas >= pedidas;
   const puedeRecibir = RECIBIBLES.includes(compra.estado) && compra.items.length > 0;
   const esSubli = compra.tipo === 'sublimacion';
+  const costo = costoDeCompra(compra.items);
+  const nombre = compra.proveedor || 'Sin proveedor';
+
+  const botonRecibir = (clase: string) => (
+    <Boton variante="secundario" icono={<PackageCheck size={16} />} onClick={onRecibir} className={clase}>
+      Recibir
+    </Boton>
+  );
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 shadow-sm">
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
-        esSubli ? 'bg-lime-100 text-lime-700' : 'bg-navy-50 text-navy-700'
-      }`}>
-        {esSubli ? <Shirt size={18} /> : <Truck size={18} />}
-      </div>
-
-      {esSubli && compra.mockupUrl && (
+    <li className="flex items-start gap-3 px-4 py-3 sm:items-center">
+      {esSubli && compra.mockupUrl ? (
         <a
           href={compra.mockupUrl}
           target="_blank"
           rel="noreferrer"
           title="Ver el mockup final"
-          className="h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200"
+          className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-gray-200"
         >
           <img src={compra.mockupUrl} alt="Mockup" className="h-full w-full object-cover" />
         </a>
+      ) : (
+        <span className={cn(
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg',
+          esSubli ? 'bg-gray-100 text-navy-700' : 'bg-navy-50 text-navy-700',
+        )}>
+          {esSubli ? <Shirt size={19} /> : <Truck size={19} />}
+        </span>
       )}
 
       <div className="min-w-0 flex-1">
-        <p className="truncate font-display text-sm font-bold text-navy-700">
-          {compra.proveedor || 'Sin proveedor'}
-          {compra.referencia && (
-            <span className="ml-1.5 font-body text-xs font-normal text-gray-400">#{compra.referencia}</span>
-          )}
-        </p>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-          <span className={`${badgeClass} ${estado.chip}`}>{estado.label}</span>
-          <span>{TIPO_LABEL[compra.tipo]}</span>
-          <span>pedido {formatFecha(compra.fechaPedido)}</span>
-          {compra.fechaEstimada && <span>llega {formatFecha(compra.fechaEstimada)}</span>}
-          <span>{compra.items.length} {compra.items.length === 1 ? 'línea' : 'líneas'}</span>
-          {pedidas > 0 && (
-            <span className={completo ? 'font-semibold text-green-600' : recibidas > 0 ? 'font-semibold text-amber-600' : ''}>
-              {recibidas} de {pedidas} recibidas
+        {/* Tocar la compra la abre: en el celular no hay lápiz aparte (le robaba lugar al nombre). */}
+        <button type="button" onClick={onEditar} className="group block w-full rounded-md text-left">
+          <span className="sr-only">Editar la compra a </span>
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0 truncate font-display text-sm font-bold text-navy-700 group-hover:underline">
+              {nombre}
+              {compra.referencia && (
+                <span className="ml-1.5 font-body text-xs font-normal text-gray-500">#{compra.referencia}</span>
+              )}
             </span>
-          )}
-        </div>
+            {costo.total > 0 && (
+              <Plata monto={costo.total} className="shrink-0 font-display text-sm font-bold text-navy-700" />
+            )}
+          </span>
+          <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500">
+            <Insignia tono={estado.tono}>{estado.label}</Insignia>
+            <span>{TIPO_LABEL[compra.tipo]}</span>
+            <span>· pedida {formatFecha(compra.fechaPedido)}</span>
+            {compra.fechaEstimada && <span>· llega {formatFecha(compra.fechaEstimada)}</span>}
+            <span>· {plural(compra.items.length, 'línea', 'líneas')}</span>
+            {pedidas > 0 && (
+              <span className={completo ? 'font-semibold text-emerald-700' : recibidas > 0 ? 'font-semibold text-amber-700' : ''}>
+                · {recibidas} de {pedidas} recibidas
+              </span>
+            )}
+            {costo.total > 0 && costo.sinCosto > 0 && (
+              <span>· {plural(costo.sinCosto, 'línea', 'líneas')} sin costo</span>
+            )}
+          </span>
+        </button>
+        {puedeRecibir && botonRecibir('mt-2.5 sm:hidden')}
       </div>
 
-      <div className="flex flex-shrink-0 items-center gap-1.5">
-        {puedeRecibir && (
-          <button
-            onClick={onRecibir}
-            className="flex items-center gap-1.5 rounded-lg bg-lime-400 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-lime-500"
-          >
-            <PackageCheck size={14} /> Recibir
-          </button>
-        )}
-        <button
-          onClick={onEditar}
-          title="Editar pedido"
-          aria-label={`Editar pedido de ${compra.proveedor || 'sin proveedor'}`}
-          className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700"
-        >
-          <Pencil size={16} />
-        </button>
-        <button
-          onClick={onBorrar}
-          title="Borrar pedido"
-          aria-label={`Borrar pedido de ${compra.proveedor || 'sin proveedor'}`}
-          className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-        >
-          <Trash2 size={16} />
-        </button>
+      <div className="hidden shrink-0 items-center gap-1 sm:flex">
+        {puedeRecibir && botonRecibir('mr-1 px-4')}
+        <BotonIcono etiqueta={`Editar la compra a ${nombre}`} icono={<Pencil size={17} />} onClick={onEditar} />
+        <BotonIcono etiqueta={`Borrar la compra a ${nombre}`} icono={<Trash2 size={17} />} tono="peligro" onClick={onBorrar} />
       </div>
-    </div>
+    </li>
   );
 }
 
@@ -528,11 +555,15 @@ const costoInicial = (c: Compra): string => {
   return total > 0 ? String(Number(total.toFixed(2))) : '';
 };
 
-function PedidoModal({ compra, products, onClose, onGuardado }: {
+function PedidoModal({ compra, products, onClose, onGuardado, onBorrar, bloqueado }: {
   compra: Compra;
   products: Product[];
   onClose: () => void;
   onGuardado: () => void;
+  /** Pide borrar la compra (la confirmación la abre la pestaña, encima de este modal). */
+  onBorrar?: () => void;
+  /** Hay una confirmación abierta encima: este modal no se cierra mientras tanto. */
+  bloqueado: boolean;
 }) {
   const esNuevo = compra.id === '';
   const [cab, setCab] = useState<Compra>(compra);
@@ -549,6 +580,10 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
 
   const ocupado = guardando || subiendoMockup || subiendoArchivos;
   const esSubli = cab.tipo === 'sublimacion';
+
+  // Foto del formulario al abrir: si cambió algo, tocar afuera pregunta antes de descartar.
+  const [fotoInicial] = useState(() => JSON.stringify([compra, compra.items.map(aBorrador), costoInicial(compra), prendaInicial(compra), modoInicial(compra)]));
+  const sucio = JSON.stringify([cab, lineas, costoTrabajo, prendaId, modoPrenda]) !== fotoInicial;
 
   const productosOrdenados = useMemo(
     () => [...products].sort((a, b) => a.name.localeCompare(b.name, 'es')),
@@ -683,6 +718,12 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
     return Math.round((n / totalUnidades) * 100) / 100;
   })();
 
+  /** Solo para mostrar: suma de cantidad × costo de las líneas de proveedor con costo. */
+  const costoTotalLineas = lineas.reduce((s, l) => {
+    const costo = textoAPlata(l.costoUnitario);
+    return costo === null ? s : s + costo * aEntero(l.cantidad);
+  }, 0);
+
   /** Encargo al taller: los talles en cero no viajan y el costo se reparte por prenda. */
   const itemsDeSublimacion = (prendaBaseFinal: string): CompraItem[] | null => {
     const armadas: { linea: LineaBorrador; descripcion: string; cantidad: number }[] = [];
@@ -733,7 +774,7 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
     }));
   };
 
-  /** Pedido a proveedor: renglón por renglón, con su costo unitario. Igual que siempre. */
+  /** Compra a proveedor: renglón por renglón, con su costo unitario. Igual que siempre. */
   const itemsDeProveedor = (): CompraItem[] | null => {
     const items: CompraItem[] = [];
     for (const l of lineas) {
@@ -797,8 +838,8 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
         ...cab,
         proveedor,
         referencia: cab.referencia.trim(),
-        // Los campos de sublimación no viajan si el pedido es de proveedor: así no
-        // quedan mockups colgados de un pedido que dejó de ser sublimación.
+        // Los campos de sublimación no viajan si la compra es de proveedor: así no
+        // quedan mockups colgados de una compra que dejó de ser sublimación.
         prendaBase: esSubli ? prendaBaseFinal : '',
         comentarioTaller: esSubli ? cab.comentarioTaller.trim() : '',
         mockupUrl: esSubli ? cab.mockupUrl : '',
@@ -806,14 +847,14 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
         items,
       });
       if (!r.ok) {
-        // La cabecera de un pedido nuevo pudo haber quedado guardada aunque fallaran
-        // las líneas: con su id, el reintento la actualiza en vez de crear otro pedido.
+        // La cabecera de una compra nueva pudo haber quedado guardada aunque fallaran
+        // las líneas: con su id, el reintento la actualiza en vez de crear otra.
         if (r.id && !cab.id) setCab(c => ({ ...c, id: r.id! }));
-        toast.error(r.error || 'No se pudo guardar el pedido');
+        toast.error(r.error || 'No se pudo guardar la compra');
         return;
       }
-      if (esSubli) toast.success(esNuevo ? 'Encargo creado ✓' : 'Encargo guardado ✓');
-      else toast.success(esNuevo ? 'Pedido creado ✓' : 'Pedido guardado ✓');
+      if (esSubli) toast.success(esNuevo ? 'Encargo creado' : 'Encargo guardado');
+      else toast.success(esNuevo ? 'Compra creada' : 'Compra guardada');
       if (r.aviso) toast.warning(r.aviso, { duration: 9000 });
       onGuardado();
     } finally {
@@ -824,421 +865,385 @@ function PedidoModal({ compra, products, onClose, onGuardado }: {
   // Compartido por las dos ramas; en sublimación vive dentro de la tarjeta de datos.
   const selectorTipo = (
     <div>
-      <span className={labelClass}>Tipo</span>
-      <div className="flex flex-wrap gap-2">
-        {(['proveedor', 'sublimacion'] as CompraTipo[]).map(t => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setCab(c => ({ ...c, tipo: t }))}
-            className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 font-display text-sm font-bold transition-colors ${
-              cab.tipo === t
-                ? 'border-lime-400 bg-lime-50 text-navy-700'
-                : 'border-gray-200 bg-white text-gray-500 hover:text-navy-700'
-            }`}
-          >
-            {t === 'sublimacion' ? <Shirt size={15} /> : <Truck size={15} />}
-            {t === 'sublimacion' ? 'Sublimación' : 'Proveedor'}
-          </button>
-        ))}
-      </div>
+      <span className={claseRotulo}>Tipo</span>
+      <Segmentado
+        etiqueta="Tipo de compra"
+        opciones={[
+          { valor: 'proveedor', texto: 'Proveedor', icono: <Truck size={15} /> },
+          { valor: 'sublimacion', texto: 'Sublimación', icono: <Shirt size={15} /> },
+        ]}
+        valor={cab.tipo}
+        alCambiar={t => setCab(c => ({ ...c, tipo: t }))}
+      />
     </div>
   );
 
+  // «Recibido» solo aparece si la compra YA está recibida (lo puso la recepción):
+  // así se ve el estado actual, pero no se puede elegir a mano desde otro.
+  const opcionesEstado = compra.estado === 'recibido' ? ESTADOS : ESTADOS_MANUALES;
   const chipsEstado = (
     <div>
-      <span className={labelClass}>Estado</span>
-      <div className="flex flex-wrap gap-2">
-        {ESTADOS.map(e => (
-          <button
-            key={e.id}
-            type="button"
-            onClick={() => setCab(c => ({ ...c, estado: e.id }))}
-            className={`rounded-full px-3.5 py-1.5 font-display text-xs font-bold transition-colors ${
-              cab.estado === e.id ? 'bg-navy-700 text-white' : `${e.chip} hover:opacity-80`
-            }`}
-          >
+      <span className={claseRotulo}>Estado</span>
+      <div role="group" aria-label="Estado de la compra" className="flex flex-wrap gap-2">
+        {opcionesEstado.map(e => (
+          <Chip key={e.id} activo={cab.estado === e.id} onClick={() => setCab(c => ({ ...c, estado: e.id }))}>
             {e.label}
-          </button>
+          </Chip>
         ))}
       </div>
-      {cab.estado === 'recibido' && (
-        <p className="mt-1.5 text-[11px] text-amber-600">
-          Marcar «recibido» a mano no toca el stock: para que entre la mercadería usá el botón «Recibir» de la lista.
-        </p>
-      )}
+      <p className="mt-1.5 text-[13px] text-gray-500">
+        «Recibido» se marca solo con el botón <b className="text-navy-700">Recibir</b> de la lista: es el que coteja y carga el stock.
+      </p>
     </div>
   );
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={() => !ocupado && onClose()} />
-      <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4">
-          <div className="min-w-0">
-            <h3 className="truncate font-display text-lg font-bold text-navy-700">
-              {esSubli
-                ? (esNuevo ? 'Nuevo encargo al taller' : 'Editar el encargo')
-                : (esNuevo ? 'Nuevo pedido' : 'Editar pedido')}
-            </h3>
-            {esSubli && (
-              <p className="truncate text-xs text-gray-400">Qué prenda, cómo tiene que quedar y cuántas.</p>
-            )}
-          </div>
-          <button onClick={onClose} disabled={ocupado} aria-label="Cerrar" className="flex-shrink-0 text-gray-400 hover:text-navy-700 disabled:opacity-40">✕</button>
-        </div>
+  const titulo = esSubli
+    ? (esNuevo ? 'Nuevo encargo al taller' : 'Editar el encargo')
+    : (esNuevo ? 'Nueva compra' : 'Editar compra');
 
-        {esSubli ? (
-          /* ── Encargo al taller: tres pasos, no un renglonario de compra ── */
-          <div className="flex-1 space-y-4 overflow-y-auto bg-gray-50 p-3 sm:p-4">
-            <section className="space-y-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-              {selectorTipo}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass} htmlFor="ped-proveedor">Taller / quién lo hace</label>
-                  <input
-                    id="ped-proveedor"
-                    type="text"
-                    value={cab.proveedor}
-                    onChange={e => setCab(c => ({ ...c, proveedor: e.target.value }))}
-                    placeholder="Ej: Sublimados Rivera"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ped-referencia">Nombre del trabajo</label>
-                  <input
-                    id="ped-referencia"
-                    type="text"
-                    value={cab.referencia}
-                    onChange={e => setCab(c => ({ ...c, referencia: e.target.value }))}
-                    placeholder="Ej: Club Carrasco · torneo de octubre"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ped-fecha">Cuándo lo encargamos</label>
-                  <input
-                    id="ped-fecha"
-                    type="date"
-                    value={cab.fechaPedido ?? ''}
-                    onChange={e => setCab(c => ({ ...c, fechaPedido: e.target.value || null }))}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ped-estimada">Para cuándo lo necesitamos</label>
-                  <input
-                    id="ped-estimada"
-                    type="date"
-                    value={cab.fechaEstimada ?? ''}
-                    onChange={e => setCab(c => ({ ...c, fechaEstimada: e.target.value || null }))}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-
-              {chipsEstado}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass} htmlFor="ped-costo">Costo del trabajo (opcional)</label>
-                  <input
-                    id="ped-costo"
-                    type="text"
-                    inputMode="decimal"
-                    value={costoTrabajo}
-                    onChange={e => setCostoTrabajo(e.target.value)}
-                    placeholder="Total que cobra el taller"
-                    className={`${inputClass} tabular-nums`}
-                  />
-                  {costoPorPrendaPreview !== null && (
-                    <p className="mt-1 text-[11px] text-gray-400">
-                      Se reparte solo: ≈ ${costoPorPrendaPreview} por prenda.
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ped-notas">Notas del trabajo</label>
-                  <textarea
-                    id="ped-notas"
-                    rows={2}
-                    value={cab.notas}
-                    onChange={e => setCab(c => ({ ...c, notas: e.target.value }))}
-                    placeholder="Lo que haga falta recordar (el taller también las ve)"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <PasoEncargo numero={1} titulo="¿Qué prenda?" ayuda="La prenda base sobre la que va a sublimar el taller.">
-              <PasoPrenda
-                productos={productosOrdenados}
-                prenda={prenda}
-                modo={modoPrenda}
-                prendaBase={cab.prendaBase}
-                eligiendo={cambiandoPrenda}
-                onElegir={elegirPrendaCatalogo}
-                onPrendaLibre={usarPrendaLibre}
-                onVolverAlCatalogo={volverAlCatalogo}
-                onCancelarCambio={() => setCambiandoPrenda(false)}
-                onPrendaBase={txt => setCab(c => ({ ...c, prendaBase: txt }))}
-              />
-            </PasoEncargo>
-
-            <PasoEncargo
-              numero={2}
-              titulo="¿Cómo tiene que quedar?"
-              ayuda="El mockup, las fotos de referencia y las indicaciones que va a leer el taller."
+  return (
+    <Dialogo
+      abierto
+      titulo={titulo}
+      descripcion={esSubli ? 'Qué prenda, cómo tiene que quedar y cuántas.' : undefined}
+      alCerrar={onClose}
+      ocupado={ocupado || bloqueado}
+      sucio={sucio}
+      ancho="xl"
+      pie={(
+        <>
+          {onBorrar && (
+            <Boton
+              variante="fantasma"
+              icono={<Trash2 size={16} />}
+              onClick={onBorrar}
+              disabled={ocupado}
+              className="text-red-600 hover:bg-red-50 sm:mr-auto"
             >
-              <PasoMockup
-                mockupUrl={cab.mockupUrl}
-                archivos={cab.archivos}
-                comentario={cab.comentarioTaller}
-                subiendoMockup={subiendoMockup}
-                subiendoArchivos={subiendoArchivos}
-                onMockup={file => void subirMockupArchivo(file)}
-                onQuitarMockup={() => setCab(c => ({ ...c, mockupUrl: '' }))}
-                onFotos={files => void subirFotosReferencia(files)}
-                onQuitarFoto={i => setCab(c => ({ ...c, archivos: c.archivos.filter((_, j) => j !== i) }))}
-                onComentario={txt => setCab(c => ({ ...c, comentarioTaller: txt }))}
-              />
-            </PasoEncargo>
-
-            <PasoEncargo
-              numero={3}
-              titulo="¿Cuántas y de qué talle?"
-              ayuda="Cargá solo los talles que van: los que queden en cero no se le piden al taller."
-            >
-              <PasoCantidades
-                modo={modoPrenda}
-                prenda={prenda}
-                prendaBase={cab.prendaBase}
-                lineas={lineas}
-                productoPorId={productoPorId}
-                total={totalUnidades}
-                sinStock={sinStockConCantidad}
-                onCantidadVariante={setCantidadVariante}
-                onCambiarLinea={setLinea}
-                onAgregarLinea={() => setLineas(ls => [...ls, lineaNueva()])}
-                onQuitarLinea={id => setLineas(ls => ls.filter(l => l.id !== id))}
-              />
-            </PasoEncargo>
-          </div>
-        ) : (
-          /* ── Pedido a proveedor: igual que siempre, renglón por renglón ── */
-          <div className="flex-1 space-y-5 overflow-y-auto p-4">
-            {selectorTipo}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelClass} htmlFor="ped-proveedor">Proveedor</label>
-                <input
-                  id="ped-proveedor"
-                  type="text"
-                  value={cab.proveedor}
-                  onChange={e => setCab(c => ({ ...c, proveedor: e.target.value }))}
-                  placeholder="Ej: Textil del Este"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="ped-referencia">Referencia</label>
-                <input
-                  id="ped-referencia"
-                  type="text"
-                  value={cab.referencia}
-                  onChange={e => setCab(c => ({ ...c, referencia: e.target.value }))}
-                  placeholder="Nº de orden, factura, nombre del equipo…"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="ped-fecha">Fecha del pedido</label>
-                <input
-                  id="ped-fecha"
-                  type="date"
-                  value={cab.fechaPedido ?? ''}
-                  onChange={e => setCab(c => ({ ...c, fechaPedido: e.target.value || null }))}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="ped-estimada">Fecha estimada de llegada</label>
-                <input
-                  id="ped-estimada"
-                  type="date"
-                  value={cab.fechaEstimada ?? ''}
-                  onChange={e => setCab(c => ({ ...c, fechaEstimada: e.target.value || null }))}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-
-            {chipsEstado}
-
-            <div>
-              <label className={labelClass} htmlFor="ped-notas">Notas</label>
-              <textarea
-                id="ped-notas"
-                rows={2}
-                value={cab.notas}
-                onChange={e => setCab(c => ({ ...c, notas: e.target.value }))}
-                placeholder="Lo que haga falta recordar de este pedido"
-                className={inputClass}
-              />
-            </div>
-
-            {/* Líneas del pedido */}
-            <div>
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="font-display text-xs font-bold uppercase tracking-wide text-gray-500">
-                  Líneas del pedido{lineas.length > 0 && ` · ${totalUnidades} ${totalUnidades === 1 ? 'unidad' : 'unidades'}`}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLineas(ls => [...ls, lineaNueva()])}
-                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-gray-50"
-                >
-                  <Plus size={14} /> Agregar línea
-                </button>
-              </div>
-
-              {lineas.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-300 py-6 text-center">
-                  <p className="text-sm text-gray-400">Todavía no hay líneas. Agregá lo que estás pidiendo.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {lineas.map((l, i) => {
-                    const producto = l.productId ? productoPorId.get(l.productId) : undefined;
-                    const variantes = variantesDe(producto);
-                    return (
-                      <div key={l.id} className="rounded-xl border border-gray-100 bg-white p-2.5">
-                        <div className="flex items-start gap-2">
-                          <span className="mt-2.5 w-4 flex-shrink-0 text-center text-[11px] font-bold text-gray-300">{i + 1}</span>
-                          <div className="min-w-0 flex-1 space-y-2">
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <select
-                                value={l.productId ?? ''}
-                                onChange={e => cambiarProducto(l, e.target.value)}
-                                aria-label={`Producto de la línea ${i + 1}`}
-                                className={inputClass}
-                              >
-                                <option value="">Sin producto del catálogo</option>
-                                {productosOrdenados.map(p => (
-                                  <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={l.variante ?? ''}
-                                onChange={e => setLinea(l.id, { variante: e.target.value || null })}
-                                disabled={!producto || variantes.length === 0}
-                                aria-label={`Variante de la línea ${i + 1}`}
-                                className={`${inputClass} disabled:bg-gray-50 disabled:text-gray-400`}
-                              >
-                                <option value="">
-                                  {!producto
-                                    ? 'Elegí primero un producto'
-                                    : variantes.length === 0
-                                      ? 'Este producto no tiene variantes'
-                                      : 'Sin variante'}
-                                </option>
-                                {variantes.map(v => (
-                                  <option key={v.key} value={v.key}>{v.label} — stock {v.stock}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <input
-                                type="text"
-                                value={l.descripcion}
-                                onChange={e => setLinea(l.id, { descripcion: e.target.value })}
-                                placeholder={producto ? producto.name : 'Qué es (ej: remeras negras M)'}
-                                aria-label={`Descripción de la línea ${i + 1}`}
-                                className={`${inputClass} min-w-[10rem] flex-1`}
-                              />
-                              <input
-                                type="number"
-                                min={1}
-                                inputMode="numeric"
-                                value={l.cantidad}
-                                onChange={e => setLinea(l.id, { cantidad: e.target.value })}
-                                placeholder="Cant."
-                                aria-label={`Cantidad de la línea ${i + 1}`}
-                                className={`${inputClass} w-24 text-center tabular-nums`}
-                              />
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={l.costoUnitario}
-                                onChange={e => setLinea(l.id, { costoUnitario: e.target.value })}
-                                placeholder="$ c/u"
-                                aria-label={`Costo unitario de la línea ${i + 1}`}
-                                className={`${inputClass} w-28 text-center tabular-nums`}
-                              />
-                            </div>
-
-                            {!sumaStock(l) && (
-                              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-600">
-                                <AlertTriangle size={12} className="flex-shrink-0" />
-                                {l.productId
-                                  ? 'Sin variante elegida: al recibir no va a sumar stock.'
-                                  : 'Línea suelta: al recibir no va a sumar stock.'}
-                              </p>
-                            )}
-                            {l.cantidadRecibida > 0 && (
-                              <p className="text-[11px] text-gray-400">
-                                Ya se recibieron {l.cantidadRecibida} de esta línea.
-                              </p>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setLineas(ls => ls.filter(x => x.id !== l.id))}
-                            title="Quitar línea"
-                            aria-label={`Quitar la línea ${i + 1}`}
-                            className="mt-1 flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {sinStock > 0 && lineas.length > 0 && (
-                <p className="mt-2 text-[11px] text-gray-400">
-                  {sinStock} de {lineas.length} {sinStock === 1 ? 'línea no va a sumar stock' : 'líneas no van a sumar stock'}:
-                  vinculá producto y variante en las que sí tengan que entrar al inventario.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="flex gap-3 border-t border-gray-100 p-4">
-          <button type="button" onClick={onClose} disabled={ocupado} className={`flex-1 ${btnSecundario}`}>
-            Cancelar
-          </button>
-          <button type="button" onClick={() => void guardar()} disabled={ocupado} className={`flex-1 ${btnPrimario}`}>
+              {esSubli ? 'Borrar el encargo' : 'Borrar compra'}
+            </Boton>
+          )}
+          <Boton variante="secundario" onClick={onClose} disabled={ocupado}>Cancelar</Boton>
+          <Boton onClick={() => void guardar()} disabled={ocupado && !guardando} cargando={guardando}>
             {guardando
               ? 'Guardando…'
               : subiendoMockup || subiendoArchivos
                 ? 'Esperá la subida…'
                 : esSubli
                   ? (esNuevo ? 'Crear el encargo' : 'Guardar el encargo')
-                  : (esNuevo ? 'Crear pedido' : 'Guardar cambios')}
-          </button>
+                  : (esNuevo ? 'Crear compra' : 'Guardar cambios')}
+          </Boton>
+        </>
+      )}
+    >
+      {esSubli ? (
+        /* ── Encargo al taller: tres pasos, no un renglonario de compra ── */
+        <div className="space-y-4">
+          <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+            {selectorTipo}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Campo etiqueta="Taller / quién lo hace" requerido>
+                <Entrada
+                  type="text"
+                  value={cab.proveedor}
+                  onChange={e => setCab(c => ({ ...c, proveedor: e.target.value }))}
+                  placeholder="Ej: Sublimados Rivera"
+                />
+              </Campo>
+              <Campo etiqueta="Nombre del trabajo">
+                <Entrada
+                  type="text"
+                  value={cab.referencia}
+                  onChange={e => setCab(c => ({ ...c, referencia: e.target.value }))}
+                  placeholder="Ej: Club Carrasco · torneo de octubre"
+                />
+              </Campo>
+              <Campo etiqueta="Cuándo lo encargamos">
+                <Entrada
+                  type="date"
+                  value={cab.fechaPedido ?? ''}
+                  onChange={e => setCab(c => ({ ...c, fechaPedido: e.target.value || null }))}
+                />
+              </Campo>
+              <Campo etiqueta="Para cuándo lo necesitamos">
+                <Entrada
+                  type="date"
+                  value={cab.fechaEstimada ?? ''}
+                  onChange={e => setCab(c => ({ ...c, fechaEstimada: e.target.value || null }))}
+                />
+              </Campo>
+            </div>
+
+            {chipsEstado}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Campo
+                etiqueta="Costo del trabajo (opcional)"
+                ayuda={costoPorPrendaPreview !== null
+                  ? `Total que cobra el taller. Se reparte solo: ≈ ${formatoPlata(costoPorPrendaPreview)} por prenda.`
+                  : 'Total que cobra el taller.'}
+              >
+                <EntradaPlata
+                  valor={textoAPlata(costoTrabajo)}
+                  alCambiar={n => setCostoTrabajo(plataATexto(n))}
+                />
+              </Campo>
+              <Campo etiqueta="Notas del trabajo">
+                <AreaTexto
+                  rows={2}
+                  value={cab.notas}
+                  onChange={e => setCab(c => ({ ...c, notas: e.target.value }))}
+                  placeholder="Lo que haga falta recordar (el taller también las ve)"
+                  className="min-h-[44px]"
+                />
+              </Campo>
+            </div>
+          </section>
+
+          <PasoEncargo numero={1} titulo="¿Qué prenda?" ayuda="La prenda base sobre la que va a sublimar el taller.">
+            <PasoPrenda
+              productos={productosOrdenados}
+              prenda={prenda}
+              modo={modoPrenda}
+              prendaBase={cab.prendaBase}
+              eligiendo={cambiandoPrenda}
+              onElegir={elegirPrendaCatalogo}
+              onPrendaLibre={usarPrendaLibre}
+              onVolverAlCatalogo={volverAlCatalogo}
+              onCancelarCambio={() => setCambiandoPrenda(false)}
+              onPrendaBase={txt => setCab(c => ({ ...c, prendaBase: txt }))}
+            />
+          </PasoEncargo>
+
+          <PasoEncargo
+            numero={2}
+            titulo="¿Cómo tiene que quedar?"
+            ayuda="El mockup, las fotos de referencia y las indicaciones que va a leer el taller."
+          >
+            <PasoMockup
+              mockupUrl={cab.mockupUrl}
+              archivos={cab.archivos}
+              comentario={cab.comentarioTaller}
+              subiendoMockup={subiendoMockup}
+              subiendoArchivos={subiendoArchivos}
+              onMockup={file => void subirMockupArchivo(file)}
+              onQuitarMockup={() => setCab(c => ({ ...c, mockupUrl: '' }))}
+              onFotos={files => void subirFotosReferencia(files)}
+              onQuitarFoto={i => setCab(c => ({ ...c, archivos: c.archivos.filter((_, j) => j !== i) }))}
+              onComentario={txt => setCab(c => ({ ...c, comentarioTaller: txt }))}
+            />
+          </PasoEncargo>
+
+          <PasoEncargo
+            numero={3}
+            titulo="¿Cuántas y de qué talle?"
+            ayuda="Cargá solo los talles que van: los que queden en cero no se le piden al taller."
+          >
+            <PasoCantidades
+              modo={modoPrenda}
+              prenda={prenda}
+              prendaBase={cab.prendaBase}
+              lineas={lineas}
+              productoPorId={productoPorId}
+              total={totalUnidades}
+              sinStock={sinStockConCantidad}
+              onCantidadVariante={setCantidadVariante}
+              onCambiarLinea={setLinea}
+              onAgregarLinea={() => setLineas(ls => [...ls, lineaNueva()])}
+              onQuitarLinea={id => setLineas(ls => ls.filter(l => l.id !== id))}
+            />
+          </PasoEncargo>
         </div>
-      </div>
-    </div>,
-    document.body,
+      ) : (
+        /* ── Compra a proveedor: renglón por renglón ── */
+        <div className="space-y-5">
+          {selectorTipo}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo etiqueta="Proveedor" requerido>
+              <Entrada
+                type="text"
+                value={cab.proveedor}
+                onChange={e => setCab(c => ({ ...c, proveedor: e.target.value }))}
+                placeholder="Ej: Textil del Este"
+              />
+            </Campo>
+            <Campo etiqueta="Referencia">
+              <Entrada
+                type="text"
+                value={cab.referencia}
+                onChange={e => setCab(c => ({ ...c, referencia: e.target.value }))}
+                placeholder="Nº de orden, factura, nombre del equipo…"
+              />
+            </Campo>
+            <Campo etiqueta="Fecha de la compra">
+              <Entrada
+                type="date"
+                value={cab.fechaPedido ?? ''}
+                onChange={e => setCab(c => ({ ...c, fechaPedido: e.target.value || null }))}
+              />
+            </Campo>
+            <Campo etiqueta="Fecha estimada de llegada">
+              <Entrada
+                type="date"
+                value={cab.fechaEstimada ?? ''}
+                onChange={e => setCab(c => ({ ...c, fechaEstimada: e.target.value || null }))}
+              />
+            </Campo>
+          </div>
+
+          {chipsEstado}
+
+          <Campo etiqueta="Notas">
+            <AreaTexto
+              rows={2}
+              value={cab.notas}
+              onChange={e => setCab(c => ({ ...c, notas: e.target.value }))}
+              placeholder="Lo que haga falta recordar de esta compra"
+              className="min-h-[44px]"
+            />
+          </Campo>
+
+          {/* Líneas de la compra */}
+          <div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="font-display text-sm font-bold uppercase tracking-wide text-navy-700">
+                Líneas{lineas.length > 0 && <span className="ml-1.5 font-body text-xs font-semibold normal-case tracking-normal text-gray-500">{plural(totalUnidades, 'unidad', 'unidades')}</span>}
+              </span>
+              <Boton variante="secundario" chico icono={<Plus size={15} />} onClick={() => setLineas(ls => [...ls, lineaNueva()])}>
+                Agregar línea
+              </Boton>
+            </div>
+
+            {lineas.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center">
+                <p className="text-sm text-gray-500">Todavía no hay líneas. Agregá lo que estás comprando.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {lineas.map((l, i) => {
+                  const producto = l.productId ? productoPorId.get(l.productId) : undefined;
+                  const variantes = variantesDe(producto);
+                  const costo = textoAPlata(l.costoUnitario);
+                  const cant = aEntero(l.cantidad);
+                  return (
+                    <div key={l.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-3 hidden w-5 shrink-0 text-center text-xs font-bold tabular-nums text-gray-400 sm:block">{i + 1}</span>
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Selector
+                              value={l.productId ?? ''}
+                              onChange={e => cambiarProducto(l, e.target.value)}
+                              aria-label={`Producto de la línea ${i + 1}`}
+                            >
+                              <option value="">Sin producto del catálogo</option>
+                              {productosOrdenados.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </Selector>
+                            <Selector
+                              value={l.variante ?? ''}
+                              onChange={e => setLinea(l.id, { variante: e.target.value || null })}
+                              disabled={!producto || variantes.length === 0}
+                              aria-label={`Variante de la línea ${i + 1}`}
+                            >
+                              <option value="">
+                                {!producto
+                                  ? 'Elegí primero un producto'
+                                  : variantes.length === 0
+                                    ? 'Este producto no tiene variantes'
+                                    : 'Sin variante'}
+                              </option>
+                              {variantes.map(v => (
+                                <option key={v.key} value={v.key}>{v.label} — stock {v.stock}</option>
+                              ))}
+                            </Selector>
+                          </div>
+
+                          <Entrada
+                            type="text"
+                            value={l.descripcion}
+                            onChange={e => setLinea(l.id, { descripcion: e.target.value })}
+                            placeholder={producto ? producto.name : 'Qué es (ej: remeras negras M)'}
+                            aria-label={`Descripción de la línea ${i + 1}`}
+                          />
+
+                          <div className="flex flex-wrap items-end gap-2">
+                            <div>
+                              <label htmlFor={`linea-cant-${l.id}`} className="mb-1 block text-xs font-semibold text-gray-500">Cantidad</label>
+                              <input
+                                id={`linea-cant-${l.id}`}
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                value={l.cantidad}
+                                onChange={e => setLinea(l.id, { cantidad: e.target.value })}
+                                className={claseCantidad}
+                              />
+                            </div>
+                            <div className="min-w-[8rem] flex-1">
+                              <label htmlFor={`linea-costo-${l.id}`} className="mb-1 block text-xs font-semibold text-gray-500">Costo c/u</label>
+                              <EntradaPlata
+                                id={`linea-costo-${l.id}`}
+                                valor={costo}
+                                alCambiar={n => setLinea(l.id, { costoUnitario: plataATexto(n) })}
+                                placeholder="opcional"
+                              />
+                            </div>
+                            {costo !== null && cant > 0 && (
+                              <p className="pb-3 text-xs text-gray-500">
+                                = <Plata monto={Math.round(costo * cant * 100) / 100} className="font-semibold text-navy-700" />
+                              </p>
+                            )}
+                          </div>
+
+                          {!sumaStock(l) && (
+                            <p className="flex items-center gap-1.5 text-[13px] font-semibold text-amber-700">
+                              <AlertTriangle size={13} className="shrink-0" />
+                              {l.productId
+                                ? 'Sin variante elegida: al recibir no va a sumar stock.'
+                                : 'Línea suelta: al recibir no va a sumar stock.'}
+                            </p>
+                          )}
+                          {l.cantidadRecibida > 0 && (
+                            <p className="text-[13px] text-gray-500">
+                              Ya se recibieron {l.cantidadRecibida} de esta línea.
+                            </p>
+                          )}
+                        </div>
+                        <BotonIcono
+                          etiqueta={`Quitar la línea ${i + 1}`}
+                          icono={<Trash2 size={17} />}
+                          tono="peligro"
+                          onClick={() => setLineas(ls => ls.filter(x => x.id !== l.id))}
+                          className="-mr-1 -mt-1"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {costoTotalLineas > 0 && (
+              <div className="mt-3 flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3">
+                <span className="text-[13px] font-semibold text-gray-600">Costo total cargado</span>
+                <Plata monto={Math.round(costoTotalLineas * 100) / 100} className="font-display text-base font-bold text-navy-700" />
+              </div>
+            )}
+
+            {sinStock > 0 && lineas.length > 0 && (
+              <p className="mt-2 text-[13px] text-gray-500">
+                {sinStock} de {lineas.length} {sinStock === 1 ? 'línea no va a sumar stock' : 'líneas no van a sumar stock'}:
+                vinculá producto y variante en las que sí tengan que entrar al inventario.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </Dialogo>
   );
 }
 
@@ -1252,7 +1257,7 @@ function PasoEncargo({ numero, titulo, ayuda, children }: {
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
       <header className="flex items-start gap-3 border-b border-gray-100 px-4 py-3">
         <span
           aria-hidden="true"
@@ -1261,8 +1266,8 @@ function PasoEncargo({ numero, titulo, ayuda, children }: {
           {numero}
         </span>
         <div className="min-w-0">
-          <h4 className="font-display text-base font-bold text-navy-700">{titulo}</h4>
-          {ayuda && <p className="mt-0.5 text-xs leading-snug text-gray-400">{ayuda}</p>}
+          <h3 className="font-display text-base font-bold text-navy-700">{titulo}</h3>
+          {ayuda && <p className="mt-0.5 text-[13px] leading-snug text-gray-500">{ayuda}</p>}
         </div>
       </header>
       <div className="p-3 sm:p-4">{children}</div>
@@ -1302,27 +1307,20 @@ function PasoPrenda({
   if (modo === 'libre') {
     return (
       <div className="space-y-3">
-        <div>
-          <label className={labelClass} htmlFor="subli-prenda-libre">¿Qué prenda es?</label>
-          <input
-            id="subli-prenda-libre"
+        <Campo
+          etiqueta="¿Qué prenda es?"
+          ayuda="Tal cual se la vas a nombrar al taller. Como no sale del catálogo, al recibirla no suma stock."
+        >
+          <Entrada
             type="text"
             value={prendaBase}
             onChange={e => onPrendaBase(e.target.value)}
             placeholder="Ej: remera dry-fit blanca, cuello redondo"
-            className={inputClass}
           />
-          <p className="mt-1 text-[11px] text-gray-400">
-            Tal cual se la vas a nombrar al taller. Como no sale del catálogo, al recibirla no suma stock.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onVolverAlCatalogo}
-          className="flex items-center gap-1.5 font-display text-xs font-bold text-navy-700 underline underline-offset-2 hover:text-navy-500"
-        >
-          <Search size={13} /> Mejor buscarla en el catálogo
-        </button>
+        </Campo>
+        <Boton variante="fantasma" chico icono={<Search size={14} />} onClick={onVolverAlCatalogo} className="-ml-3">
+          Mejor buscarla en el catálogo
+        </Boton>
       </div>
     );
   }
@@ -1330,7 +1328,7 @@ function PasoPrenda({
   if (prenda && !eligiendo) {
     const talles = variantesDe(prenda).length;
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-lime-300 bg-lime-50/60 p-3">
+      <div className="flex items-center gap-3 rounded-xl border border-navy-700 bg-navy-50/60 p-3">
         <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white">
           {prenda.images?.[0] ? (
             <img src={prenda.images[0]} alt={prenda.name} className="h-full w-full object-cover" />
@@ -1341,19 +1339,15 @@ function PasoPrenda({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-display text-[10px] font-bold uppercase tracking-wide text-lime-700">Prenda del catálogo</p>
+          <p className="font-display text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">Prenda del catálogo</p>
           <p className="truncate font-display text-base font-bold text-navy-700">{prenda.name}</p>
           <p className="text-xs text-gray-500">
             {talles === 0 ? 'sin talles cargados' : `${talles} ${talles === 1 ? 'talle' : 'talles'} para elegir abajo`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onVolverAlCatalogo}
-          className="flex-shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-gray-50"
-        >
+        <Boton variante="secundario" chico onClick={onVolverAlCatalogo} className="shrink-0">
           Cambiar
-        </button>
+        </Boton>
       </div>
     );
   }
@@ -1361,25 +1355,25 @@ function PasoPrenda({
   return (
     <div className="space-y-3">
       <div className="relative">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
+        <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Entrada
+          type="search"
           value={busca}
           onChange={e => setBusca(e.target.value)}
           placeholder="Buscá la prenda por nombre…"
           aria-label="Buscar prenda en el catálogo"
-          className={`${inputClass} pl-9`}
+          className="pl-10"
         />
       </div>
 
       {filtrados.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 py-6 text-center">
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-gray-500">
             {productos.length === 0 ? 'Todavía no hay productos en el catálogo.' : 'Ninguna prenda con ese nombre.'}
           </p>
         </div>
       ) : (
-        <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+        <div className="space-y-1.5 sm:max-h-64 sm:overflow-y-auto sm:pr-1">
           {filtrados.map(p => {
             const talles = variantesDe(p).length;
             return (
@@ -1387,11 +1381,10 @@ function PasoPrenda({
                 key={p.id}
                 type="button"
                 onClick={() => onElegir(p)}
-                className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
-                  prenda?.id === p.id
-                    ? 'border-lime-400 bg-lime-50'
-                    : 'border-gray-100 bg-white hover:border-lime-300 hover:bg-lime-50/50'
-                }`}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors',
+                  prenda?.id === p.id ? 'border-navy-700 bg-navy-50' : 'border-gray-200 bg-white hover:border-navy-700',
+                )}
               >
                 <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
                   {p.images?.[0] ? (
@@ -1404,7 +1397,7 @@ function PasoPrenda({
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-display text-sm font-bold text-navy-700">{p.name}</p>
-                  <p className="text-[11px] text-gray-400">
+                  <p className="text-xs text-gray-500">
                     {talles === 0 ? 'sin talles cargados' : `${talles} ${talles === 1 ? 'talle' : 'talles'}`}
                   </p>
                 </div>
@@ -1414,22 +1407,14 @@ function PasoPrenda({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-100 pt-3">
-        <button
-          type="button"
-          onClick={onPrendaLibre}
-          className="font-display text-xs font-bold text-navy-700 underline underline-offset-2 hover:text-navy-500"
-        >
+      <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+        <Boton variante="fantasma" chico onClick={onPrendaLibre} className="-ml-3">
           Es una prenda que no está en el catálogo
-        </button>
+        </Boton>
         {prenda && (
-          <button
-            type="button"
-            onClick={onCancelarCambio}
-            className="font-display text-xs font-semibold text-gray-400 hover:text-navy-700"
-          >
+          <Boton variante="fantasma" chico onClick={onCancelarCambio} className="text-gray-500">
             Dejar «{prenda.name}»
-          </button>
+          </Boton>
         )}
       </div>
     </div>
@@ -1478,18 +1463,21 @@ function PasoMockup({
     onFotos(files);
   };
 
+  // Label con pinta de botón secundario (el input file vive adentro).
+  const claseBotonArchivo = 'inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 font-display text-sm font-bold text-navy-700 transition-colors hover:border-navy-700';
+
   return (
     <div className="space-y-5">
       {/* Mockup final */}
       <div>
-        <span className={labelClass}>Mockup final</span>
+        <span className={claseRotulo}>Mockup final</span>
         <div
           onDragOver={e => { e.preventDefault(); setArrastrando(true); }}
           onDragLeave={() => setArrastrando(false)}
           onDrop={soltar}
         >
           {mockupUrl ? (
-            <div className={`overflow-hidden rounded-xl border-2 ${arrastrando ? 'border-dashed border-lime-400' : 'border-gray-200'} bg-gray-50`}>
+            <div className={cn('overflow-hidden rounded-xl border-2 bg-gray-50', arrastrando ? 'border-dashed border-navy-700' : 'border-gray-200')}>
               <a href={mockupUrl} target="_blank" rel="noreferrer" title="Abrir el mockup en grande">
                 <img
                   src={mockupUrl}
@@ -1500,9 +1488,11 @@ function PasoMockup({
             </div>
           ) : (
             <label
-              className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-10 text-center transition-colors ${
-                arrastrando ? 'border-lime-400 bg-lime-50' : 'border-gray-300 bg-gray-50 hover:border-lime-300 hover:bg-lime-50/40'
-              } ${subiendoMockup ? 'pointer-events-none opacity-60' : ''}`}
+              className={cn(
+                'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-10 text-center transition-colors',
+                arrastrando ? 'border-navy-700 bg-navy-50' : 'border-gray-300 bg-gray-50 hover:border-navy-700 hover:bg-navy-50/40',
+                subiendoMockup && 'pointer-events-none opacity-60',
+              )}
             >
               {subiendoMockup
                 ? <Loader2 size={30} className="animate-spin text-navy-700" />
@@ -1510,7 +1500,7 @@ function PasoMockup({
               <span className="font-display text-sm font-bold text-navy-700">
                 {subiendoMockup ? 'Subiendo el mockup…' : 'Arrastrá el mockup acá'}
               </span>
-              <span className="text-xs text-gray-400">o tocá para elegirlo del dispositivo</span>
+              <span className="text-xs text-gray-500">o tocá para elegirlo del dispositivo</span>
               <input type="file" accept="image/*" className="hidden" onChange={elegirMockup} disabled={subiendoMockup} />
             </label>
           )}
@@ -1518,25 +1508,20 @@ function PasoMockup({
 
         {mockupUrl && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <label className={`inline-flex cursor-pointer items-center gap-2 ${btnSecundario} ${subiendoMockup ? 'pointer-events-none opacity-50' : ''}`}>
+            <label className={cn(claseBotonArchivo, subiendoMockup && 'pointer-events-none opacity-50')}>
               {subiendoMockup ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
               {subiendoMockup ? 'Subiendo…' : 'Reemplazar'}
               <input type="file" accept="image/*" className="hidden" onChange={elegirMockup} disabled={subiendoMockup} />
             </label>
-            <button
-              type="button"
-              onClick={onQuitarMockup}
-              disabled={subiendoMockup}
-              className="rounded-lg px-2 py-2.5 font-display text-xs font-bold text-gray-400 transition-colors hover:text-red-500 disabled:opacity-40"
-            >
+            <Boton variante="fantasma" onClick={onQuitarMockup} disabled={subiendoMockup} className="text-gray-500 hover:bg-red-50 hover:text-red-600">
               Quitar mockup
-            </button>
+            </Boton>
           </div>
         )}
 
         {!mockupUrl && !subiendoMockup && (
-          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-700">
-            <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-800">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
             Todavía no cargaste el mockup. Es lo primero que mira el taller: sin eso no sabe cómo tiene que quedar.
           </p>
         )}
@@ -1544,11 +1529,11 @@ function PasoMockup({
 
       {/* Fotos de referencia */}
       <div>
-        <span className={labelClass}>Fotos de referencia (opcional)</span>
+        <span className={claseRotulo}>Fotos de referencia (opcional)</span>
         {archivos.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {archivos.map((a, i) => (
-              <div key={`${a.url}-${i}`} className="relative h-16 w-16 overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <div key={`${a.url}-${i}`} className="relative h-20 w-20 overflow-hidden rounded-lg border border-gray-200 bg-white">
                 <a href={a.url} target="_blank" rel="noreferrer" title={a.nombre} className="block h-full w-full">
                   <img src={a.url} alt={a.nombre} className="h-full w-full object-cover" />
                 </a>
@@ -1556,36 +1541,33 @@ function PasoMockup({
                   type="button"
                   onClick={() => onQuitarFoto(i)}
                   aria-label={`Quitar ${a.nombre}`}
-                  className="absolute right-0.5 top-0.5 rounded-full bg-white/90 p-0.5 text-gray-500 shadow-sm hover:text-red-500"
+                  className="absolute right-0 top-0 flex h-8 w-8 items-center justify-center rounded-bl-lg bg-white/90 text-gray-600 hover:text-red-600"
                 >
-                  <X size={12} />
+                  <X size={15} />
                 </button>
               </div>
             ))}
           </div>
         )}
-        <label className={`inline-flex cursor-pointer items-center gap-2 ${btnSecundario} ${subiendoArchivos ? 'pointer-events-none opacity-50' : ''}`}>
+        <label className={cn(claseBotonArchivo, subiendoArchivos && 'pointer-events-none opacity-50')}>
           {subiendoArchivos ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
           {subiendoArchivos ? 'Subiendo…' : archivos.length > 0 ? 'Agregar más fotos' : 'Agregar fotos'}
           <input type="file" accept="image/*" multiple className="hidden" onChange={elegirFotos} disabled={subiendoArchivos} />
         </label>
-        <p className="mt-1.5 text-[11px] text-gray-400">
+        <p className="mt-1.5 text-[13px] text-gray-500">
           Detalles, colores, trabajos parecidos: todo lo que ayude a que salga como lo pensaste.
         </p>
       </div>
 
       {/* Instrucciones */}
-      <div>
-        <label className={labelClass} htmlFor="subli-instrucciones">Instrucciones para el taller</label>
-        <textarea
-          id="subli-instrucciones"
+      <Campo etiqueta="Instrucciones para el taller">
+        <AreaTexto
           rows={4}
           value={comentario}
           onChange={e => onComentario(e.target.value)}
           placeholder={'Ej: logo al pecho izquierdo, 8 cm de ancho. Verde exacto del mockup (#CCFF00). Nombres atrás en Lexend, arriba del número. Costura reforzada en las mangas.'}
-          className={inputClass}
         />
-      </div>
+      </Campo>
     </div>
   );
 }
@@ -1633,16 +1615,17 @@ function PasoCantidades({
     return (
       <div
         key={clave ?? '__unica__'}
-        className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
-          n > 0 ? 'border-lime-400 bg-lime-50/60' : 'border-gray-100 bg-white'
-        }`}
+        className={cn(
+          'flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors',
+          n > 0 ? 'border-navy-700 bg-navy-50/60' : 'border-gray-200 bg-white',
+        )}
       >
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-sm font-bold text-navy-700">
             {titulo}
             {color && <span className="ml-1.5 font-body text-xs font-normal text-gray-500">{color}</span>}
           </p>
-          <p className="text-[11px] text-gray-400">
+          <p className="text-xs text-gray-500">
             {stock === null ? 'esta prenda no suma stock' : `en stock hoy: ${stock}`}
             {linea && linea.cantidadRecibida > 0 && ` · ya llegaron ${linea.cantidadRecibida}`}
           </p>
@@ -1655,9 +1638,7 @@ function PasoCantidades({
           onChange={e => onCantidadVariante(clave, e.target.value)}
           placeholder="0"
           aria-label={`Cantidad de ${titulo}${color ? ` ${color}` : ''}`}
-          className={`w-16 flex-shrink-0 rounded-lg border px-2 py-2 text-center text-sm font-bold tabular-nums text-navy-700 outline-none focus:border-lime-400 sm:w-20 ${
-            n > 0 ? 'border-lime-400 bg-white' : 'border-gray-200'
-          }`}
+          className={claseCantidad}
         />
       </div>
     );
@@ -1668,7 +1649,7 @@ function PasoCantidades({
       {enCatalogo ? (
         variantes.length === 0 ? (
           <>
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-700">
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-800">
               «{prenda?.name}» no tiene talles cargados en el catálogo. Podés encargar igual, pero al recibir
               no va a sumar stock hasta que le cargues los talles al producto.
             </p>
@@ -1686,18 +1667,18 @@ function PasoCantidades({
         <div className="space-y-2">
           {filasLibres.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 py-6 text-center">
-              <p className="text-sm text-gray-400">Agregá una fila por cada talle o variante que le encargás.</p>
+              <p className="text-sm text-gray-500">Agregá una fila por cada talle o variante que le encargás.</p>
             </div>
           ) : (
             filasLibres.map((l, i) => (
-              <div key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white p-2">
-                <input
+              <div key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-2">
+                <Entrada
                   type="text"
                   value={l.descripcion}
                   onChange={e => onCambiarLinea(l.id, { descripcion: e.target.value })}
                   placeholder={prendaBase ? `${prendaBase} — talle…` : 'Ej: remera blanca talle M'}
                   aria-label={`Qué prenda va en la fila ${i + 1}`}
-                  className={`${inputClass} min-w-0 flex-1`}
+                  className="min-w-0 flex-1"
                 />
                 <input
                   type="number"
@@ -1707,38 +1688,26 @@ function PasoCantidades({
                   onChange={e => onCambiarLinea(l.id, { cantidad: e.target.value })}
                   placeholder="0"
                   aria-label={`Cantidad de la fila ${i + 1}`}
-                  className="w-16 flex-shrink-0 rounded-lg border border-gray-200 px-2 py-2.5 text-center text-sm font-bold tabular-nums text-navy-700 outline-none focus:border-lime-400 sm:w-20"
+                  className={claseCantidad}
                 />
-                <button
-                  type="button"
-                  onClick={() => onQuitarLinea(l.id)}
-                  title="Quitar fila"
-                  aria-label={`Quitar la fila ${i + 1}`}
-                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                >
-                  <Trash2 size={16} />
-                </button>
+                <BotonIcono etiqueta={`Quitar la fila ${i + 1}`} icono={<Trash2 size={17} />} tono="peligro" onClick={() => onQuitarLinea(l.id)} />
               </div>
             ))
           )}
-          <button
-            type="button"
-            onClick={onAgregarLinea}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 font-display text-xs font-bold text-navy-700 transition-colors hover:bg-gray-50"
-          >
-            <Plus size={14} /> Agregar fila
-          </button>
+          <Boton variante="secundario" chico icono={<Plus size={15} />} onClick={onAgregarLinea}>
+            Agregar fila
+          </Boton>
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-gray-300 py-6 text-center">
           <Shirt size={26} strokeWidth={1.5} className="mx-auto mb-2 text-gray-300" />
-          <p className="text-sm text-gray-400">Elegí la prenda arriba y acá aparecen sus talles.</p>
+          <p className="text-sm text-gray-500">Elegí la prenda arriba y acá aparecen sus talles.</p>
         </div>
       )}
 
       {otras.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-          <p className="mb-2 font-display text-[11px] font-bold uppercase tracking-wide text-gray-500">
+          <p className="mb-2 font-display text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">
             Otras prendas ya cargadas en este trabajo
           </p>
           <div className="space-y-1.5">
@@ -1752,11 +1721,11 @@ function PasoCantidades({
               if (l.variante) detalle.push(formatVariante(l.variante));
               if (l.cantidadRecibida > 0) detalle.push(`ya llegaron ${l.cantidadRecibida}`);
               return (
-                <div key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white p-2">
+                <div key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-display text-sm font-bold text-navy-700">{titulo}</p>
                     {detalle.length > 0 && (
-                      <p className="truncate text-[11px] text-gray-400">{detalle.join(' · ')}</p>
+                      <p className="truncate text-xs text-gray-500">{detalle.join(' · ')}</p>
                     )}
                   </div>
                   <input
@@ -1766,17 +1735,9 @@ function PasoCantidades({
                     value={l.cantidad}
                     onChange={e => onCambiarLinea(l.id, { cantidad: e.target.value })}
                     aria-label={`Cantidad de ${titulo}`}
-                    className="w-16 flex-shrink-0 rounded-lg border border-gray-200 px-2 py-2 text-center text-sm font-bold tabular-nums text-navy-700 outline-none focus:border-lime-400 sm:w-20"
+                    className={claseCantidad}
                   />
-                  <button
-                    type="button"
-                    onClick={() => onQuitarLinea(l.id)}
-                    title="Quitar del trabajo"
-                    aria-label={`Quitar ${titulo} del trabajo`}
-                    className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <BotonIcono etiqueta={`Quitar ${titulo} del trabajo`} icono={<Trash2 size={17} />} tono="peligro" onClick={() => onQuitarLinea(l.id)} />
                 </div>
               );
             })}
@@ -1792,14 +1753,14 @@ function PasoCantidades({
       </div>
 
       {total === 0 && (
-        <p className="text-[11px] text-gray-400">
+        <p className="text-[13px] text-gray-500">
           Todavía no cargaste cantidades. Podés guardar el borrador igual y completarlas después.
         </p>
       )}
 
       {sinStock > 0 && (
-        <p className="flex items-start gap-1.5 text-[11px] font-semibold text-amber-600">
-          <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+        <p className="flex items-start gap-1.5 text-[13px] font-semibold text-amber-700">
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
           {sinStock === 1
             ? 'Hay 1 fila que al recibir no va a sumar stock (no está atada a un talle del catálogo).'
             : `Hay ${sinStock} filas que al recibir no van a sumar stock (no están atadas a un talle del catálogo).`}
@@ -1845,6 +1806,14 @@ function RecepcionModal({ compra, productoPorId, onClose, onRecibido }: {
     return suma + Math.max(0, n - it.cantidadRecibida);
   }, 0);
 
+  /** Lo mismo que `aStock`, pero de una línea: para decirlo al lado de cada número. */
+  const entranDeLinea = (it: CompraItem): number => {
+    if (!sumaStock(it)) return 0;
+    const n = leer(it.id);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, n - it.cantidadRecibida);
+  };
+
   const quedanPendientes = compra.items.some(it => {
     const n = leer(it.id);
     return Number.isFinite(n) && n < it.cantidad;
@@ -1866,162 +1835,109 @@ function RecepcionModal({ compra, productoPorId, onClose, onRecibido }: {
     }
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={() => !guardando && onClose()} />
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 p-4">
-          <div className="min-w-0">
-            <h3 className="truncate font-display text-lg font-bold text-navy-700">
-              Recibir · {compra.proveedor || 'Sin proveedor'}
-            </h3>
-            <p className="text-xs text-gray-400">
-              {TIPO_LABEL[compra.tipo]}
-              {compra.referencia && ` · #${compra.referencia}`}
-              {` · ${compra.items.length} ${compra.items.length === 1 ? 'línea' : 'líneas'}`}
-            </p>
-          </div>
-          <button onClick={onClose} disabled={guardando} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700 disabled:opacity-40">✕</button>
+  const hayRecibidasAntes = compra.items.some(it => it.cantidadRecibida > 0);
+
+  return (
+    <Dialogo
+      abierto
+      titulo={`Recibir · ${compra.proveedor || 'Sin proveedor'}`}
+      descripcion={`${TIPO_LABEL[compra.tipo]}${compra.referencia ? ` · #${compra.referencia}` : ''} · ${plural(compra.items.length, 'línea', 'líneas')}`}
+      alCerrar={onClose}
+      ocupado={guardando}
+      ancho="lg"
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+          <Boton onClick={() => void confirmar()} disabled={hayInvalidos} cargando={guardando} icono={<PackageCheck size={17} />}>
+            {guardando ? 'Registrando…' : aStock > 0 ? `Confirmar · entran ${aStock} al stock` : 'Confirmar recepción'}
+          </Boton>
+        </>
+      )}
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="max-w-md text-sm leading-relaxed text-gray-600">
+            Cotejá lo que llegó de verdad. En cada línea va el <b className="text-navy-700">total recibido hasta hoy</b>
+            {hayRecibidasAntes ? ', contando lo que ya había llegado antes' : ''}: al stock entra solo la diferencia.
+          </p>
+          <Boton variante="secundario" chico icono={<CheckCheck size={15} />} onClick={recibirTodo} disabled={guardando}>
+            Llegó todo
+          </Boton>
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-gray-500">
-              Cotejá lo que llegó de verdad. El número es el <b className="text-navy-700">total recibido</b> de cada línea.
-            </p>
-            <button
-              type="button"
-              onClick={recibirTodo}
-              disabled={guardando}
-              className="flex items-center gap-1.5 rounded-lg bg-navy-700 px-3 py-1.5 font-display text-xs font-bold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400"
-            >
-              <CheckCheck size={14} /> Recibí todo
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {compra.items.map(it => {
-              const producto = it.productId ? productoPorId.get(it.productId) : undefined;
-              const n = leer(it.id);
-              const invalido = !Number.isFinite(n) || n < 0;
-              const deMas = Number.isFinite(n) && n > it.cantidad;
-              return (
-                <div key={it.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 px-3 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-display text-sm font-bold text-navy-700">{it.descripcion}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-                      <span>pedidas {it.cantidad}</span>
-                      {it.cantidadRecibida > 0 && <span>ya recibidas {it.cantidadRecibida}</span>}
-                      {producto && <span className="text-gray-500">{producto.name}</span>}
-                      {it.variante && <span className={`${badgeClass} bg-navy-50 text-navy-700`}>{formatVariante(it.variante)}</span>}
-                      {!sumaStock(it) && (
-                        <span className={`${badgeClass} bg-amber-50 text-amber-700`}>no suma stock</span>
-                      )}
-                    </div>
+        <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200">
+          {compra.items.map(it => {
+            const producto = it.productId ? productoPorId.get(it.productId) : undefined;
+            const n = leer(it.id);
+            const invalido = !Number.isFinite(n) || n < 0;
+            const deMas = Number.isFinite(n) && n > it.cantidad;
+            const entran = entranDeLinea(it);
+            const idInput = `recep-${it.id}`;
+            return (
+              <li key={it.id} className="flex flex-wrap items-center gap-3 px-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-display text-sm font-bold text-navy-700">{it.descripcion}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+                    <span>pedidas {it.cantidad}</span>
+                    {it.cantidadRecibida > 0 && <span>· ya recibidas {it.cantidadRecibida}</span>}
+                    {producto && producto.name !== it.descripcion && <span>· {producto.name}</span>}
+                    {it.variante && <Insignia tono="navy">{formatVariante(it.variante)}</Insignia>}
+                    {!sumaStock(it) && <Insignia tono="atencion">no suma stock</Insignia>}
                   </div>
-                  <div className="flex flex-shrink-0 items-center gap-2">
-                    <label htmlFor={`recep-${it.id}`} className="text-[11px] font-bold uppercase tracking-wide text-gray-400">
-                      Llegó
-                    </label>
-                    <input
-                      id={`recep-${it.id}`}
-                      type="number"
-                      min={0}
-                      inputMode="numeric"
-                      value={cantidades[it.id] ?? ''}
-                      onChange={e => setCantidades(c => ({ ...c, [it.id]: e.target.value }))}
-                      disabled={guardando}
-                      className={`w-24 rounded-lg border px-3 py-2 text-center text-sm font-bold tabular-nums text-navy-700 outline-none ${
-                        invalido ? 'border-red-300' : deMas ? 'border-amber-300' : 'border-gray-200 focus:border-lime-400'
-                      }`}
-                    />
-                  </div>
-                  {deMas && (
-                    <p className="w-full text-[11px] text-amber-600">Llegó más de lo pedido: se va a cargar igual.</p>
-                  )}
                 </div>
-              );
-            })}
-          </div>
+                <div className="shrink-0 text-right">
+                  <label htmlFor={idInput} className="mb-1 block text-xs font-semibold text-gray-500">Total recibido</label>
+                  <input
+                    id={idInput}
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={cantidades[it.id] ?? ''}
+                    onChange={e => setCantidades(c => ({ ...c, [it.id]: e.target.value }))}
+                    disabled={guardando}
+                    aria-invalid={invalido || undefined}
+                    aria-describedby={`${idInput}-ayuda`}
+                    className={cn(
+                      claseCantidad,
+                      'w-24',
+                      invalido ? 'border-red-400' : deMas ? 'border-amber-400' : '',
+                    )}
+                  />
+                </div>
+                <p id={`${idInput}-ayuda`} className={cn('w-full text-right text-xs', entran > 0 ? 'font-semibold text-emerald-700' : 'text-gray-500')}>
+                  {invalido
+                    ? 'Poné un número entero (0 o más).'
+                    : !sumaStock(it)
+                      ? 'Se registra, pero no toca el stock.'
+                      : entran > 0
+                        ? `Entran ${entran} al stock`
+                        : 'No entra nada nuevo al stock'}
+                  {deMas && !invalido && <span className="font-normal text-amber-700"> · llegó más de lo pedido: se carga igual</span>}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
 
-          <div className={`rounded-xl border px-4 py-3 ${aStock > 0 ? 'border-lime-300 bg-lime-50' : 'border-gray-200 bg-gray-50'}`}>
-            <p className="font-display text-sm font-bold text-navy-700">
-              {aStock > 0
-                ? `Van a entrar ${aStock} ${aStock === 1 ? 'unidad' : 'unidades'} al stock`
-                : 'Esta recepción no suma stock'}
+        <div className={cn('rounded-xl border px-4 py-3', aStock > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50')}>
+          <p className="font-display text-sm font-bold text-navy-700">
+            {aStock > 0
+              ? `Van a entrar ${aStock} ${aStock === 1 ? 'unidad' : 'unidades'} al stock`
+              : 'Esta recepción no suma stock'}
+          </p>
+          <p className="mt-0.5 text-[13px] text-gray-600">
+            {aStock > 0
+              ? 'Solo cuenta la diferencia contra lo ya recibido, y solo de las líneas con producto y variante.'
+              : 'Ninguna línea tiene producto y variante, o ya estaba todo recibido.'}
+          </p>
+          {quedanPendientes && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-amber-800">
+              <AlertTriangle size={14} className="flex-shrink-0" />
+              Falta mercadería: la compra queda «en camino» con el saldo pendiente.
             </p>
-            <p className="mt-0.5 text-xs text-gray-500">
-              {aStock > 0
-                ? 'Solo cuenta la diferencia contra lo ya recibido, y solo de las líneas con producto y variante.'
-                : 'Ninguna línea tiene producto y variante, o ya estaba todo recibido.'}
-            </p>
-            {quedanPendientes && (
-              <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-amber-600">
-                <AlertTriangle size={13} className="flex-shrink-0" />
-                Falta mercadería: el pedido queda «en camino» con el saldo pendiente.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex gap-3 border-t border-gray-100 p-4">
-          <button type="button" onClick={onClose} disabled={guardando} className={`flex-1 ${btnSecundario}`}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => void confirmar()}
-            disabled={guardando || hayInvalidos}
-            className={`flex flex-1 items-center justify-center gap-2 ${btnPrimario}`}
-          >
-            {guardando ? <Loader2 size={16} className="animate-spin" /> : <PackageCheck size={16} />}
-            {guardando ? 'Registrando…' : 'Confirmar recepción'}
-          </button>
+          )}
         </div>
       </div>
-    </div>,
-    document.body,
-  );
-}
-
-// ─── Confirmación de borrado ─────────────────────────────────────────────────
-
-function ConfirmarBorrado({ compra, borrando, onCancelar, onConfirmar }: {
-  compra: Compra;
-  borrando: boolean;
-  onCancelar: () => void;
-  onConfirmar: () => void;
-}) {
-  const { recibidas } = resumenItems(compra.items);
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
-      <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-        <h3 className="mb-2 font-display text-lg font-bold text-navy-700">¿Borrar este pedido?</h3>
-        <p className="truncate text-sm font-semibold text-navy-700">
-          {compra.proveedor || 'Sin proveedor'}{compra.referencia && ` · #${compra.referencia}`}
-        </p>
-        <p className="mb-6 mt-2 text-sm text-gray-500">
-          Se borra el pedido con todas sus líneas y no se puede deshacer.
-          {recibidas > 0 && ' El stock que ya entró queda como está: esto no lo descuenta.'}
-        </p>
-        <div className="flex gap-3">
-          <button type="button" onClick={onCancelar} disabled={borrando} className={`flex-1 ${btnSecundario}`}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={onConfirmar}
-            disabled={borrando}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 py-2.5 font-display text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {borrando && <Loader2 size={15} className="animate-spin" />}
-            {borrando ? 'Borrando…' : 'Borrar'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+    </Dialogo>
   );
 }
