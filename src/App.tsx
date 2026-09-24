@@ -224,10 +224,18 @@ function usePageMeta({ title, description, image }: PageMeta) {
 
 // Cambio de página: solo un fundido corto (≤250 ms). El leve ascenso ya lo pone el
 // .fade-in de cada página; sumarle otro desplazamiento acá lo hacía sentir lento.
+// La PRIMERA página de la visita no se anima: con LazyMotion, un m.div que arranca en
+// opacity 0 queda invisible hasta que baja el chunk de framer-motion, y eso demoraba el
+// primer dibujado (ahora que no hay splash que lo tape). Las navegaciones siguientes sí.
+let yaHuboPagina = false;
 function PageTransition({ children }: { children: React.ReactNode }) {
+  // Se lee en el initializer y se marca en un efecto (no en el initializer): StrictMode
+  // de desarrollo llama dos veces al initializer y la primera página se animaba igual.
+  const [animar] = useState(() => yaHuboPagina);
+  useEffect(() => { yaHuboPagina = true; }, []);
   return (
     <m.div
-      initial={{ opacity: 0 }}
+      initial={animar ? { opacity: 0 } : false}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
     >
@@ -312,27 +320,17 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  // Sin pantalla de "Cargando..." (24/09): la web se dibuja al instante y cada sección
+  // decide qué mostrar mientras llegan los datos (`datosListos`: esqueletos, "cargando"
+  // o nada). Antes un splash tapaba TODO hasta que llegaban las 8 consultas (hasta 4s):
+  // era lo que más demoraba la primera pantalla (Lighthouse: LCP ~6s en celular).
   const [datosListos, setDatosListos] = useState(false);
 
   useEffect(() => {
     let vivo = true;
-    // TECHO DURO DEL SPLASH. Antes la web entera esperaba a que terminaran el probe de
-    // salud y las 8 consultas iniciales, sin timeout ni catch: un solo pedido colgado
-    // (red mala, Supabase frío, refresh del token del admin reteniendo el navigator lock
-    // que necesitan todas las queries) dejaba "Cargando..." para siempre y la única
-    // salida era F5. Ahora a los 4s se muestra la web pase lo que pase; los datos que
-    // lleguen tarde entran solos cuando llegan (cada _set* dispara su render).
-    const techoSplash = setTimeout(() => {
-      if (!vivo) return;
-      console.warn('[arranque] los datos tardaron más de 4s: muestro la web igual y sigo esperándolos');
-      setLoaded(true);
-    }, 4000);
-
     const loadData = async () => {
-      // Espera el probe de salud de Supabase: hasta ~12s (2 intentos × 6s de abort, ver
-      // supabaseClient.ts), NO 2.5s como decía este comentario. Por eso existe el techo de
-      // arriba: sin él, esos 12s del peor caso son 12s de splash antes de siquiera pedir datos.
+      // Espera el probe de salud de Supabase: hasta ~12s en el peor caso (2 intentos × 6s
+      // de abort, ver supabaseClient.ts). La web ya está dibujada mientras tanto.
       await supabaseReady;
 
       // Supabase es la fuente de verdad de todo. Fallback: snapshot legacy para
@@ -442,18 +440,16 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       StorageService.setCart(refreshedCart);
     };
     // `finally` (no solo el camino feliz): si loadData falla a mitad —una query que
-    // rechaza, un dato con forma inesperada— la web se muestra igual. Antes el throw
-    // se perdía en una promesa sin catch y el splash quedaba colgado para siempre.
+    // rechaza, un dato con forma inesperada— las páginas dejan de decir "cargando" y
+    // muestran lo que haya.
     loadData()
       .catch((e) => console.error('[arranque] falló la carga inicial; muestro la web con lo que haya', e))
       .finally(() => {
         if (!vivo) return;
-        clearTimeout(techoSplash);
-        setLoaded(true);
         setDatosListos(true);
       });
 
-    return () => { vivo = false; clearTimeout(techoSplash); };
+    return () => { vivo = false; };
   }, []);
 
   // Recarga de solo lectura desde Supabase (ej: tras reponer stock al anular
@@ -737,18 +733,6 @@ function StoreProvider({ children }: { children: React.ReactNode }) {
       console.error('[logout] no se pudo revisar la cache de torneos', e);
     }
   }, []);
-
-  if (!loaded) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-navy-700 gap-6">
-      <img src="/logo.png" alt="VOLEA" className="h-16 animate-pulse" />
-      <div className="flex gap-2">
-        <div className="w-3 h-3 rounded-full bg-lime-400 animate-bounce" style={{animationDelay: '0ms'}} />
-        <div className="w-3 h-3 rounded-full bg-lime-400 animate-bounce" style={{animationDelay: '150ms'}} />
-        <div className="w-3 h-3 rounded-full bg-lime-400 animate-bounce" style={{animationDelay: '300ms'}} />
-      </div>
-      <p className="text-white/60 font-body text-sm">Cargando...</p>
-    </div>
-  );
 
   return (
     <StoreContext.Provider value={{
@@ -1758,7 +1742,10 @@ function HomePage() {
       {/* Con la web mostrándose a los 4s, esta sección podía quedar como un título con una
           grilla vacía debajo — lo primero que ve alguien que entra con mala red, y parece
           rota. Si todavía no hay nada que destacar, no se dibuja. */}
-      {(featured.length > 0 || datosListos) && (
+      {/* Sin splash, mientras llegan los datos se muestra la forma de las 4 tarjetas: así
+          la sección no aparece de golpe empujando todo lo de abajo. Si ya cargó y no hay
+          nada destacado, no se dibuja. */}
+      {(featured.length > 0 || !datosListos) && (
       <section className="bg-white py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
           <EncabezadoSeccion
@@ -1766,6 +1753,17 @@ function HomePage() {
             titulo="Destacados"
             link={{ to: '/tienda', texto: 'Ver toda la tienda' }}
           />
+          {featured.length === 0 ? (
+            <div role="status" aria-label="Cargando destacados" className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-4">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} aria-hidden>
+                  <div className="aspect-[4/5] rounded-xl bg-gray-100 motion-safe:animate-pulse" />
+                  <div className="mt-3 h-3 w-3/4 rounded bg-gray-100 motion-safe:animate-pulse" />
+                  <div className="mt-2 h-3 w-1/3 rounded bg-gray-100 motion-safe:animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : (
           <StaggerGrid className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-4">
             {featured.map(p => (
               <StaggerItem key={p.id}>
@@ -1773,6 +1771,7 @@ function HomePage() {
               </StaggerItem>
             ))}
           </StaggerGrid>
+          )}
           {/* En celular el "Ver toda la tienda" de arriba quedó varias pantallas atrás. */}
           <Link
             to="/tienda"
@@ -1792,6 +1791,10 @@ function HomePage() {
               En celular, una fila que se desliza en vez de seis filas de tarjetas. */}
           <Reveal>
             <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-5">
+              {/* Mientras llegan los datos: la forma de las tarjetas, no un hueco que después salta. */}
+              {!datosListos && categories.length === 0 && Array.from({ length: 5 }, (_, i) => (
+                <div key={i} aria-hidden className="aspect-[4/5] w-36 shrink-0 rounded-xl bg-gray-200/70 motion-safe:animate-pulse md:w-auto" />
+              ))}
               {categoriasConProductos(categories, products).map((cat) => {
                 const foto = fotoDeCategoria(products, cat.id);
                 return (
@@ -4170,6 +4173,15 @@ function Footer() {
 // Placeholder para el hueco entre que la web se muestra (techo de 4s) y que llegan los
 // datos: sin esto, estas páginas afirman "no hay nada" cuando la verdad es "todavía no
 // llegó". Va en los wrappers y no adentro de las páginas para no cambiarles la firma.
+// El panel espera a tener los datos del arranque antes de dibujarse: sin el splash, un
+// admin logueado podía ver (y tocar) listas todavía vacías el primer segundo. El login
+// sí sale al instante: no depende de nada de eso.
+function AdminRoute() {
+  const { isAdmin, datosListos } = useStore();
+  if (isAdmin && !datosListos) return <SeccionCargando texto="Cargando el panel…" />;
+  return <Suspense fallback={cargandoTab}><AdminPage /></Suspense>;
+}
+
 function SeccionCargando({ texto }: { texto: string }) {
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center text-gray-400">
@@ -4331,7 +4343,7 @@ function AnimatedRoutes() {
       <Route path="/contacto" element={<PageTransition><ContactPage /></PageTransition>} />
       <Route path="/checkout" element={<PageTransition><CheckoutPage /></PageTransition>} />
       <Route path="/pago/resultado" element={<PageTransition><ResultadoPagoRoute /></PageTransition>} />
-      <Route path="/admin" element={<PageTransition><Suspense fallback={cargandoTab}><AdminPage /></Suspense></PageTransition>} />
+      <Route path="/admin" element={<PageTransition><AdminRoute /></PageTransition>} />
       <Route path="*" element={<PageTransition><NotFoundPage /></PageTransition>} />
     </Routes>
   );
