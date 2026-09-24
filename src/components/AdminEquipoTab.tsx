@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   AlertCircle, Crown, Info, KeyRound, Loader2, Lock, Paintbrush, Pencil,
   RefreshCw, ShieldCheck, Undo2, UserMinus, UserPlus, Users,
@@ -8,6 +7,11 @@ import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MiembroEquipo, RolAdmin } from '../types';
 import { SupabaseService } from '../services/supabaseService';
+import {
+  Boton, Campo, CargandoFilas, Dialogo, EncabezadoPagina, Entrada, ErrorEstado, Insignia,
+  Selector, Tarjeta, Vacio, type TonoInsignia,
+} from '../admin/ui';
+import { cn } from '../lib/cn';
 
 /** La tabla `admins` guarda los emails en minúscula: comparamos siempre así. */
 const normEmail = (e: string) => e.trim().toLowerCase();
@@ -28,7 +32,8 @@ type InfoRol = {
   resumen: string;
   puede: string[];
   Icono: LucideIcon;
-  claseChip: string;
+  /** Tono de la Insignia del rol (clases fijas del kit, nada armado a mano). */
+  tono: TonoInsignia;
   claseIcono: string;
 };
 
@@ -41,7 +46,7 @@ const ROLES: InfoRol[] = [
     resumen: 'Manda en todo y es el único que ve y toca esta pantalla.',
     puede: ['Todo lo del rol Equipo', 'Dar y quitar accesos', 'Cambiarle el rol a los demás'],
     Icono: Crown,
-    claseChip: 'bg-navy-700 text-lime-400',
+    tono: 'navy',
     claseIcono: 'text-navy-700',
   },
   {
@@ -52,8 +57,8 @@ const ROLES: InfoRol[] = [
     resumen: 'Todo el día a día del negocio, pero no gestiona quién entra al panel.',
     puede: ['Caja, pedidos y stock', 'Torneos, inscripciones y ranking', 'Blog, galería y contenido de la web'],
     Icono: ShieldCheck,
-    claseChip: 'bg-lime-400 text-navy-700',
-    claseIcono: 'text-lime-600',
+    tono: 'info',
+    claseIcono: 'text-sky-600',
   },
   {
     id: 'sublimacion',
@@ -63,8 +68,8 @@ const ROLES: InfoRol[] = [
     resumen: 'Proveedor externo: entra únicamente a su pantalla de trabajos, no ve nada más.',
     puede: ['Ver los trabajos de sublimación', 'Marcar el estado de cada trabajo'],
     Icono: Paintbrush,
-    claseChip: 'bg-amber-100 text-amber-800',
-    claseIcono: 'text-amber-500',
+    tono: 'atencion',
+    claseIcono: 'text-amber-600',
   },
 ];
 
@@ -75,9 +80,9 @@ type EditorState =
   | { modo: 'editar'; miembro: MiembroEquipo };
 
 /**
- * Pestaña Equipo (solo la ve el owner): quién entra al panel, con qué rol, y el
- * alta/baja. Las bajas no borran — dejan el registro con `activo: false` para no
- * perder el historial.
+ * Pestaña Equipo → Accesos (solo la ve el owner): quién entra al panel, con qué
+ * rol, y el alta/baja. Las bajas no borran — dejan el registro con
+ * `activo: false` para no perder el historial.
  */
 export default function AdminEquipoTab({ miEmail }: { miEmail: string }) {
   const [miembros, setMiembros] = useState<MiembroEquipo[] | null>(null);
@@ -153,147 +158,137 @@ export default function AdminEquipoTab({ miEmail }: { miEmail: string }) {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="flex items-center gap-2 font-display text-xl font-bold text-navy-700">
-          <Users size={22} /> Equipo
-        </h2>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => void cargar()}
-            disabled={cargando}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-navy-700 transition-colors hover:border-navy-700 disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={cargando ? 'animate-spin' : ''} /> Actualizar
-          </button>
-          <button
-            onClick={() => setEditor({ modo: 'alta' })}
-            disabled={miembros === null}
-            title={miembros === null ? 'Esperá a que cargue la lista para no dar de alta a alguien repetido.' : undefined}
-            className="inline-flex items-center gap-2 rounded-lg bg-lime-400 px-4 py-1.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            <UserPlus size={16} /> Dar acceso
-          </button>
-        </div>
-      </div>
+    <div>
+      <EncabezadoPagina
+        rotulo="Equipo"
+        titulo="Accesos"
+        descripcion="Quién entra al panel de VOLEA y con qué permisos. Los cambios de acá corren al toque."
+        acciones={(
+          <>
+            <Boton
+              variante="secundario"
+              onClick={() => void cargar()}
+              disabled={cargando}
+              icono={<RefreshCw size={16} className={cargando ? 'animate-spin' : undefined} />}
+            >
+              Actualizar
+            </Boton>
+            <Boton
+              onClick={() => setEditor({ modo: 'alta' })}
+              disabled={miembros === null}
+              title={miembros === null ? 'Esperá a que cargue la lista para no dar de alta a alguien repetido.' : undefined}
+              icono={<UserPlus size={17} />}
+            >
+              Dar acceso
+            </Boton>
+          </>
+        )}
+      />
 
-      <p className="text-sm text-gray-500">
-        Quién entra al panel de VOLEA y con qué permisos. Los cambios de acá corren al toque.
-      </p>
+      <div className="space-y-5">
+        {miembros !== null && ownersActivos.length === 0 && (
+          <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-800">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            <span>
+              <b className="font-display">No queda ningún dueño activo.</b> Nadie puede dar ni quitar accesos
+              desde acá: hay que arreglarlo a mano en Supabase, en la tabla <code>admins</code>.
+            </span>
+          </div>
+        )}
 
-      <PanelRoles />
+        {fallo && !cargando && (
+          <ErrorEstado
+            mensaje={`No se pudo leer el equipo. Puede ser la sesión vencida.${
+              miembros !== null ? ' Lo de abajo es lo último que sí pudimos leer: puede estar viejo.' : ''
+            }`}
+            alReintentar={() => void cargar()}
+          />
+        )}
 
-      {miembros !== null && ownersActivos.length === 0 && (
-        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <AlertCircle size={16} className="mt-0.5 shrink-0" />
-          <span>
-            <b className="font-display">No queda ningún dueño activo.</b> Nadie puede dar ni quitar accesos
-            desde acá: hay que arreglarlo a mano en Supabase, en la tabla <code>admins</code>.
-          </span>
-        </div>
-      )}
+        {cargando && miembros === null && !fallo && <CargandoFilas filas={3} />}
 
-      {fallo && !cargando && (
-        <div className="rounded-xl border border-gray-100 bg-white p-8 text-center shadow-sm">
-          <AlertCircle size={40} strokeWidth={1} className="mx-auto mb-3 text-gray-300" />
-          <p className="font-display font-bold text-gray-500">No se pudo leer el equipo</p>
-          <p className="mt-1 text-xs text-gray-400">
-            Puede ser la sesión vencida.
-            {miembros !== null && ' Lo de abajo es lo último que sí pudimos leer, puede estar viejo.'}
-          </p>
-          <button
-            onClick={() => void cargar()}
-            className="mt-2 text-sm font-semibold text-lime-600 hover:underline"
-          >
-            Reintentar
-          </button>
-        </div>
-      )}
+        {miembros !== null && miembros.length === 0 && (
+          <Vacio
+            icono={<Users size={22} />}
+            titulo="Todavía no hay nadie cargado"
+            descripcion="Sumá a la primera persona que va a entrar al panel."
+            accion={<Boton onClick={() => setEditor({ modo: 'alta' })} icono={<UserPlus size={17} />}>Dar acceso</Boton>}
+          />
+        )}
 
-      {cargando && miembros === null && !fallo && (
-        <div className="rounded-xl border border-gray-100 bg-white p-10 text-center shadow-sm">
-          <Loader2 size={28} strokeWidth={1.5} className="mx-auto mb-2 animate-spin text-gray-300" />
-          <p className="font-display text-sm font-bold text-gray-500">Cargando el equipo…</p>
-        </div>
-      )}
+        {miembros !== null && miembros.length > 0 && (
+          <>
+            {ROLES.map(r => {
+              const gente = activos.filter(m => m.role === r.id);
+              const { Icono } = r;
+              return (
+                <section key={r.id} aria-label={r.grupo}>
+                  <h2 className="mb-2 flex items-center gap-2 px-1 font-display text-sm font-bold uppercase tracking-wide text-navy-700">
+                    <Icono size={15} className={r.claseIcono} /> {r.grupo}
+                    <Insignia tono="neutro" className="tabular-nums">{gente.length}</Insignia>
+                  </h2>
+                  {gente.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-gray-300 px-4 py-4 text-[13px] text-gray-500">
+                      Nadie con este rol por ahora.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {gente.map(m => (
+                        <li key={m.email}>
+                          <FilaMiembro
+                            miembro={m}
+                            soyYo={normEmail(m.email) === yo}
+                            bloqueo={bloqueoAcceso(m)}
+                            confirmando={confirmando === normEmail(m.email)}
+                            trabajando={trabajando === normEmail(m.email)}
+                            onEditar={() => setEditor({ modo: 'editar', miembro: m })}
+                            onConfirmar={v => setConfirmando(v ? normEmail(m.email) : null)}
+                            onQuitar={() => quitarAcceso(m)}
+                            onDevolver={() => devolverAcceso(m)}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
 
-      {miembros !== null && miembros.length === 0 && (
-        <div className="rounded-xl border border-dashed border-gray-300 p-10 text-center">
-          <p className="font-display text-sm font-bold text-gray-500">Todavía no hay nadie cargado</p>
-          <p className="mt-1 text-xs text-gray-400">Dale a «Dar acceso» para sumar a la primera persona.</p>
-        </div>
-      )}
-
-      {miembros !== null && miembros.length > 0 && (
-        <div className="space-y-5">
-          {ROLES.map(r => {
-            const gente = activos.filter(m => m.role === r.id);
-            const { Icono } = r;
-            return (
-              <section key={r.id}>
-                <h3 className="mb-2 flex items-center gap-2 font-display text-xs font-bold uppercase tracking-wide text-gray-400">
-                  <Icono size={14} className={r.claseIcono} /> {r.grupo}
-                  <span className="rounded-full bg-gray-100 px-1.5 text-[11px] font-bold text-gray-500">
-                    {gente.length}
-                  </span>
-                </h3>
-                {gente.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-400">
-                    Nadie con este rol por ahora.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {gente.map(m => (
+            {inactivos.length > 0 && (
+              <section aria-label="Sin acceso">
+                <h2 className="mb-1 flex items-center gap-2 px-1 font-display text-sm font-bold uppercase tracking-wide text-gray-500">
+                  <Lock size={15} className="text-gray-400" /> Sin acceso
+                  <Insignia tono="neutro" className="tabular-nums">{inactivos.length}</Insignia>
+                </h2>
+                <p className="mb-2 px-1 text-[13px] text-gray-500">
+                  No los borramos: quedan guardados para no perder el historial. Podés devolverles el acceso cuando quieras.
+                </p>
+                <ul className="space-y-2">
+                  {inactivos.map(m => (
+                    <li key={m.email}>
                       <FilaMiembro
-                        key={m.email}
                         miembro={m}
                         soyYo={normEmail(m.email) === yo}
-                        bloqueo={bloqueoAcceso(m)}
-                        confirmando={confirmando === normEmail(m.email)}
+                        bloqueo={null}
+                        confirmando={false}
                         trabajando={trabajando === normEmail(m.email)}
                         onEditar={() => setEditor({ modo: 'editar', miembro: m })}
-                        onConfirmar={v => setConfirmando(v ? normEmail(m.email) : null)}
+                        onConfirmar={() => undefined}
                         onQuitar={() => quitarAcceso(m)}
                         onDevolver={() => devolverAcceso(m)}
                       />
-                    ))}
-                  </div>
-                )}
+                    </li>
+                  ))}
+                </ul>
               </section>
-            );
-          })}
+            )}
+          </>
+        )}
 
-          {inactivos.length > 0 && (
-            <section>
-              <h3 className="mb-1 flex items-center gap-2 font-display text-xs font-bold uppercase tracking-wide text-gray-400">
-                <Lock size={14} className="text-gray-300" /> Sin acceso
-                <span className="rounded-full bg-gray-100 px-1.5 text-[11px] font-bold text-gray-500">
-                  {inactivos.length}
-                </span>
-              </h3>
-              <p className="mb-2 text-xs text-gray-400">
-                No los borramos: quedan guardados para no perder el historial. Podés devolverles el acceso cuando quieras.
-              </p>
-              <div className="space-y-2">
-                {inactivos.map(m => (
-                  <FilaMiembro
-                    key={m.email}
-                    miembro={m}
-                    soyYo={normEmail(m.email) === yo}
-                    bloqueo={null}
-                    confirmando={false}
-                    trabajando={trabajando === normEmail(m.email)}
-                    onEditar={() => setEditor({ modo: 'editar', miembro: m })}
-                    onConfirmar={() => undefined}
-                    onQuitar={() => quitarAcceso(m)}
-                    onDevolver={() => devolverAcceso(m)}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
+        {/* La ayuda va después de la lista: lo que se viene a hacer acá es mirar y
+            tocar a la gente; esto se consulta antes de asignar un rol. */}
+        <PanelRoles />
+      </div>
 
       {editor !== null && (
         <EditorMiembroModal
@@ -313,23 +308,20 @@ export default function AdminEquipoTab({ miEmail }: { miEmail: string }) {
 /** Panel fijo con qué puede hacer cada rol: es para consultar antes de asignar. */
 function PanelRoles() {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-      <h3 className="mb-3 flex items-center gap-2 font-display text-sm font-bold text-navy-700">
-        <Info size={16} className="text-lime-600" /> Qué puede hacer cada rol
-      </h3>
+    <Tarjeta
+      titulo={<span className="inline-flex items-center gap-2"><Info size={16} className="text-navy-400" /> Qué puede hacer cada rol</span>}
+    >
       <div className="grid gap-3 sm:grid-cols-3">
         {ROLES.map(r => {
           const { Icono } = r;
           return (
-            <div key={r.id} className="rounded-lg border border-gray-100 p-3">
-              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${r.claseChip}`}>
-                <Icono size={11} /> {r.chip}
-              </span>
-              <p className="mt-2 text-xs text-gray-500">{r.resumen}</p>
+            <div key={r.id} className="rounded-lg border border-gray-200 p-3">
+              <Insignia tono={r.tono}><Icono size={12} /> {r.chip}</Insignia>
+              <p className="mt-2 text-[13px] text-gray-600">{r.resumen}</p>
               <ul className="mt-2 space-y-1">
                 {r.puede.map(p => (
-                  <li key={p} className="flex items-start gap-1.5 text-xs text-navy-700">
-                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-lime-400" />
+                  <li key={p} className="flex items-start gap-2 text-[13px] text-navy-700">
+                    <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-navy-400" />
                     {p}
                   </li>
                 ))}
@@ -338,14 +330,14 @@ function PanelRoles() {
           );
         })}
       </div>
-      <p className="mt-3 flex items-start gap-2 rounded-lg bg-navy-50 p-2.5 text-xs text-navy-700">
-        <KeyRound size={14} className="mt-0.5 shrink-0 text-navy-400" />
+      <p className="mt-3 flex items-start gap-2 rounded-lg bg-navy-50 p-3 text-[13px] text-navy-700">
+        <KeyRound size={15} className="mt-0.5 shrink-0 text-navy-400" />
         <span>
           <b className="font-display">Dar acceso acá no crea la cuenta.</b> Esta pantalla guarda el permiso y el rol.
           La cuenta con contraseña se crea aparte, en Supabase → Authentication → Users, con el mismo email.
         </span>
       </p>
-    </div>
+    </Tarjeta>
   );
 }
 
@@ -370,103 +362,93 @@ function FilaMiembro({
   const { Icono } = info;
 
   return (
-    <div className={`rounded-xl border border-gray-100 bg-white p-3 shadow-sm ${miembro.activo ? '' : 'opacity-70'}`}>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-display text-sm font-bold ${
-          miembro.activo ? 'bg-navy-700/10 text-navy-700' : 'bg-gray-100 text-gray-400'
-        }`}>
-          {(miembro.name || miembro.email).charAt(0).toUpperCase()}
-        </span>
-
-        <div className="min-w-0 flex-1">
-          <p className={`flex items-center gap-1.5 truncate font-display text-sm font-bold ${
-            miembro.activo ? 'text-navy-700' : 'text-gray-400'
-          }`}>
-            {miembro.name || <span className="italic text-gray-400">sin nombre</span>}
-            {soyYo && (
-              <span className="rounded-full bg-navy-700/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-navy-700">
-                vos
-              </span>
+    <div className={cn('rounded-xl border border-gray-200 bg-white p-3 sm:p-4', !miembro.activo && 'bg-gray-50')}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span
+            aria-hidden
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-display text-sm font-bold',
+              miembro.activo ? 'bg-navy-700 text-white' : 'bg-gray-200 text-gray-500',
             )}
-          </p>
-          <p className="truncate text-xs text-gray-500">{miembro.email}</p>
+          >
+            {(miembro.name || miembro.email).charAt(0).toUpperCase()}
+          </span>
+
+          <div className="min-w-0 flex-1">
+            <p className={cn(
+              'flex flex-wrap items-center gap-x-2 gap-y-1 font-display text-[15px] font-bold',
+              miembro.activo ? 'text-navy-700' : 'text-gray-500',
+            )}>
+              <span className="min-w-0 truncate">
+                {miembro.name || <span className="font-normal italic text-gray-400">sin nombre</span>}
+              </span>
+              {soyYo && <Insignia tono="navy">vos</Insignia>}
+              <Insignia tono={miembro.activo ? info.tono : 'neutro'}><Icono size={12} /> {info.chip}</Insignia>
+              {!miembro.activo && <Insignia tono="neutro">sin acceso</Insignia>}
+            </p>
+            <p className="truncate text-[13px] text-gray-500">{miembro.email}</p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
-            miembro.activo ? info.claseChip : 'bg-gray-100 text-gray-400'
-          }`}>
-            <Icono size={11} /> {info.chip}
-          </span>
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-            miembro.activo ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-          }`}>
-            {miembro.activo ? 'activo' : 'sin acceso'}
-          </span>
-        </div>
-
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="flex items-center gap-2 sm:shrink-0 sm:justify-end">
           {trabajando ? (
-            <Loader2 size={18} className="animate-spin text-gray-300" />
+            <span className="inline-flex h-11 items-center gap-2 px-2 text-[13px] text-gray-500">
+              <Loader2 size={17} className="animate-spin" /> Guardando…
+            </span>
           ) : confirmando ? (
-            <>
-              <span className="text-xs font-semibold text-gray-500">¿Le sacamos el acceso?</span>
-              <button
-                onClick={onQuitar}
-                className="rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-bold text-white transition-colors hover:bg-red-600"
-              >
-                Sí, quitar
-              </button>
-              <button
-                onClick={() => onConfirmar(false)}
-                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-500 transition-colors hover:border-gray-400"
-              >
-                No
-              </button>
-            </>
+            <div role="alert" className="flex w-full flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-2 sm:w-auto sm:flex-row sm:items-center">
+              <span className="px-1 text-[13px] font-semibold text-red-800">¿Le sacamos el acceso?</span>
+              <div className="grid grid-cols-2 gap-2 sm:flex">
+                <Boton variante="secundario" onClick={() => onConfirmar(false)}>No</Boton>
+                <Boton variante="peligro" onClick={onQuitar} icono={<UserMinus size={16} />}>Sí, quitar</Boton>
+              </div>
+            </div>
           ) : (
-            <>
-              <button
+            // En el celu: Editar a su medida y la acción de acceso ocupa el resto (a
+            // mitades, «Devolver acceso» se partía en dos renglones).
+            <div className="grid w-full grid-cols-[auto_1fr] gap-2 sm:flex sm:w-auto">
+              <Boton
+                variante="secundario"
                 onClick={onEditar}
                 title="Cambiar el nombre o el rol"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-navy-700 transition-colors hover:border-navy-700"
+                icono={<Pencil size={15} />}
               >
-                <Pencil size={13} /> Editar
-              </button>
+                Editar
+              </Boton>
 
               {!miembro.activo ? (
-                <button
-                  onClick={onDevolver}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-lime-400 bg-lime-50 px-2.5 py-1.5 text-xs font-bold text-navy-700 transition-colors hover:bg-lime-100"
-                >
-                  <Undo2 size={13} /> Devolver acceso
-                </button>
+                <Boton variante="secundario" onClick={onDevolver} icono={<Undo2 size={15} />}>
+                  Devolver acceso
+                </Boton>
               ) : bloqueo !== null ? (
                 // Un <span> y no un <button disabled>: sobre un botón deshabilitado el
                 // navegador no muestra el title, y acá el motivo es lo importante.
                 <span
                   title={bloqueo}
                   aria-disabled="true"
-                  className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-gray-100 px-2.5 py-1.5 text-xs font-semibold text-gray-300"
+                  className="inline-flex h-11 cursor-not-allowed items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 font-display text-sm font-bold text-gray-400"
                 >
-                  <Lock size={13} /> Quitar acceso
+                  <Lock size={15} /> Quitar acceso
                 </span>
               ) : (
-                <button
+                <Boton
+                  variante="secundario"
                   onClick={() => onConfirmar(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-500 transition-colors hover:bg-red-50"
+                  icono={<UserMinus size={15} />}
+                  className="text-red-700 hover:border-red-600"
                 >
-                  <UserMinus size={13} /> Quitar acceso
-                </button>
+                  Quitar acceso
+                </Boton>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
 
       {miembro.activo && bloqueo !== null && (
-        <p className="mt-2 flex items-start gap-1.5 border-t border-gray-100 pt-2 text-[11px] text-gray-400">
-          <Lock size={11} className="mt-0.5 shrink-0" /> {bloqueo}
+        <p className="mt-3 flex items-start gap-2 border-t border-gray-100 pt-3 text-[13px] text-gray-500">
+          <Lock size={13} className="mt-0.5 shrink-0" /> {bloqueo}
         </p>
       )}
     </div>
@@ -506,6 +488,11 @@ function EditorMiembroModal({ estado, equipo, miEmail, onCerrar, onGuardado }: {
   const rolProhibido = esUltimoDueno && rol !== 'owner';
   const puedeGuardar = nombreOk && emailOk && yaExiste === null && !rolProhibido && !guardando;
 
+  // Lo tipeado no se pierde por un toque afuera: Dialogo pregunta antes.
+  const sucio = nombre !== (editando?.name ?? '')
+    || email !== (editando?.email ?? '')
+    || rol !== (editando?.role ?? 'admin');
+
   const guardar = async () => {
     if (!puedeGuardar) return;
     setGuardando(true);
@@ -537,143 +524,123 @@ function EditorMiembroModal({ estado, equipo, miEmail, onCerrar, onGuardado }: {
     }
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={() => !guardando && onCerrar()} />
-      <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 p-4">
-          <h3 className="font-display text-lg font-bold text-navy-700">
-            {editando !== null ? 'Editar miembro' : 'Dar acceso al panel'}
-          </h3>
-          <button onClick={onCerrar} aria-label="Cerrar" className="text-gray-400 hover:text-navy-700">✕</button>
-        </div>
+  const idForm = 'equipo-form';
+  const errorEmail = editando === null && email.trim() !== '' && !emailOk ? 'Eso no tiene forma de email.' : null;
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          <div>
-            <label htmlFor="equipo-nombre" className="mb-1 block font-display text-xs font-semibold uppercase text-gray-500">
-              Nombre
-            </label>
-            <input
-              id="equipo-nombre"
-              type="text"
-              value={nombre}
-              autoFocus
-              onChange={e => setNombre(e.target.value)}
-              placeholder="Pauli"
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-lime-400"
-            />
-            <p className="mt-1 text-[11px] text-gray-400">Es el nombre con el que la vas a ver en el panel.</p>
-          </div>
+  return (
+    <Dialogo
+      abierto
+      titulo={editando !== null ? 'Editar miembro' : 'Dar acceso al panel'}
+      alCerrar={onCerrar}
+      ocupado={guardando}
+      sucio={sucio}
+      ancho="lg"
+      pie={(
+        <>
+          <Boton
+            variante="secundario"
+            onClick={() => { if (!sucio || window.confirm('Tenés cambios sin guardar. ¿Descartarlos?')) onCerrar(); }}
+            disabled={guardando}
+          >
+            Cancelar
+          </Boton>
+          <Boton
+            type="submit"
+            form={idForm}
+            disabled={!puedeGuardar && !guardando}
+            cargando={guardando}
+            icono={editando !== null ? <Pencil size={15} /> : <UserPlus size={17} />}
+          >
+            {editando !== null ? 'Guardar cambios' : 'Dar acceso'}
+          </Boton>
+        </>
+      )}
+    >
+      {/* <form>: Enter en cualquier campo guarda (si está todo en orden). */}
+      <form id={idForm} onSubmit={e => { e.preventDefault(); void guardar(); }} className="space-y-5">
+        <Campo etiqueta="Nombre" requerido ayuda="Es el nombre con el que la vas a ver en el panel.">
+          <Entrada
+            type="text"
+            value={nombre}
+            onChange={e => setNombre(e.target.value)}
+            placeholder="Pauli"
+            autoComplete="off"
+          />
+        </Campo>
 
-          <div>
-            <label htmlFor="equipo-email" className="mb-1 block font-display text-xs font-semibold uppercase text-gray-500">
-              Email
-            </label>
-            <input
-              id="equipo-email"
+        <div>
+          <Campo
+            etiqueta="Email"
+            requerido
+            error={errorEmail}
+            ayuda={editando !== null
+              ? 'El email no se cambia: es la llave del acceso. Si está mal escrito, sacale el acceso a este y dá de alta el correcto.'
+              : undefined}
+          >
+            <Entrada
               type="email"
+              inputMode="email"
+              autoComplete="off"
+              autoCapitalize="none"
               value={email}
               disabled={editando !== null}
               onChange={e => setEmail(e.target.value)}
               placeholder="pauli@volea.uy"
-              className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-                editando !== null
-                  ? 'border-gray-100 bg-gray-50 text-gray-400'
-                  : email.trim() !== '' && !emailOk
-                    ? 'border-red-300'
-                    : 'border-gray-200 focus:border-lime-400'
-              }`}
+              className={errorEmail ? 'border-red-400 focus:border-red-600 focus:ring-red-600/15' : undefined}
             />
-            {editando !== null && (
-              <p className="mt-1 text-[11px] text-gray-400">
-                El email no se cambia: es la llave del acceso. Si está mal escrito, sacale el acceso a este y
-                dá de alta el correcto.
-              </p>
-            )}
-            {editando === null && email.trim() !== '' && !emailOk && (
-              <p className="mt-1 text-xs text-red-500">Eso no tiene forma de email.</p>
-            )}
-            {yaExiste !== null && (
-              <p className="mt-1 text-xs text-amber-600">
+          </Campo>
+          {yaExiste !== null && (
+            <p role="alert" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+              <AlertCircle size={15} className="mt-0.5 shrink-0" />
+              <span>
                 Ese email ya está en la lista ({yaExiste.name || 'sin nombre'}
                 {yaExiste.activo ? '' : ', sin acceso'}).{' '}
                 {yaExiste.activo
                   ? 'Editalo desde la lista en vez de darlo de alta de nuevo.'
                   : 'Cerrá esto y usá «Devolver acceso».'}
-              </p>
-            )}
-          </div>
+              </span>
+            </p>
+          )}
+        </div>
 
-          <div>
-            <label htmlFor="equipo-rol" className="mb-1 block font-display text-xs font-semibold uppercase text-gray-500">
-              Rol
-            </label>
-            <select
-              id="equipo-rol"
-              value={rol}
-              onChange={e => setRol(e.target.value as RolAdmin)}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-navy-700 outline-none focus:border-lime-400"
-            >
+        <div>
+          <Campo etiqueta="Rol" ayuda={infoDe(rol).resumen}>
+            <Selector value={rol} onChange={e => setRol(e.target.value as RolAdmin)}>
               {ROLES.map(r => (
                 <option key={r.id} value={r.id} disabled={esUltimoDueno && r.id !== 'owner'}>
                   {r.corto}
                 </option>
               ))}
-            </select>
-            <p className="mt-1 text-xs text-gray-500">{infoDe(rol).resumen}</p>
+            </Selector>
+          </Campo>
 
-            {esUltimoDueno && (
-              <p className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
-                <Lock size={14} className="mt-0.5 shrink-0" />
-                <span>
-                  Es el único dueño activo, así que el rol queda trabado en Dueño: si se lo bajás, el sistema
-                  se queda sin nadie que pueda administrar accesos. Nombrá dueño a otra persona primero.
-                </span>
-              </p>
-            )}
-            {meBajoElRol && !esUltimoDueno && (
-              <p className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
-                <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>Sos vos: si te bajás de Dueño, perdés esta pantalla y te lo tiene que devolver otro dueño.</span>
-              </p>
-            )}
-          </div>
-
-          {editando === null && (
-            <div className="flex items-start gap-2 rounded-lg bg-navy-50 p-3 text-xs text-navy-700">
-              <KeyRound size={14} className="mt-0.5 shrink-0 text-navy-400" />
+          {esUltimoDueno && (
+            <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+              <Lock size={15} className="mt-0.5 shrink-0" />
               <span>
-                <b className="font-display">Esto es solo el permiso.</b> Para que pueda entrar de verdad, la cuenta
-                con contraseña se crea aparte, en Supabase → Authentication → Users, con este mismo email.
+                Es el único dueño activo, así que el rol queda trabado en Dueño: si se lo bajás, el sistema
+                se queda sin nadie que pueda administrar accesos. Nombrá dueño a otra persona primero.
               </span>
-            </div>
+            </p>
+          )}
+          {meBajoElRol && !esUltimoDueno && (
+            <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
+              <AlertCircle size={15} className="mt-0.5 shrink-0" />
+              <span>Sos vos: si te bajás de Dueño, perdés esta pantalla y te lo tiene que devolver otro dueño.</span>
+            </p>
           )}
         </div>
 
-        <div className="flex gap-2 border-t border-gray-200 p-4">
-          <button
-            onClick={onCerrar}
-            disabled={guardando}
-            className="rounded-lg border border-gray-200 px-4 py-2.5 font-display text-sm font-bold text-gray-500 transition-colors hover:border-gray-400 disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={() => void guardar()}
-            disabled={!puedeGuardar}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-lime-400 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {guardando ? (
-              <><Loader2 size={16} className="animate-spin" /> Guardando…</>
-            ) : editando !== null ? (
-              <><Pencil size={15} /> Guardar cambios</>
-            ) : (
-              <><UserPlus size={16} /> Dar acceso</>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        {editando === null && (
+          <div className="flex items-start gap-2 rounded-lg bg-navy-50 p-3 text-[13px] text-navy-700">
+            <KeyRound size={15} className="mt-0.5 shrink-0 text-navy-400" />
+            <span>
+              <b className="font-display">Esto es solo el permiso.</b> Para que pueda entrar de verdad, la cuenta
+              con contraseña se crea aparte, en Supabase → Authentication → Users, con este mismo email.
+            </span>
+          </div>
+        )}
+      </form>
+    </Dialogo>
   );
 }
