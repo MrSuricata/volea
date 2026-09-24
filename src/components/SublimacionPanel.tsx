@@ -17,11 +17,11 @@
  * Seguridad: la base ya filtra por RLS (solo ve trabajos de sublimación ya
  * enviados). El filtro por `tipo` de acá es cinturón + tiradores, no la defensa.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight,
+  AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
   ClipboardList, FileText, Hammer, ImageOff, Inbox, LogOut, Maximize2, PackageCheck,
   RefreshCw, Send, Shirt, Truck, X,
 } from 'lucide-react';
@@ -78,15 +78,20 @@ function entregaDe(ymd: string | null): Entrega {
 
 // ─── Estados, en idioma de taller ────────────────────────────────────────────
 
-interface PintaEstado { texto: string; chip: string; icono: LucideIcon }
+/**
+ * `chip` va sobre blanco (tarjetas de la lista); `chipOscuro` sobre la barra azul
+ * del detalle. Lima solo sobre oscuro: en blanco casi no se lee, por eso "Para
+ * hacer" es azul marino en la lista y lima recién en la barra.
+ */
+interface PintaEstado { texto: string; chip: string; chipOscuro: string; icono: LucideIcon }
 
 const ESTADO: Record<CompraEstado, PintaEstado> = {
-  borrador:   { texto: 'Sin enviar',  chip: 'bg-gray-100 text-gray-500 border-gray-200',    icono: FileText },
-  pedido:     { texto: 'Para hacer',  chip: 'bg-lime-400 text-navy-700 border-lime-500',    icono: ClipboardList },
-  en_proceso: { texto: 'En proceso',  chip: 'bg-amber-100 text-amber-800 border-amber-300', icono: Hammer },
-  en_camino:  { texto: 'Ya lo mandé', chip: 'bg-sky-100 text-sky-800 border-sky-300',       icono: Truck },
-  recibido:   { texto: 'Entregado',   chip: 'bg-navy-100 text-navy-700 border-navy-200',    icono: PackageCheck },
-  cancelado:  { texto: 'Cancelado',   chip: 'bg-red-100 text-red-600 border-red-200',       icono: X },
+  borrador:   { texto: 'Sin enviar',  chip: 'bg-gray-100 text-gray-600 border-gray-200',    chipOscuro: 'bg-gray-100 text-gray-600 border-gray-200',    icono: FileText },
+  pedido:     { texto: 'Para hacer',  chip: 'bg-navy-700 text-white border-navy-700',       chipOscuro: 'bg-lime-400 text-navy-900 border-lime-400',    icono: ClipboardList },
+  en_proceso: { texto: 'En proceso',  chip: 'bg-amber-100 text-amber-800 border-amber-300', chipOscuro: 'bg-amber-100 text-amber-800 border-amber-300', icono: Hammer },
+  en_camino:  { texto: 'Ya lo mandé', chip: 'bg-sky-100 text-sky-800 border-sky-300',       chipOscuro: 'bg-sky-100 text-sky-800 border-sky-300',       icono: Truck },
+  recibido:   { texto: 'Entregado',   chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', chipOscuro: 'bg-emerald-50 text-emerald-800 border-emerald-200', icono: PackageCheck },
+  cancelado:  { texto: 'Cancelado',   chip: 'bg-red-50 text-red-700 border-red-200',        chipOscuro: 'bg-red-50 text-red-700 border-red-200',        icono: X },
 };
 
 /** Los que hay que hacer arriba; lo entregado y lo cancelado al fondo. */
@@ -95,6 +100,23 @@ const ORDEN: Record<CompraEstado, number> = {
 };
 
 const PENDIENTES: CompraEstado[] = ['pedido', 'en_proceso'];
+
+/** Volver a la app (cambiar de pestaña, desbloquear el celu) relee si pasó al menos esto. */
+const RELEER_AL_VOLVER_MS = 30_000;
+
+/**
+ * La cuenta regresiva ("atrasado 3 días") solo sirve mientras el trabajo está en el
+ * taller. Uno ya mandado, entregado o cancelado mostraba "atrasado" en rojo para
+ * siempre; ahí va la fecha sola, en gris.
+ */
+function entregaDelTrabajo(c: Compra): Entrega {
+  if (PENDIENTES.includes(c.estado)) return entregaDe(c.fechaEstimada);
+  return {
+    texto: c.fechaEstimada ? `Era para el ${fechaCorta(c.fechaEstimada)}` : 'Sin fecha de entrega',
+    apura: false,
+    vencida: false,
+  };
+}
 
 const totalUnidades = (c: Compra): number =>
   c.items.reduce((suma, it) => suma + (Number.isFinite(it.cantidad) ? it.cantidad : 0), 0);
@@ -230,7 +252,7 @@ function VisorFotos({ fotos, indice, onCerrar, onIr }: {
 function TarjetaTrabajo({ trabajo, onAbrir }: { trabajo: Compra; onAbrir: () => void }) {
   const pinta = ESTADO[trabajo.estado];
   const Icono = pinta.icono;
-  const entrega = entregaDe(trabajo.fechaEstimada);
+  const entrega = entregaDelTrabajo(trabajo);
   const unidades = totalUnidades(trabajo);
   const tapa: Foto | undefined = fotosDe(trabajo)[0];
 
@@ -238,7 +260,7 @@ function TarjetaTrabajo({ trabajo, onAbrir }: { trabajo: Compra; onAbrir: () => 
     <button
       type="button"
       onClick={onAbrir}
-      className="flex w-full items-stretch gap-3 overflow-hidden rounded-2xl border border-gray-200 bg-white text-left shadow-sm transition-shadow hover:shadow-md active:shadow-none"
+      className="flex w-full items-stretch gap-3 overflow-hidden rounded-2xl border border-gray-200 bg-white text-left transition-colors hover:border-navy-300 active:border-navy-700"
     >
       <div className="flex w-24 shrink-0 items-center justify-center bg-navy-50 sm:w-28">
         {tapa ? (
@@ -293,10 +315,14 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
 }) {
   const [guardando, setGuardando] = useState<'en_proceso' | 'en_camino' | null>(null);
   const [verFoto, setVerFoto] = useState<number | null>(null);
+  // "Está pronto, lo mando" no tiene vuelta atrás desde el taller (la base solo deja
+  // avanzar el estado): un toque de más con las manos ocupadas avisaba a VOLEA de
+  // algo que no salió. Por eso pide un segundo toque, en el mismo lugar del pulgar.
+  const [confirmarEnvio, setConfirmarEnvio] = useState(false);
 
   const pinta = ESTADO[trabajo.estado];
   const Icono = pinta.icono;
-  const entrega = entregaDe(trabajo.fechaEstimada);
+  const entrega = entregaDelTrabajo(trabajo);
   const unidades = totalUnidades(trabajo);
   const fotos = useMemo(() => fotosDe(trabajo), [trabajo]);
   const adjuntos = useMemo(() => trabajo.archivos.filter(a => !esImagen(a)), [trabajo.archivos]);
@@ -319,10 +345,15 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
 
   useEffect(() => {
     // Con el visor abierto manda el visor: ahí Escape cierra la foto, no el trabajo.
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && verFoto === null) onCerrar(); };
+    // Y con la confirmación del envío abierta, Escape la cancela (no cierra el trabajo).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || verFoto !== null) return;
+      if (confirmarEnvio) { setConfirmarEnvio(false); return; }
+      onCerrar();
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onCerrar, verFoto]);
+  }, [onCerrar, verFoto, confirmarEnvio]);
 
   const marcar = async (estado: 'en_proceso' | 'en_camino') => {
     if (guardando !== null) return;
@@ -331,6 +362,7 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
       await onEstado(estado);
     } finally {
       setGuardando(null);
+      setConfirmarEnvio(false);
     }
   };
 
@@ -351,7 +383,7 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
           </p>
           <p className="truncate text-sm text-gray-300">{trabajo.prendaBase || 'Prenda a confirmar'}</p>
         </div>
-        <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${pinta.chip}`}>
+        <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide ${pinta.chipOscuro}`}>
           <Icono size={14} /> {pinta.texto}
         </span>
       </header>
@@ -424,11 +456,11 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
 
           {/* Instrucciones del taller: grandes y legibles, son la orden real. */}
           {trabajo.comentarioTaller.trim() !== '' && (
-            <section className="rounded-2xl border-2 border-lime-400 bg-lime-50 p-4">
-              <h2 className="font-display text-base font-bold uppercase tracking-wide text-navy-700">
+            <section className="rounded-2xl bg-navy-700 p-4 text-white">
+              <h2 className="font-display text-base font-bold uppercase tracking-wide text-lime-400">
                 Instrucciones
               </h2>
-              <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed text-navy-700">
+              <p className="mt-2 whitespace-pre-wrap text-lg leading-relaxed text-white">
                 {trabajo.comentarioTaller}
               </p>
             </section>
@@ -535,33 +567,74 @@ function DetalleTrabajo({ trabajo, onCerrar, onEstado }: {
       </div>
 
       {/* Barra de acciones: abajo y fija, que es donde llega el pulgar. */}
-      <div className="shrink-0 border-t border-gray-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,31,63,0.08)]">
-        <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            onClick={() => void marcar('en_proceso')}
-            disabled={!puedeEmpezar || guardando !== null}
-            className="inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 font-display text-lg font-bold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {guardando === 'en_proceso' ? (
-              <><RefreshCw size={22} className="animate-spin" /> Anotando…</>
-            ) : (
-              <><Hammer size={22} /> Lo empecé</>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => void marcar('en_camino')}
-            disabled={!puedeMandar || guardando !== null}
-            className="inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl bg-lime-400 px-4 font-display text-lg font-bold text-navy-700 transition-colors hover:bg-lime-500 disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {guardando === 'en_camino' ? (
-              <><RefreshCw size={22} className="animate-spin" /> Anotando…</>
-            ) : (
-              <><Send size={22} /> Está pronto, lo mando</>
-            )}
-          </button>
-        </div>
+      <div className="shrink-0 border-t border-gray-200 bg-white p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {confirmarEnvio && puedeMandar ? (
+          <div role="alertdialog" aria-labelledby="confirmar-envio-titulo" className="mx-auto max-w-3xl">
+            <p id="confirmar-envio-titulo" className="font-display text-lg font-bold leading-snug text-navy-700">
+              ¿Ya está pronto y lo mandás?
+            </p>
+            <p className="mt-0.5 text-base text-gray-600">
+              Le avisamos a VOLEA que va en camino. Después no se puede volver atrás desde acá.
+            </p>
+            {/* "Todavía no" queda donde estaba "lo mando" (abajo en el celu, a la derecha
+                en la compu): un doble toque sin querer cae en el que NO manda. */}
+            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => setConfirmarEnvio(false)}
+                disabled={guardando !== null}
+                className="inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl border-2 border-gray-300 bg-white px-4 font-display text-lg font-bold text-navy-700 transition-colors hover:border-navy-700 disabled:text-gray-400"
+              >
+                Todavía no
+              </button>
+              <button
+                type="button"
+                onClick={() => void marcar('en_camino')}
+                disabled={guardando !== null}
+                autoFocus
+                className="inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 font-display text-lg font-bold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-200 disabled:text-gray-400"
+              >
+                {guardando === 'en_camino' ? (
+                  <><RefreshCw size={22} className="animate-spin" /> Anotando…</>
+                ) : (
+                  <><Send size={22} /> Sí, lo mando</>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row">
+            {/* El paso que toca va lleno (azul); el otro, con borde. */}
+            <button
+              type="button"
+              onClick={() => void marcar('en_proceso')}
+              disabled={!puedeEmpezar || guardando !== null}
+              className={`inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl px-4 font-display text-lg font-bold transition-colors disabled:border-transparent disabled:bg-gray-100 disabled:text-gray-400 ${
+                puedeEmpezar
+                  ? 'bg-navy-700 text-white hover:bg-navy-800'
+                  : 'border-2 border-gray-300 bg-white text-navy-700'
+              }`}
+            >
+              {guardando === 'en_proceso' ? (
+                <><RefreshCw size={22} className="animate-spin" /> Anotando…</>
+              ) : (
+                <><Hammer size={22} /> Lo empecé</>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmarEnvio(true)}
+              disabled={!puedeMandar || guardando !== null}
+              className={`inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-xl px-4 font-display text-lg font-bold transition-colors disabled:border-transparent disabled:bg-gray-100 disabled:text-gray-400 ${
+                puedeEmpezar
+                  ? 'border-2 border-navy-700 bg-white text-navy-700 hover:bg-navy-50'
+                  : 'bg-navy-700 text-white hover:bg-navy-800'
+              }`}
+            >
+              <Send size={22} /> Está pronto, lo mando
+            </button>
+          </div>
+        )}
         {!puedeMandar && (
           <p className="mx-auto mt-2 max-w-3xl text-center text-sm text-gray-500">
             {trabajo.estado === 'en_camino'
@@ -591,13 +664,23 @@ export default function SublimacionPanel({ nombre, onSalir }: {
   const [cargando, setCargando] = useState(true);
   const [falloLectura, setFalloLectura] = useState(false);
   const [abiertoId, setAbiertoId] = useState<string | null>(null);
+  const [verTerminados, setVerTerminados] = useState(false);
+  // Cuándo fue la última lectura y el último estado marcado desde acá (ver abajo).
+  const ultimaCarga = useRef(0);
+  const cambioLocal = useRef(0);
 
   const cargar = useCallback(async (avisar = false) => {
+    const inicio = Date.now();
     setCargando(true);
     const data = await SupabaseService.getCompras();
+    ultimaCarga.current = Date.now();
     if (data === null) {
       setFalloLectura(true);
       if (avisar) toast.error('No se pudieron actualizar los trabajos');
+    } else if (cambioLocal.current > inicio) {
+      // Mientras viajaba la lectura se marcó un estado desde acá: esa foto ya es
+      // vieja y pisaría el "Lo empecé" recién anotado. Se descarta; la próxima
+      // lectura trae todo al día.
     } else {
       setFalloLectura(false);
       // La base ya filtra por RLS; el filtro por tipo es por las dudas.
@@ -608,6 +691,19 @@ export default function SublimacionPanel({ nombre, onSalir }: {
   }, []);
 
   useEffect(() => { void cargar(); }, [cargar]);
+
+  // Volver a la app (otra pestaña, el celu bloqueado un rato) relee la lista sin
+  // tocar nada: VOLEA pudo haber mandado un trabajo nuevo mientras tanto. Con un
+  // mínimo entre lecturas para no gastar datos en cada ida y vuelta.
+  useEffect(() => {
+    const alVolver = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - ultimaCarga.current < RELEER_AL_VOLVER_MS) return;
+      void cargar();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => document.removeEventListener('visibilitychange', alVolver);
+  }, [cargar]);
 
   const ordenados = useMemo(() => {
     if (!trabajos) return [];
@@ -626,7 +722,13 @@ export default function SublimacionPanel({ nombre, onSalir }: {
     });
   }, [trabajos]);
 
-  const pendientes = ordenados.filter(t => PENDIENTES.includes(t.estado)).length;
+  // Tres grupos: lo que hay que hacer, lo que ya salió del taller y el historial
+  // (entregado / cancelado), que va plegado para que no se mezcle con lo pendiente.
+  const paraHacer = ordenados.filter(t => PENDIENTES.includes(t.estado));
+  const enCamino = ordenados.filter(t => t.estado === 'en_camino');
+  const terminados = ordenados.filter(t => !PENDIENTES.includes(t.estado) && t.estado !== 'en_camino');
+  const pendientes = paraHacer.length;
+  const tituloTerminados = terminados.some(t => t.estado === 'cancelado') ? 'Entregados y cancelados' : 'Entregados';
   const abierto = abiertoId === null ? null : ordenados.find(t => t.id === abiertoId) ?? null;
 
   const cambiarEstado = async (compraId: string, estado: 'en_proceso' | 'en_camino') => {
@@ -637,6 +739,7 @@ export default function SublimacionPanel({ nombre, onSalir }: {
     }
     // Se actualiza en pantalla sin volver a leer todo: en el taller la conexión
     // suele estar justa y la respuesta tiene que ser inmediata.
+    cambioLocal.current = Date.now();
     setTrabajos(prev => (prev ? prev.map(t => (t.id === compraId ? { ...t, estado } : t)) : prev));
     if (estado === 'en_proceso') {
       toast.success('Listo, quedó anotado que lo empezaste');
@@ -653,7 +756,7 @@ export default function SublimacionPanel({ nombre, onSalir }: {
           <FotoConRespaldo
             url="/logo-white.png"
             alt="VOLEA"
-            className="h-9 w-auto shrink-0"
+            className="h-7 w-auto shrink-0 sm:h-9"
             respaldo={<span className="shrink-0 font-display text-xl font-black tracking-tight">VOLEA</span>}
           />
           <div className="min-w-0 flex-1">
@@ -684,7 +787,7 @@ export default function SublimacionPanel({ nombre, onSalir }: {
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-5">
         {cargando && trabajos === null && !falloLectura ? (
           <div className="flex flex-col items-center justify-center gap-3 py-20 text-navy-700">
-            <RefreshCw size={34} className="animate-spin text-lime-500" />
+            <RefreshCw size={34} className="animate-spin text-navy-400" />
             <p className="font-display text-lg font-semibold">Buscando tus trabajos…</p>
           </div>
         ) : falloLectura && trabajos === null ? (
@@ -725,7 +828,7 @@ export default function SublimacionPanel({ nombre, onSalir }: {
                 </>
               ) : (
                 <>
-                  <CheckCircle2 size={22} className="shrink-0 text-lime-600" />
+                  <CheckCircle2 size={22} className="shrink-0 text-emerald-600" />
                   <p className="font-display text-lg font-bold text-navy-700">
                     Estás al día, no hay nada pendiente
                   </p>
@@ -733,13 +836,59 @@ export default function SublimacionPanel({ nombre, onSalir }: {
               )}
             </div>
 
-            <ul className="space-y-3">
-              {ordenados.map(trabajo => (
-                <li key={trabajo.id}>
-                  <TarjetaTrabajo trabajo={trabajo} onAbrir={() => setAbiertoId(trabajo.id)} />
-                </li>
-              ))}
-            </ul>
+            {paraHacer.length > 0 && (
+              <ul className="space-y-3">
+                {paraHacer.map(trabajo => (
+                  <li key={trabajo.id}>
+                    <TarjetaTrabajo trabajo={trabajo} onAbrir={() => setAbiertoId(trabajo.id)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {enCamino.length > 0 && (
+              <section className={paraHacer.length > 0 ? 'mt-8' : undefined} aria-labelledby="sub-en-camino">
+                <h2 id="sub-en-camino" className="flex items-center gap-2 font-display text-base font-bold uppercase tracking-wide text-navy-700">
+                  <Truck size={19} className="shrink-0" /> Ya los mandaste
+                  <span className="rounded-full bg-white px-2.5 py-0.5 text-sm tabular-nums ring-1 ring-inset ring-navy-100">{enCamino.length}</span>
+                </h2>
+                <p className="mb-3 mt-0.5 text-base text-gray-500">Cuando lleguen a VOLEA pasan a entregados.</p>
+                <ul className="space-y-3">
+                  {enCamino.map(trabajo => (
+                    <li key={trabajo.id}>
+                      <TarjetaTrabajo trabajo={trabajo} onAbrir={() => setAbiertoId(trabajo.id)} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {terminados.length > 0 && (
+              <section className={paraHacer.length + enCamino.length > 0 ? 'mt-8' : undefined}>
+                <button
+                  type="button"
+                  onClick={() => setVerTerminados(v => !v)}
+                  aria-expanded={verTerminados}
+                  aria-controls="sub-terminados"
+                  className="flex min-h-[56px] w-full items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 text-left transition-colors hover:border-navy-300"
+                >
+                  <span className="flex items-center gap-2 font-display text-base font-bold uppercase tracking-wide text-navy-700">
+                    <PackageCheck size={19} className="shrink-0" /> {tituloTerminados}
+                    <span className="rounded-full bg-navy-50 px-2.5 py-0.5 text-sm tabular-nums">{terminados.length}</span>
+                  </span>
+                  <ChevronDown size={22} className={`shrink-0 text-gray-500 transition-transform ${verTerminados ? 'rotate-180' : ''}`} />
+                </button>
+                {verTerminados && (
+                  <ul id="sub-terminados" className="mt-3 space-y-3">
+                    {terminados.map(trabajo => (
+                      <li key={trabajo.id}>
+                        <TarjetaTrabajo trabajo={trabajo} onAbrir={() => setAbiertoId(trabajo.id)} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
           </>
         )}
       </main>

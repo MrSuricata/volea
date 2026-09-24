@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   ArrowRight, CalendarDays, Check, CheckCheck, Circle, Clock, ListTodo, Loader2, Pencil,
-  Plus, RefreshCw, Search, SlidersHorizontal, Trash2, Undo2, UserRound, X,
+  Plus, RefreshCw, SlidersHorizontal, Trash2, Undo2, UserRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MiembroEquipo, Tarea, TareaEstado, TareaPrioridad } from '../types';
 import { SupabaseService } from '../services/supabaseService';
 import { normalizar } from '../utils/nombres';
+import {
+  AreaTexto, BarraFiltros, Boton, BotonIcono, Campo, CargandoFilas, Chip, Dialogo,
+  EncabezadoPagina, Entrada, ErrorEstado, Insignia, Segmentado, Selector, Tarjeta, type TonoInsignia,
+} from '../admin/ui';
+import { cn } from '../lib/cn';
 
 /**
  * Pestaña Tareas: la agenda compartida del equipo (Brian, Pauli, Gastón).
@@ -45,7 +49,7 @@ type Filtro = 'todas' | 'mias' | 'sin';
 const COLUMNAS: { id: TareaEstado; label: string; icono: LucideIcon; acento: string }[] = [
   { id: 'pendiente', label: 'Pendiente', icono: Circle, acento: 'text-gray-400' },
   { id: 'en_curso', label: 'En curso', icono: Clock, acento: 'text-navy-500' },
-  { id: 'hecha', label: 'Hecha', icono: CheckCheck, acento: 'text-green-600' },
+  { id: 'hecha', label: 'Hecha', icono: CheckCheck, acento: 'text-emerald-600' },
 ];
 
 const VACIO: Record<TareaEstado, string> = {
@@ -54,16 +58,16 @@ const VACIO: Record<TareaEstado, string> = {
   hecha: 'Todavía nada terminado',
 };
 
-const PRIORIDADES: { id: TareaPrioridad; label: string; activo: string }[] = [
-  { id: 'baja', label: 'Baja', activo: 'border-gray-300 bg-gray-100 text-gray-500' },
-  { id: 'normal', label: 'Normal', activo: 'border-navy-700 bg-navy-700 text-white' },
-  { id: 'alta', label: 'Alta', activo: 'border-red-300 bg-red-50 text-red-600' },
+const PRIORIDADES: { valor: TareaPrioridad; texto: string }[] = [
+  { valor: 'baja', texto: 'Baja' },
+  { valor: 'normal', texto: 'Normal' },
+  { valor: 'alta', texto: 'Alta' },
 ];
 
-const ESTADOS: { id: TareaEstado; label: string }[] = [
-  { id: 'pendiente', label: 'Pendiente' },
-  { id: 'en_curso', label: 'En curso' },
-  { id: 'hecha', label: 'Hecha' },
+const ESTADOS: { valor: TareaEstado; texto: string }[] = [
+  { valor: 'pendiente', texto: 'Pendiente' },
+  { valor: 'en_curso', texto: 'En curso' },
+  { valor: 'hecha', texto: 'Hecha' },
 ];
 
 const PESO_PRIORIDAD: Record<TareaPrioridad, number> = { alta: 0, normal: 1, baja: 2 };
@@ -93,19 +97,22 @@ const ordenHechas = (a: Tarea, b: Tarea): number => {
 /** Chip de vencimiento: el "hoy"/"vencida" es toda la parte de agenda del pedido. */
 const chipVencimiento = (
   t: Tarea, hoy: string, manana: string,
-): { texto: string; clase: string } | null => {
+): { texto: string; tono: TonoInsignia; vencida: boolean } | null => {
   if (!t.venceEl) return null;
   const dia = t.venceEl.slice(0, 10);
-  if (t.estado === 'hecha') return { texto: fechaCorta(dia), clase: 'bg-gray-100 text-gray-400' };
-  if (dia < hoy) return { texto: `vencida · ${fechaCorta(dia)}`, clase: 'bg-red-50 text-red-600' };
-  if (dia === hoy) return { texto: 'hoy', clase: 'bg-amber-100 text-amber-700' };
-  if (dia === manana) return { texto: 'mañana', clase: 'bg-navy-50 text-navy-600' };
-  return { texto: fechaCorta(dia), clase: 'bg-gray-100 text-gray-500' };
+  if (t.estado === 'hecha') return { texto: fechaCorta(dia), tono: 'neutro', vencida: false };
+  if (dia < hoy) return { texto: `vencida · ${fechaCorta(dia)}`, tono: 'alerta', vencida: true };
+  if (dia === hoy) return { texto: 'hoy', tono: 'atencion', vencida: false };
+  if (dia === manana) return { texto: 'mañana', tono: 'navy', vencida: false };
+  return { texto: fechaCorta(dia), tono: 'neutro', vencida: false };
 };
 
-const chipClass = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold';
-const inputClass = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 focus:border-lime-400 focus:outline-none';
-const labelClass = 'mb-1 block font-display text-xs font-bold uppercase tracking-wide text-gray-500';
+/** Rótulo de un grupo de botones (Segmentado no es un input: no va dentro de Campo). */
+const rotuloGrupo = 'mb-1.5 block text-[13px] font-semibold text-navy-700';
+
+/** Mismo texto que usa Dialogo al tocar afuera: Cancelar tiene que preguntar igual. */
+const confirmarDescarte = (sucio: boolean): boolean =>
+  !sucio || window.confirm('Tenés cambios sin guardar. ¿Descartarlos?');
 
 /** Cuántas hechas se ven antes de tener que pedir "ver todas". */
 const LIMITE_HECHAS = 5;
@@ -311,145 +318,121 @@ export default function AdminTareasTab({ adminEmail }: { adminEmail: string }) {
   ];
 
   return (
-    <div className="fade-in">
-      {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="hidden font-display text-2xl font-bold text-navy-700 lg:block">Tareas</h1>
-        <button
-          onClick={() => void cargar()}
-          disabled={recargando}
-          className="ml-auto flex items-center gap-2 rounded-lg bg-navy-700 px-5 py-2.5 font-display text-sm font-semibold text-white transition-colors hover:bg-navy-800 disabled:bg-gray-400"
-        >
-          <RefreshCw size={16} className={recargando ? 'animate-spin' : ''} /> Actualizar
-        </button>
-      </div>
+    <div>
+      <EncabezadoPagina
+        rotulo="Equipo"
+        titulo="Tareas"
+        descripcion="La agenda compartida: anotá en un renglón y mové cada tarea con un toque."
+        acciones={(
+          <Boton
+            variante="secundario"
+            onClick={() => void cargar()}
+            disabled={recargando}
+            icono={<RefreshCw size={16} className={recargando ? 'animate-spin' : undefined} />}
+          >
+            Actualizar
+          </Boton>
+        )}
+      />
 
       {/* Alta rápida: un renglón + Enter. Lo demás (detalle, asignado, prioridad,
           fecha) sale por el botón de al lado, que se lleva lo ya escrito. */}
-      <div className="mb-5 rounded-xl border border-gray-100 bg-white p-3 shadow-sm sm:p-4">
+      <Tarjeta className="mb-5">
         <form
           onSubmit={e => { e.preventDefault(); void anotarRapido(); }}
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-col gap-2 sm:flex-row"
         >
           <label htmlFor="tarea-rapida" className="sr-only">¿Qué hay que hacer?</label>
-          <input
+          <Entrada
             id="tarea-rapida"
             type="text"
             value={nuevoTitulo}
             onChange={e => setNuevoTitulo(e.target.value)}
             placeholder="¿Qué hay que hacer?"
             autoComplete="off"
-            className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 placeholder:text-gray-400 focus:border-lime-400 focus:outline-none"
+            enterKeyHint="done"
+            className="sm:flex-1"
           />
-          <button
-            type="submit"
-            disabled={nuevoTitulo.trim() === ''}
-            className="flex items-center gap-1.5 rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 disabled:bg-gray-100 disabled:text-gray-400"
-          >
-            {creando ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} strokeWidth={2.5} />}
-            Anotar
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditando(tareaVacia(adminEmail, nuevoTitulo.trim()))}
-            title="Anotar con detalle, asignado, prioridad y fecha"
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2.5 font-display text-sm font-semibold text-navy-700 transition-colors hover:border-navy-700"
-          >
-            <SlidersHorizontal size={16} /> Con detalle
-          </button>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            {/* Sin `cargando`: ese prop deshabilita, y acá se puede seguir anotando
+                mientras la anterior viaja (cada una tiene su tarjeta temporal). */}
+            <Boton
+              type="submit"
+              disabled={nuevoTitulo.trim() === ''}
+              icono={creando ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} strokeWidth={2.5} />}
+            >
+              Anotar
+            </Boton>
+            <Boton
+              variante="secundario"
+              onClick={() => setEditando(tareaVacia(adminEmail, nuevoTitulo.trim()))}
+              title="Anotar con detalle, asignado, prioridad y fecha"
+              icono={<SlidersHorizontal size={16} />}
+            >
+              Con detalle
+            </Boton>
+          </div>
         </form>
-        <p className="mt-2 text-[11px] text-gray-400">
-          Enter la anota a tu nombre y queda en <b>Pendiente</b>. Con «Con detalle» le ponés a quién,
-          prioridad y para cuándo.
+        <p className="mt-2 text-[13px] text-gray-500">
+          Enter la anota a tu nombre y queda en <b className="font-semibold text-navy-700">Pendiente</b>.
+          Con «Con detalle» le ponés a quién, prioridad y para cuándo.
         </p>
-      </div>
+      </Tarjeta>
 
       {/* Resumen — la lectura de un vistazo antes de mirar las columnas */}
       {!cargandoInicial && !falloCarga && (
-        <div className="mb-5 flex flex-wrap items-center gap-2 text-xs">
-          <span className={`${chipClass} bg-navy-50 text-navy-600`}>
-            <ListTodo size={12} /> {resumen.abiertas} sin terminar
-          </span>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Insignia tono="navy">
+            <ListTodo size={13} /> {resumen.abiertas} sin terminar
+          </Insignia>
           {resumen.paraHoy > 0 && (
-            <span className={`${chipClass} bg-amber-100 text-amber-700`}>
-              <CalendarDays size={12} /> {resumen.paraHoy} para hoy
-            </span>
+            <Insignia tono="atencion">
+              <CalendarDays size={13} /> {resumen.paraHoy} para hoy
+            </Insignia>
           )}
           {resumen.vencidas > 0 && (
-            <span className={`${chipClass} bg-red-50 text-red-600`}>
+            <Insignia tono="alerta" punto>
               {resumen.vencidas} {resumen.vencidas === 1 ? 'vencida' : 'vencidas'}
-            </span>
+            </Insignia>
           )}
         </div>
       )}
 
       {/* Filtros + buscador */}
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        {filtros.map(f => (
-          <button
-            key={f.id}
-            onClick={() => setFiltro(f.id)}
-            aria-pressed={filtro === f.id}
-            className={`rounded-full px-3.5 py-1.5 font-display text-xs font-bold transition-colors ${
-              filtro === f.id ? 'bg-navy-700 text-white' : 'bg-gray-100 text-gray-500 hover:text-navy-700'
-            }`}
-          >
+      <BarraFiltros
+        busqueda={busqueda}
+        alBuscar={setBusqueda}
+        placeholder="Buscar tarea, persona…"
+        chips={filtros.map(f => (
+          <Chip key={f.id} activo={filtro === f.id} onClick={() => setFiltro(f.id)}>
             {f.label}
-          </button>
+          </Chip>
         ))}
-        <div className="relative w-full sm:ml-auto sm:w-64">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar tarea, persona…"
-            aria-label="Buscar tareas"
-            className="w-full rounded-full border border-gray-200 py-1.5 pl-9 pr-8 text-xs focus:border-lime-400 focus:outline-none"
-          />
-          {busqueda !== '' && (
-            <button
-              onClick={() => setBusqueda('')}
-              aria-label="Limpiar búsqueda"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-navy-700"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
+      />
 
       {cargandoInicial ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-          <Loader2 size={32} strokeWidth={1.5} className="mx-auto mb-3 animate-spin text-gray-300" />
-          <p className="font-display text-sm font-bold text-gray-500">Cargando las tareas…</p>
-        </div>
+        <CargandoFilas filas={4} />
       ) : falloCarga ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 py-10 text-center">
-          <ListTodo size={32} strokeWidth={1.5} className="mx-auto mb-3 text-gray-300" />
-          <p className="font-display text-sm font-bold text-gray-500">No se pudieron cargar las tareas</p>
-          <p className="mt-1 text-xs text-gray-400">
-            Puede ser la sesión vencida: entrá de nuevo con el link mágico y probá «Actualizar».
-          </p>
-        </div>
+        <ErrorEstado
+          mensaje="No se pudieron cargar las tareas. Puede ser la sesión vencida: entrá de nuevo y probá otra vez."
+          alReintentar={() => void cargar()}
+        />
       ) : (
         /* Tres columnas en desktop, apiladas en el celular */
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-3 md:gap-4">
           {COLUMNAS.map(col => {
             const lista = porEstado[col.id];
             const esHecha = col.id === 'hecha';
             const mostradas = esHecha && !verHechas ? lista.slice(0, LIMITE_HECHAS) : lista;
             const Icono = col.icono;
             return (
-              <section key={col.id} className={esHecha ? 'opacity-90' : undefined}>
+              <section key={col.id} aria-label={col.label}>
                 <div className="mb-2 flex items-center gap-2 px-1">
-                  <Icono size={14} className={col.acento} />
-                  <h2 className="font-display text-sm font-bold uppercase tracking-wide text-gray-500">
+                  <Icono size={15} className={col.acento} />
+                  <h2 className="font-display text-sm font-bold uppercase tracking-wide text-navy-700">
                     {col.label}
                   </h2>
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500">
-                    {lista.length}
-                  </span>
+                  <Insignia tono="neutro" className="tabular-nums">{lista.length}</Insignia>
                 </div>
                 <div className="space-y-2">
                   {mostradas.map(t => (
@@ -469,19 +452,16 @@ export default function AdminTareasTab({ adminEmail }: { adminEmail: string }) {
                     />
                   ))}
                   {lista.length === 0 && (
-                    <div className="rounded-xl border border-dashed border-gray-200 py-6 text-center text-xs text-gray-400">
+                    <p className="rounded-xl border border-dashed border-gray-300 px-3 py-6 text-center text-[13px] text-gray-500">
                       {busqueda.trim() !== '' || filtro !== 'todas'
                         ? 'Nada con este filtro'
                         : VACIO[col.id]}
-                    </div>
+                    </p>
                   )}
                   {esHecha && lista.length > LIMITE_HECHAS && (
-                    <button
-                      onClick={() => setVerHechas(v => !v)}
-                      className="w-full rounded-xl border border-dashed border-gray-200 py-2 font-display text-xs font-bold text-gray-500 transition-colors hover:text-navy-700"
-                    >
+                    <Boton variante="fantasma" anchoCompleto onClick={() => setVerHechas(v => !v)}>
                       {verHechas ? 'Ver menos' : `Ver todas (${lista.length})`}
-                    </button>
+                    </Boton>
                   )}
                 </div>
               </section>
@@ -529,131 +509,128 @@ function TarjetaTarea({
 }) {
   const hecha = tarea.estado === 'hecha';
   const venc = chipVencimiento(tarea, hoy, manana);
-  const vencida = venc !== null && venc.texto.startsWith('vencida');
-
-  const botonBase = 'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 font-display text-[11px] font-bold transition-colors disabled:opacity-40';
+  const vencida = venc !== null && venc.vencida;
 
   return (
     <article
-      className={`rounded-xl border bg-white p-3 shadow-sm transition-opacity ${
-        hecha ? 'border-gray-100 opacity-60' : vencida ? 'border-red-200' : 'border-gray-100'
-      }`}
+      className={cn(
+        'rounded-xl border bg-white p-3 transition-opacity',
+        hecha ? 'border-gray-200 opacity-70' : vencida ? 'border-red-300' : 'border-gray-200',
+      )}
     >
-      <div className="flex items-start gap-2">
-        <p className={`min-w-0 flex-1 break-words text-sm font-semibold ${
-          hecha ? 'text-gray-400 line-through' : 'text-navy-700'
-        }`}>
-          {tarea.titulo}
-        </p>
-        <div className="flex flex-shrink-0 items-center gap-0.5">
-          <button
+      <div className="flex items-start gap-1">
+        <div className="min-w-0 flex-1 pt-2.5">
+          <p className={cn(
+            'break-words text-[15px] font-semibold leading-snug',
+            hecha ? 'text-gray-500 line-through' : 'text-navy-700',
+          )}>
+            {tarea.titulo}
+          </p>
+          {tarea.detalle.trim() !== '' && (
+            <p className="mt-1 line-clamp-2 text-[13px] text-gray-500">{tarea.detalle}</p>
+          )}
+        </div>
+        {/* 44px cada uno: se toca con el pulgar, no con la uña. */}
+        <div className="-mr-1 -mt-0.5 flex shrink-0 items-center">
+          <BotonIcono
+            etiqueta={`Editar «${tarea.titulo}»`}
+            icono={<Pencil size={17} />}
             onClick={onEditar}
             disabled={ocupada}
-            title="Editar"
-            aria-label={`Editar ${tarea.titulo}`}
-            className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-40"
-          >
-            <Pencil size={14} />
-          </button>
-          <button
+          />
+          <BotonIcono
+            etiqueta={`Borrar «${tarea.titulo}»`}
+            icono={<Trash2 size={17} />}
+            tono="peligro"
             onClick={onPedirBorrar}
             disabled={ocupada}
-            title="Borrar"
-            aria-label={`Borrar ${tarea.titulo}`}
-            className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40"
-          >
-            <Trash2 size={14} />
-          </button>
+          />
         </div>
       </div>
 
-      {tarea.detalle.trim() !== '' && (
-        <p className="mt-1 line-clamp-2 text-xs text-gray-500">{tarea.detalle}</p>
-      )}
-
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className={`${chipClass} ${
-          tarea.asignadoA ? 'bg-navy-50 text-navy-600' : 'bg-gray-100 text-gray-400'
-        }`}>
-          <UserRound size={11} /> {quien}
-        </span>
+        <Insignia tono={tarea.asignadoA ? 'navy' : 'neutro'}>
+          <UserRound size={12} /> {quien}
+        </Insignia>
         {/* Prioridad: solo se canta si es alta (rojo) o baja (gris tenue). La
             normal no ocupa lugar, que es el caso del 90% de las tareas. */}
-        {tarea.prioridad === 'alta' && !hecha && (
-          <span className={`${chipClass} bg-red-50 text-red-600`}>Alta</span>
-        )}
-        {tarea.prioridad === 'baja' && !hecha && (
-          <span className={`${chipClass} bg-gray-100 text-gray-400`}>Baja</span>
-        )}
-        {venc && <span className={`${chipClass} ${venc.clase}`}>{venc.texto}</span>}
+        {tarea.prioridad === 'alta' && !hecha && <Insignia tono="alerta">Alta</Insignia>}
+        {tarea.prioridad === 'baja' && !hecha && <Insignia tono="neutro">Baja</Insignia>}
+        {venc && <Insignia tono={venc.tono} punto={venc.vencida}>{venc.texto}</Insignia>}
       </div>
 
       {confirmando ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 px-2.5 py-1.5">
-          <span className="flex-1 text-[11px] font-semibold text-red-600">¿Borrar esta tarea?</span>
-          <button
-            onClick={onBorrar}
-            className="rounded-md bg-red-500 px-2.5 py-1 font-display text-[11px] font-bold text-white transition-colors hover:bg-red-600"
-          >
-            Sí, borrar
-          </button>
-          <button
-            onClick={onCancelarBorrar}
-            className="rounded-md px-2 py-1 font-display text-[11px] font-bold text-gray-500 transition-colors hover:text-navy-700"
-          >
-            No
-          </button>
+        <div role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2">
+          <p className="px-1 pb-2 text-[13px] font-semibold text-red-800">¿Borrar esta tarea?</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Boton variante="secundario" onClick={onCancelarBorrar}>No</Boton>
+            <Boton variante="peligro" onClick={onBorrar} icono={<Trash2 size={16} />}>Sí, borrar</Boton>
+          </div>
         </div>
       ) : (
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2.5">
+        // Botones con borde y no llenos: con 10 tarjetas, 10 bloques azules pesaban
+        // más que las tareas mismas. El tilde verde ya dice cuál es "Hecha".
+        <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3">
           {tarea.estado === 'pendiente' && (
-            <>
-              <button
+            <div className="grid flex-1 grid-cols-2 gap-2">
+              <Boton
+                variante="secundario"
                 onClick={() => onEstado('en_curso')}
                 disabled={ocupada}
-                className={`${botonBase} border border-gray-200 text-navy-700 hover:border-navy-700`}
+                icono={<ArrowRight size={16} />}
+                className="px-3"
               >
-                <ArrowRight size={12} /> En curso
-              </button>
-              <button
+                En curso
+              </Boton>
+              <Boton
+                variante="secundario"
                 onClick={() => onEstado('hecha')}
                 disabled={ocupada}
-                className={`${botonBase} bg-lime-400 text-navy-700 hover:bg-lime-300`}
+                icono={<Check size={16} strokeWidth={3} className="text-emerald-600" />}
+                className="px-3"
               >
-                <Check size={12} strokeWidth={3} /> Hecha
-              </button>
-            </>
+                Hecha
+              </Boton>
+            </div>
           )}
           {tarea.estado === 'en_curso' && (
-            <>
-              <button
+            <div className="grid flex-1 grid-cols-2 gap-2">
+              <Boton
+                variante="fantasma"
                 onClick={() => onEstado('pendiente')}
                 disabled={ocupada}
                 title="Volver a Pendiente"
-                className={`${botonBase} text-gray-500 hover:text-navy-700`}
+                icono={<Undo2 size={16} />}
+                className="px-3"
               >
-                <Undo2 size={12} /> Pendiente
-              </button>
-              <button
+                Pendiente
+              </Boton>
+              <Boton
+                variante="secundario"
                 onClick={() => onEstado('hecha')}
                 disabled={ocupada}
-                className={`${botonBase} bg-lime-400 text-navy-700 hover:bg-lime-300`}
+                icono={<Check size={16} strokeWidth={3} className="text-emerald-600" />}
+                className="px-3"
               >
-                <Check size={12} strokeWidth={3} /> Marcar hecha
-              </button>
-            </>
+                Hecha
+              </Boton>
+            </div>
           )}
           {hecha && (
-            <button
+            <Boton
+              variante="fantasma"
               onClick={() => onEstado('pendiente')}
               disabled={ocupada}
               title="Reabrir la tarea"
-              className={`${botonBase} text-gray-500 hover:text-navy-700`}
+              icono={<Undo2 size={16} />}
+              className="-ml-2 px-3"
             >
-              <Undo2 size={12} /> Reabrir
-            </button>
+              Reabrir
+            </Boton>
           )}
-          {ocupada && <Loader2 size={12} className="animate-spin text-gray-300" />}
+          {ocupada && (
+            <Loader2 size={16} className="shrink-0 animate-spin text-gray-400" aria-label="Guardando" />
+          )}
         </div>
       )}
     </article>
@@ -661,9 +638,11 @@ function TarjetaTarea({
 }
 
 /**
- * Modal de alta/edición con lo que no entra en un renglón. Va por PORTAL a
- * <body> sí o sí: los contenedores del panel tienen transform (fade-in / framer)
- * y un ancestro con transform rompe el `position: fixed`.
+ * Modal de alta/edición con lo que no entra en un renglón. Usa el Dialogo del
+ * kit, que va por PORTAL a <body>: los contenedores del panel tienen transform
+ * (fade-in / framer) y un ancestro con transform rompe el `position: fixed`.
+ * Dialogo además trae Escape, foco adentro, pie fijo en el celular y pregunta
+ * antes de descartar lo escrito.
  */
 function TareaModal({ tarea, equipo, adminEmail, onClose, onGuardada }: {
   tarea: Tarea;
@@ -681,19 +660,6 @@ function TareaModal({ tarea, equipo, adminEmail, onClose, onGuardada }: {
   const [vence, setVence] = useState(tarea.venceEl ? tarea.venceEl.slice(0, 10) : '');
   const [guardando, setGuardando] = useState(false);
 
-  const cerrar = useCallback(() => { if (!guardando) onClose(); }, [guardando, onClose]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cerrar(); };
-    document.addEventListener('keydown', onKey);
-    const overflowPrevio = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = overflowPrevio;
-    };
-  }, [cerrar]);
-
   // Si la tarea está asignada a alguien que ya no figura en el equipo (dado de
   // baja, o el equipo no cargó), igual se lo muestra: no se pierde el dato.
   const opciones = useMemo(() => {
@@ -708,6 +674,14 @@ function TareaModal({ tarea, equipo, adminEmail, onClose, onGuardada }: {
   const hoy = diaEnMvd(Date.now());
   const manana = diaEnMvd(Date.now() + DIA_MS);
   const listo = titulo.trim() !== '';
+
+  // Tocar afuera / Escape / Cancelar no tiran lo escrito sin preguntar.
+  const sucio = titulo !== tarea.titulo
+    || detalle !== tarea.detalle
+    || asignado !== (tarea.asignadoA ?? '')
+    || prioridad !== tarea.prioridad
+    || estado !== tarea.estado
+    || vence !== (tarea.venceEl ? tarea.venceEl.slice(0, 10) : '');
 
   const guardar = async () => {
     if (!listo || guardando) return;
@@ -741,149 +715,103 @@ function TareaModal({ tarea, equipo, adminEmail, onClose, onGuardada }: {
     }
   };
 
-  const botonFecha = 'rounded-lg border border-gray-200 px-2.5 py-1 font-display text-[11px] font-bold text-gray-500 transition-colors hover:border-navy-700 hover:text-navy-700';
+  const idForm = 'tarea-form';
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={cerrar} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={esNueva ? 'Nueva tarea' : 'Editar tarea'}
-        className="relative flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-      >
-        <div className="flex items-center justify-between border-b border-gray-200 p-4">
-          <h3 className="font-display text-lg font-bold text-navy-700">
-            {esNueva ? 'Nueva tarea' : 'Editar tarea'}
-          </h3>
-          <button
-            onClick={cerrar}
-            disabled={guardando}
-            aria-label="Cerrar"
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-navy-700 disabled:opacity-50"
-          >
-            <X size={18} />
-          </button>
+  return (
+    <Dialogo
+      abierto
+      titulo={esNueva ? 'Nueva tarea' : 'Editar tarea'}
+      alCerrar={onClose}
+      ocupado={guardando}
+      sucio={sucio}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={() => { if (confirmarDescarte(sucio)) onClose(); }} disabled={guardando}>
+            Cancelar
+          </Boton>
+          <Boton type="submit" form={idForm} disabled={!listo} cargando={guardando}>
+            {esNueva ? 'Anotar tarea' : 'Guardar cambios'}
+          </Boton>
+        </>
+      )}
+    >
+      {/* Un <form> de verdad: Enter en el título guarda, como en el alta rápida. */}
+      <form id={idForm} onSubmit={e => { e.preventDefault(); void guardar(); }} className="space-y-5">
+        <Campo etiqueta="¿Qué hay que hacer?" requerido>
+          <Entrada
+            type="text"
+            value={titulo}
+            onChange={e => setTitulo(e.target.value)}
+            placeholder="Ej: pedir remeras talle M"
+            autoComplete="off"
+          />
+        </Campo>
+
+        <Campo etiqueta="Detalle" ayuda="Opcional: lo que haga falta aclarar.">
+          <AreaTexto
+            value={detalle}
+            onChange={e => setDetalle(e.target.value)}
+            rows={3}
+            className="resize-y"
+          />
+        </Campo>
+
+        <Campo
+          etiqueta="¿Quién la tiene?"
+          ayuda={opciones.length === 0 ? 'No se pudo leer el equipo. Guardala igual y asigná después con «Actualizar».' : undefined}
+        >
+          <Selector value={asignado} onChange={e => setAsignado(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {opciones.map(o => (
+              <option key={o.email} value={o.email}>{o.label}</option>
+            ))}
+          </Selector>
+        </Campo>
+
+        <div>
+          <span className={rotuloGrupo}>Prioridad</span>
+          <Segmentado
+            etiqueta="Prioridad"
+            opciones={PRIORIDADES}
+            valor={prioridad}
+            alCambiar={setPrioridad}
+            anchoCompleto
+          />
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          <div>
-            <label htmlFor="tarea-titulo" className={labelClass}>¿Qué hay que hacer?</label>
-            <input
-              id="tarea-titulo"
-              type="text"
-              value={titulo}
-              onChange={e => setTitulo(e.target.value)}
-              placeholder="Ej: pedir remeras talle M"
-              autoFocus
-              className={inputClass}
+        <div>
+          <label htmlFor="tarea-vence" className={rotuloGrupo}>¿Para cuándo?</label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Entrada
+              id="tarea-vence"
+              type="date"
+              value={vence}
+              onChange={e => setVence(e.target.value)}
+              className="sm:w-48"
             />
-          </div>
-
-          <div>
-            <label htmlFor="tarea-detalle" className={labelClass}>Detalle (opcional)</label>
-            <textarea
-              id="tarea-detalle"
-              value={detalle}
-              onChange={e => setDetalle(e.target.value)}
-              rows={3}
-              placeholder="Lo que haga falta aclarar"
-              className={`${inputClass} resize-y`}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="tarea-asignado" className={labelClass}>¿Quién la tiene?</label>
-            <select
-              id="tarea-asignado"
-              value={asignado}
-              onChange={e => setAsignado(e.target.value)}
-              className={inputClass}
-            >
-              <option value="">Sin asignar</option>
-              {opciones.map(o => (
-                <option key={o.email} value={o.email}>{o.label}</option>
-              ))}
-            </select>
-            {opciones.length === 0 && (
-              <p className="mt-1 text-[11px] text-gray-400">
-                No se pudo leer el equipo. Guardala igual y asigná después con «Actualizar».
-              </p>
-            )}
-          </div>
-
-          <div>
-            <span className={labelClass}>Prioridad</span>
-            <div className="grid grid-cols-3 gap-2">
-              {PRIORIDADES.map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPrioridad(p.id)}
-                  aria-pressed={prioridad === p.id}
-                  className={`rounded-lg border py-2 font-display text-sm font-bold transition-colors ${
-                    prioridad === p.id ? p.activo : 'border-gray-200 text-gray-500 hover:border-navy-700'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="tarea-vence" className={labelClass}>¿Para cuándo?</label>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                id="tarea-vence"
-                type="date"
-                value={vence}
-                onChange={e => setVence(e.target.value)}
-                className="rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-navy-700 focus:border-lime-400 focus:outline-none"
-              />
-              <button type="button" onClick={() => setVence(hoy)} className={botonFecha}>Hoy</button>
-              <button type="button" onClick={() => setVence(manana)} className={botonFecha}>Mañana</button>
+            <div className="flex gap-2">
+              <Boton variante="secundario" className="flex-1 px-4 sm:flex-none" onClick={() => setVence(hoy)}>Hoy</Boton>
+              <Boton variante="secundario" className="flex-1 px-4 sm:flex-none" onClick={() => setVence(manana)}>Mañana</Boton>
               {vence !== '' && (
-                <button type="button" onClick={() => setVence('')} className={botonFecha}>Sin fecha</button>
+                <Boton variante="fantasma" className="flex-1 px-3 sm:flex-none" onClick={() => setVence('')}>Sin fecha</Boton>
               )}
             </div>
           </div>
-
-          {!esNueva && (
-            <div>
-              <span className={labelClass}>Estado</span>
-              <div className="grid grid-cols-3 gap-2">
-                {ESTADOS.map(e => (
-                  <button
-                    key={e.id}
-                    type="button"
-                    onClick={() => setEstado(e.id)}
-                    aria-pressed={estado === e.id}
-                    className={`rounded-lg border py-2 font-display text-sm font-bold transition-colors ${
-                      estado === e.id
-                        ? 'border-navy-700 bg-navy-700 text-white'
-                        : 'border-gray-200 text-gray-500 hover:border-navy-700'
-                    }`}
-                  >
-                    {e.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="border-t border-gray-200 p-4">
-          <button
-            onClick={() => void guardar()}
-            disabled={!listo || guardando}
-            className="w-full rounded-lg bg-lime-400 py-3 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-300 disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {guardando ? 'Guardando…' : esNueva ? 'Anotar tarea' : 'Guardar cambios'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        {!esNueva && (
+          <div>
+            <span className={rotuloGrupo}>Estado</span>
+            <Segmentado
+              etiqueta="Estado"
+              opciones={ESTADOS}
+              valor={estado}
+              alCambiar={setEstado}
+              anchoCompleto
+            />
+          </div>
+        )}
+      </form>
+    </Dialogo>
   );
 }
