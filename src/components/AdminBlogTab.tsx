@@ -340,7 +340,7 @@ export function AdminBlogTab({ posts, onSave, onDelete, uploadImage }: {
         />
       ) : (
         <>
-          <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+          <div className="sin-barra -mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
             <Chip activo={filtro === 'todas'} onClick={() => setFiltro('todas')} cantidad={posts.length}>Todas</Chip>
             <Chip activo={filtro === 'publicadas'} onClick={() => setFiltro('publicadas')} cantidad={publicadas}>Publicadas</Chip>
             <Chip activo={filtro === 'borradores'} onClick={() => setFiltro('borradores')} cantidad={posts.length - publicadas}>Borradores</Chip>

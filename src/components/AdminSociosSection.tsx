@@ -416,7 +416,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
 
           {/* Filtros: una fila de chips que se desliza + rango de fechas */}
           <div className="mb-4 space-y-3">
-            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+            <div className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
               <Chip activo={filterArea === 'todas'} onClick={() => setFilterArea('todas')}>Todas las áreas</Chip>
               {areas.map(a => (
                 <Chip key={a} activo={filterArea === a} onClick={() => setFilterArea(a)}>{AREA_LBL[a]}</Chip>

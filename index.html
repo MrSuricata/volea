@@ -62,9 +62,13 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: 'Montserrat', sans-serif; }
       ::selection { background-color: #ccff00; color: #001F3F; }
-      ::-webkit-scrollbar { width: 8px; }
-      ::-webkit-scrollbar-track { background: #001F3F; }
-      ::-webkit-scrollbar-thumb { background: #ccff00; border-radius: 4px; }
+      /* Barra de la marca solo para la página entera: aplicada a todo, las filas de filtros
+         y carruseles que se deslizan mostraban una franja lima y azul en el medio. */
+      html::-webkit-scrollbar { width: 8px; }
+      html::-webkit-scrollbar-track { background: #001F3F; }
+      html::-webkit-scrollbar-thumb { background: #ccff00; border-radius: 4px; }
+      .sin-barra { scrollbar-width: none; }
+      .sin-barra::-webkit-scrollbar { display: none; }
       /* Curva única de la web (src/ui/movimiento.ts, EASE_VOLEA): arranca rápido y frena largo.
          Nada de ease-in en entradas: se siente lento justo al principio, que es cuando se mira. */
       .fade-in { animation: fadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1); }

@@ -1790,7 +1790,7 @@ function HomePage() {
           {/* Foto real de cada categoría (antes: íconos genéricos, cinco cajitas iguales).
               En celular, una fila que se desliza en vez de seis filas de tarjetas. */}
           <Reveal>
-            <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-5">
+            <div className="sin-barra -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-5">
               {/* Mientras llegan los datos: la forma de las tarjetas, no un hueco que después salta. */}
               {!datosListos && categories.length === 0 && Array.from({ length: 5 }, (_, i) => (
                 <div key={i} aria-hidden className="aspect-[4/5] w-36 shrink-0 rounded-xl bg-gray-200/70 motion-safe:animate-pulse md:w-auto" />
@@ -2189,7 +2189,7 @@ function ShopPage() {
 
       {/* Category tabs: en celular una fila que se desliza (antes 4 filas de botones
           antes del primer producto). */}
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 mb-4 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 md:mb-8">
+      <div className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-2 mb-4 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 md:mb-8">
         <button
           onClick={() => setSelectedCategory('')}
           aria-pressed={!selectedCategory}

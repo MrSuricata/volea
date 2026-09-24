@@ -156,7 +156,7 @@ export function Segmentado<T extends string>({ opciones, valor, alCambiar, etiqu
   anchoCompleto?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label={etiqueta} className={cn('inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-gray-100 p-1', anchoCompleto && 'flex w-full', className)}>
+    <div role="radiogroup" aria-label={etiqueta} className={cn('sin-barra inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-gray-100 p-1', anchoCompleto && 'flex w-full', className)}>
       {opciones.map((o) => {
         const elegido = o.valor === valor;
         return (
@@ -217,7 +217,7 @@ export function BarraFiltros({ busqueda, alBuscar, placeholder = 'Buscar…', ch
           {acciones}
         </div>
       )}
-      {chips && <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">{chips}</div>}
+      {chips && <div className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">{chips}</div>}
     </div>
   );
 }

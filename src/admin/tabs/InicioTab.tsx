@@ -89,12 +89,14 @@ export function InicioTab({ nombre, irA, inscNuevas, tareasPendientes }: Props) 
           icono={<ListChecks size={18} />}
           onClick={() => irA('tareas')}
         />
+        {/* Productos agotados (no "variantes sin stock"): muchas combinaciones talle×color
+            en 0 son talles que nunca se fabricaron, y el 151 en rojo alarmaba de gusto. */}
         <Estadistica
-          etiqueta="Variantes sin stock"
-          valor={sinStock}
-          tono={sinStock > 0 ? 'alerta' : 'bien'}
+          etiqueta="Productos agotados"
+          valor={agotados}
+          tono={agotados > 0 ? 'alerta' : 'bien'}
           icono={<Package size={18} />}
-          detalle={stockBajo > 0 ? `${stockBajo} con stock bajo` : undefined}
+          detalle={stockBajo + sinStock > 0 ? `${sinStock} talles en 0 · ${stockBajo} bajos` : undefined}
           onClick={() => irA('stock')}
         />
       </div>
@@ -146,7 +148,7 @@ export function InicioTab({ nombre, irA, inscNuevas, tareasPendientes }: Props) 
         {/* Tienda */}
         <div className="space-y-6 xl:col-span-2">
           <div className="grid grid-cols-2 gap-3">
-            <Estadistica etiqueta="Productos visibles" valor={visibles} detalle={agotados > 0 ? `${agotados} agotados` : undefined} onClick={() => irA('products')} />
+            <Estadistica etiqueta="Productos visibles" valor={visibles} onClick={() => irA('products')} />
             <Estadistica etiqueta="Unidades en stock" valor={unidades.toLocaleString('es-UY')} onClick={() => irA('stock')} />
           </div>
 
