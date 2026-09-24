@@ -89,6 +89,6 @@ describe('ayudas de ubicación', () => {
     expect(fueraDeSudamerica({ lat: 34.9, lng: 56.2 })).toBe(true);
   });
   it('arma el link para chequear el pin', () => {
-    expect(linkMapa({ lat: -34.9, lng: -56.2 })).toBe('https://www.google.com/maps/search/?api=1&query=-34.9,-56.2');
+    expect(linkMapa({ lat: -34.9, lng: -56.2 })).toBe('https://www.google.com/maps?q=-34.9,-56.2');
   });
 });

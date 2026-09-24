@@ -18,3 +18,13 @@ export function hayCambios<T extends object>(inicial: T, actual: T): boolean {
   for (const k of claves) if (!igual(a[k], b[k])) return true;
   return false;
 }
+
+/**
+ * Usuario de Instagram "sin @" como lo guarda el club, aunque peguen "@club" o el link
+ * del perfil ("https://www.instagram.com/club/?hl=es").
+ */
+export function usuarioInstagram(texto: string): string {
+  const t = texto.trim();
+  const link = t.match(/instagram\.com\/([^/?#\s]+)/i);
+  return (link ? link[1] : t).replace(/^@+/, '');
+}

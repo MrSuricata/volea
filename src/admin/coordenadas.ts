@@ -98,6 +98,6 @@ export function leerNumeroCoordenada(texto: string): number | null {
 export const fueraDeSudamerica = ({ lat, lng }: Coordenadas): boolean =>
   lat < -56 || lat > 13 || lng < -82 || lng > -34;
 
-/** Link para chequear el pin en Google Maps. */
+/** Link para chequear el pin: el mismo que arma el botón de la ficha pública del club. */
 export const linkMapa = ({ lat, lng }: Coordenadas): string =>
-  `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  `https://www.google.com/maps?q=${lat},${lng}`;
