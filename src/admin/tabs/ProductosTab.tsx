@@ -7,6 +7,7 @@ import { categoryLabel, getTotalStock } from '../../lib/formato';
 import { FALLBACK_IMG, errorFoto } from '../../lib/fotos';
 import { urlImagen } from '../../utils/imagenes';
 import { sesionAdminVencida } from '../../services/authService';
+import { UMBRAL_STOCK_BAJO } from '../StockDashboard';
 import { BarraFiltros, Boton, BotonIcono, Chip, Confirmar, EncabezadoPagina, Insignia, Plata, Selector, Vacio } from '../ui';
 
 // Productos: antes una tabla que en el celular escondía justo el stock y el "oculto" (lo
@@ -72,7 +73,7 @@ export function ProductosTab({ editar }: { editar: (p: Product | null) => void }
 
   const stock = (p: Product) => {
     const n = getTotalStock(p);
-    return <Insignia tono={n === 0 ? 'alerta' : n <= 3 ? 'atencion' : 'bien'}>{n === 0 ? 'Sin stock' : `${n} u.`}</Insignia>;
+    return <Insignia tono={n === 0 ? 'alerta' : n <= UMBRAL_STOCK_BAJO ? 'atencion' : 'bien'}>{n === 0 ? 'Sin stock' : `${n} u.`}</Insignia>;
   };
 
   return (

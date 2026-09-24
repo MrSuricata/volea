@@ -7,12 +7,12 @@ import { agruparPorEvento, listarTorneosPublicos, type EventoAgrupado } from '..
 import { Boton, EncabezadoPagina, ErrorEstado, Estadistica, Insignia, Plata, Tarjeta, Vacio } from '../ui';
 import { InsigniaPagoMP, InsigniaPedido } from '../estados';
 import { TZ_UY } from '../../lib/formato';
+import { UMBRAL_STOCK_BAJO } from '../StockDashboard';
 
 // Inicio del panel (antes "Dashboard"): lo primero que se ve tiene que decir QUÉ HAY QUE
 // ATENDER hoy, y cada número lleva a su pantalla. Antes eran tarjetas pastel que no se
 // podían tocar, y los torneos sacaban al admin hacia la web pública.
 
-const UMBRAL_STOCK_BAJO = 3;
 
 type Props = {
   nombre: string;
