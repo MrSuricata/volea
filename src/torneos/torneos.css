@@ -36,7 +36,7 @@
 .rk h1 { font-weight: 900; }
 .rk .contenedor { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
 .rk .cabecera { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-.rk .cabecera h1 { margin: 0; font-size: 1.7rem; flex: 1; }
+.rk .cabecera h1 { margin: 0; font-size: 1.7rem; flex: 1 1 16rem; } /* base de 16rem, no 0: con los dos botones al lado, en el celular el título quedaba de una letra de ancho ("TO/RN/EOS"); ahora los botones bajan de renglón */
 .rk .marca { color: var(--lima); }
 .rk .acciones { display: flex; gap: 8px; align-items: center; }
 .rk .boton {
