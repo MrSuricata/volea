@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { Plus, Edit, Trash2, X, Save, Upload, FileText } from 'lucide-react';
+import { FileText, ImageOff, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Post } from '../types';
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const formatPrice = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
+import { sesionAdminVencida } from '../services/authService';
+import {
+  AreaTexto, Boton, BotonIcono, Campo, Chip, Confirmar, Dialogo, EncabezadoPagina, Entrada,
+  Insignia, Interruptor, Vacio,
+} from '../admin/ui';
+import { cn } from '../lib/cn';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,9 +39,65 @@ const formatDate = (iso: string): string => {
   return `${d}/${m}/${y}`;
 };
 
-const inputClass =
-  'w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors';
-const labelClass = 'block text-sm font-semibold text-navy-700 mb-1';
+type FiltroPosts = 'todas' | 'publicadas' | 'borradores';
+
+// ─── Portada (subir o pegar URL) ─────────────────────────────────────────────
+
+/**
+ * El input de archivo va ADENTRO de un <label> (y no disparado con .click() desde
+ * un botón): es la forma que iOS Safari abre siempre el selector de fotos. Queda
+ * `sr-only` y no `hidden` para que se pueda llegar con Tab.
+ */
+/** Vista previa; va con `key={url}` para que "no se pudo cargar" se resetee al cambiar la URL. */
+function VistaPortada({ url }: { url: string }) {
+  const [rota, setRota] = useState(false);
+  return (
+    <div className="mb-3 overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+      {rota ? (
+        <div className="flex h-40 flex-col items-center justify-center gap-1.5 text-[13px] text-gray-500">
+          <ImageOff size={22} /> No se pudo cargar esa imagen
+        </div>
+      ) : (
+        <img src={url} alt="Portada" onError={() => setRota(true)} className="h-40 w-full object-cover sm:h-48" />
+      )}
+    </div>
+  );
+}
+
+function Portada({ url, subiendo, alElegirArchivo, alCambiarUrl }: {
+  url: string;
+  subiendo: boolean;
+  alElegirArchivo: (e: ChangeEvent<HTMLInputElement>) => void;
+  alCambiarUrl: (url: string) => void;
+}) {
+  return (
+    <div>
+      <span className="mb-1.5 block text-[13px] font-semibold text-navy-700">Portada</span>
+      {url.trim() !== '' && <VistaPortada key={url} url={url} />}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <label
+          className={cn(
+            'inline-flex h-11 shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-5 font-display text-sm font-bold text-navy-700 transition-colors hover:border-navy-700 focus-within:ring-2 focus-within:ring-navy-700/15',
+            subiendo && 'pointer-events-none opacity-60',
+          )}
+        >
+          <Upload size={16} className={subiendo ? 'animate-pulse' : undefined} />
+          {subiendo ? 'Subiendo…' : 'Subir imagen'}
+          <input type="file" accept="image/*" className="sr-only" disabled={subiendo} onChange={alElegirArchivo} />
+        </label>
+        <Entrada
+          type="url"
+          inputMode="url"
+          value={url}
+          onChange={e => alCambiarUrl(e.target.value)}
+          placeholder="O pegá una URL de imagen"
+          aria-label="URL de la portada"
+          autoComplete="off"
+        />
+      </div>
+    </div>
+  );
+}
 
 // ─── Modal editor ────────────────────────────────────────────────────────────
 
@@ -64,10 +123,17 @@ function BlogPostModal({
       createdAt: '',
     }
   );
+  // Foto de cómo arrancó: tocar afuera con un borrador escrito pregunta antes de tirarlo.
+  const [inicial] = useState(() => JSON.stringify(form));
+  const sucio = JSON.stringify(form) !== inicial;
   const [slugTouched, setSlugTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [errorTitulo, setErrorTitulo] = useState<string | null>(null);
+  const tituloRef = useRef<HTMLInputElement>(null);
 
   const handleTitleChange = (value: string) => {
+    if (value.trim()) setErrorTitulo(null);
     setForm(f => ({
       ...f,
       title: value,
@@ -95,13 +161,15 @@ function BlogPostModal({
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (uploading) return;
+    if (uploading || guardando) return;
 
     const title = form.title.trim();
     if (!title) {
-      toast.error('Completá el título de la publicación');
+      // Al lado del campo (y con foco), no solo un toast que en el celular tapa la pantalla.
+      setErrorTitulo('Completá el título de la publicación');
+      tituloRef.current?.focus();
       return;
     }
 
@@ -116,6 +184,18 @@ function BlogPostModal({
     while (taken.has(slug)) {
       slug = `${baseSlug}-${n}`;
       n++;
+    }
+
+    // `onSave` no devuelve promesa (guarda local y sube a la nube de fondo), así que
+    // no hay forma de esperar el resultado. Lo que sí se puede: no decir "creada" si
+    // la sesión ya venció (mismo pre-chequeo que Productos y Galería). Lee la sesión
+    // de memoria, no se cuelga. El modal queda abierto con lo escrito.
+    setGuardando(true);
+    const vencida = await sesionAdminVencida();
+    setGuardando(false);
+    if (vencida) {
+      toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. La publicación NO se guardó.');
+      return;
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -133,139 +213,90 @@ function BlogPostModal({
     onClose();
   };
 
+  const idForm = 'blog-post-form';
+
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="font-display text-xl font-bold text-navy-700">
-            {isNew ? 'Nueva publicación' : 'Editar publicación'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-navy-700 transition-colors">
-            <X size={24} />
-          </button>
+    <Dialogo
+      abierto
+      titulo={isNew ? 'Nueva publicación' : 'Editar publicación'}
+      alCerrar={onClose}
+      sucio={sucio}
+      ocupado={guardando}
+      ancho="lg"
+      pie={(
+        <>
+          <Boton
+            variante="secundario"
+            onClick={() => { if (!sucio || window.confirm('Tenés cambios sin guardar. ¿Descartarlos?')) onClose(); }}
+            disabled={guardando}
+          >
+            Cancelar
+          </Boton>
+          <Boton type="submit" form={idForm} disabled={uploading} cargando={guardando}>
+            {uploading ? 'Subiendo imagen…' : 'Guardar'}
+          </Boton>
+        </>
+      )}
+    >
+      <form id={idForm} onSubmit={e => void handleSubmit(e)} className="space-y-5" noValidate>
+        <Campo etiqueta="Título" requerido error={errorTitulo}>
+          <Entrada
+            ref={tituloRef}
+            type="text"
+            value={form.title}
+            onChange={e => handleTitleChange(e.target.value)}
+            placeholder="Título de la publicación"
+            className={errorTitulo ? 'border-red-400 focus:border-red-600 focus:ring-red-600/15' : undefined}
+          />
+        </Campo>
+
+        <Campo etiqueta="Slug" ayuda={<>URL de la publicación: <span className="font-medium text-navy-700">/blog/{form.slug || '…'}</span></>}>
+          <Entrada
+            type="text"
+            value={form.slug}
+            onChange={e => handleSlugChange(e.target.value)}
+            placeholder="mi-publicacion"
+            autoCapitalize="none"
+            autoComplete="off"
+          />
+        </Campo>
+
+        <Campo etiqueta="Extracto" ayuda="Resumen corto que se muestra en el listado del blog.">
+          <AreaTexto
+            rows={2}
+            value={form.excerpt}
+            onChange={e => setForm(f => ({ ...f, excerpt: e.target.value }))}
+            className="min-h-[72px] resize-none"
+          />
+        </Campo>
+
+        <Campo etiqueta="Contenido" ayuda='Formato: cada línea es un párrafo · "## " para subtítulos · "- " para listas.'>
+          <AreaTexto
+            rows={10}
+            value={form.content}
+            onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+            placeholder="Escribí acá el contenido de la publicación…"
+            className="min-h-[220px] resize-y"
+          />
+        </Campo>
+
+        <Portada
+          url={form.coverUrl}
+          subiendo={uploading}
+          alElegirArchivo={e => void handleFile(e)}
+          alCambiarUrl={coverUrl => setForm(f => ({ ...f, coverUrl }))}
+        />
+
+        <div className="rounded-lg border border-gray-200 px-4 py-2">
+          <Interruptor
+            activo={form.published}
+            alCambiar={published => setForm(f => ({ ...f, published }))}
+            etiqueta="Publicado"
+            descripcion={form.published ? 'Visible en el blog' : 'Guardado como borrador'}
+          />
         </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className={labelClass}>Título *</label>
-            <input
-              type="text"
-              value={form.title}
-              onChange={e => handleTitleChange(e.target.value)}
-              placeholder="Título de la publicación"
-              className={inputClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Slug</label>
-            <input
-              type="text"
-              value={form.slug}
-              onChange={e => handleSlugChange(e.target.value)}
-              placeholder="mi-publicacion"
-              className={inputClass}
-            />
-            <p className="text-xs text-gray-400 mt-1">URL de la publicación: /blog/{form.slug || '...'}</p>
-          </div>
-
-          <div>
-            <label className={labelClass}>Extracto</label>
-            <textarea
-              rows={2}
-              value={form.excerpt}
-              onChange={e => setForm(f => ({ ...f, excerpt: e.target.value }))}
-              placeholder="Resumen corto que se muestra en el listado del blog"
-              className={`${inputClass} resize-none`}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass}>Contenido</label>
-            <textarea
-              rows={10}
-              value={form.content}
-              onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
-              placeholder="Escribí acá el contenido de la publicación…"
-              className={`${inputClass} resize-y`}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Formato: cada línea es un párrafo · "## " para subtítulos · "- " para listas
-            </p>
-          </div>
-
-          <div>
-            <label className={labelClass}>Portada</label>
-            {form.coverUrl && (
-              <img
-                src={form.coverUrl}
-                alt="Portada"
-                className="w-full h-40 object-cover rounded-lg border border-gray-200 mb-3"
-              />
-            )}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <label
-                className={`inline-flex items-center justify-center gap-2 bg-navy-700 hover:bg-navy-800 text-white font-display font-semibold text-sm py-3 px-4 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
-              >
-                <Upload size={16} />
-                {uploading ? 'Subiendo…' : 'Subir imagen'}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={uploading}
-                  onChange={handleFile}
-                />
-              </label>
-              <input
-                type="text"
-                value={form.coverUrl}
-                onChange={e => setForm(f => ({ ...f, coverUrl: e.target.value }))}
-                placeholder="O pegá una URL de imagen"
-                className={inputClass}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between bg-gray-50 rounded-lg p-4">
-            <div>
-              <p className="text-sm font-semibold text-navy-700">Publicado</p>
-              <p className="text-xs text-gray-400">
-                {form.published ? 'Visible en el blog' : 'Guardado como borrador'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setForm(f => ({ ...f, published: !f.published }))}
-              aria-pressed={form.published}
-              className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ${form.published ? 'bg-lime-400' : 'bg-gray-300'}`}
-            >
-              <span
-                className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.published ? 'translate-x-5' : ''}`}
-              />
-            </button>
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={uploading}
-              className="flex-1 bg-lime-400 hover:bg-lime-500 disabled:bg-gray-300 disabled:cursor-not-allowed text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Save size={18} /> {uploading ? 'Subiendo imagen…' : 'Guardar'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Dialogo>
   );
 }
 
@@ -280,91 +311,98 @@ export function AdminBlogTab({ posts, onSave, onDelete, uploadImage }: {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<FiltroPosts>('todas');
+
+  const publicadas = useMemo(() => posts.filter(p => p.published).length, [posts]);
+  const visibles = useMemo(
+    () => posts.filter(p => (filtro === 'todas' ? true : filtro === 'publicadas' ? p.published : !p.published)),
+    [posts, filtro],
+  );
+  const aBorrar = deleteConfirm ? posts.find(p => p.id === deleteConfirm) ?? null : null;
+
+  const nueva = () => { setEditingPost(null); setModalOpen(true); };
 
   return (
-    <div className="fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Blog</h1>
-        <button
-          onClick={() => { setEditingPost(null); setModalOpen(true); }}
-          className="bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-2 px-6 rounded-lg transition-colors flex items-center gap-2"
-        >
-          <Plus size={18} /> Nueva publicación
-        </button>
-      </div>
+    <div>
+      <EncabezadoPagina
+        rotulo="Web"
+        titulo="Blog"
+        descripcion="Las notas del blog de la web. Un borrador no se ve hasta que lo publicás."
+        acciones={<Boton onClick={nueva} icono={<Plus size={17} strokeWidth={2.5} />}>Nueva publicación</Boton>}
+      />
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {posts.length === 0 ? (
-          <div className="p-12 text-center text-gray-400">
-            <FileText size={48} strokeWidth={1} className="mx-auto mb-3" />
-            <p className="font-display font-semibold">Todavía no hay publicaciones</p>
-            <p className="text-sm mt-1">Creá la primera con el botón “Nueva publicación”.</p>
+      {posts.length === 0 ? (
+        <Vacio
+          icono={<FileText size={22} />}
+          titulo="Todavía no hay publicaciones"
+          descripcion="Escribí la primera: se guarda como borrador hasta que la publiques."
+          accion={<Boton onClick={nueva} icono={<Plus size={17} strokeWidth={2.5} />}>Nueva publicación</Boton>}
+        />
+      ) : (
+        <>
+          <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+            <Chip activo={filtro === 'todas'} onClick={() => setFiltro('todas')} cantidad={posts.length}>Todas</Chip>
+            <Chip activo={filtro === 'publicadas'} onClick={() => setFiltro('publicadas')} cantidad={publicadas}>Publicadas</Chip>
+            <Chip activo={filtro === 'borradores'} onClick={() => setFiltro('borradores')} cantidad={posts.length - publicadas}>Borradores</Chip>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Portada</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Título</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Estado</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden md:table-cell">Fecha</th>
-                  <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {posts.map(post => (
-                  <tr key={post.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      {post.coverUrl ? (
-                        <img
-                          src={post.coverUrl}
-                          alt={post.title}
-                          className="w-12 h-12 object-cover rounded"
-                        />
-                      ) : (
-                        <span className="text-gray-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-display font-semibold text-navy-700 text-sm">{post.title}</p>
-                      <p className="text-xs text-gray-400">/{post.slug}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${post.published ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
-                      >
+
+          {visibles.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">
+              {filtro === 'publicadas' ? 'No hay nada publicado todavía.' : 'No hay borradores.'}
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+              {visibles.map(post => (
+                <li key={post.id} className="flex items-center gap-1 py-2 pl-2 pr-2 sm:pl-3 sm:pr-3">
+                  {/* Toda la fila abre el editor (blanco grande para el dedo); el lápiz
+                      queda como pista visual y para teclado. */}
+                  <button
+                    type="button"
+                    onClick={() => { setEditingPost(post); setModalOpen(true); }}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left transition-colors hover:bg-gray-50"
+                  >
+                  {post.coverUrl ? (
+                    <img
+                      src={post.coverUrl}
+                      alt=""
+                      loading="lazy"
+                      className="h-14 w-14 shrink-0 rounded-lg border border-gray-200 object-cover sm:h-16 sm:w-20"
+                    />
+                  ) : (
+                    <span aria-hidden className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-400 sm:h-16 sm:w-20">
+                      <FileText size={20} />
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 font-display text-[15px] font-bold leading-snug text-navy-700">{post.title}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-gray-500">
+                      <Insignia tono={post.published ? 'bien' : 'neutro'} punto={post.published}>
                         {post.published ? 'Publicado' : 'Borrador'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell whitespace-nowrap">
-                      {formatDate(post.publishedAt || post.createdAt)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => { setEditingPost(post); setModalOpen(true); }}
-                          className="text-navy-700 hover:text-lime-500 transition-colors"
-                          title="Editar"
-                        >
-                          <Edit size={16} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirm(post.id)}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
-                          title="Eliminar"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                      </Insignia>
+                      <span className="tabular-nums">{formatDate(post.publishedAt || post.createdAt)}</span>
+                      <span className="hidden truncate sm:inline">/blog/{post.slug}</span>
+                    </p>
+                  </div>
+                  </button>
+                  <div className="flex shrink-0 items-center">
+                    <BotonIcono
+                      etiqueta={`Editar «${post.title}»`}
+                      icono={<Pencil size={18} />}
+                      onClick={() => { setEditingPost(post); setModalOpen(true); }}
+                    />
+                    <BotonIcono
+                      etiqueta={`Eliminar «${post.title}»`}
+                      icono={<Trash2 size={18} />}
+                      tono="peligro"
+                      onClick={() => setDeleteConfirm(post.id)}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
 
       {/* Modal crear/editar */}
       {modalOpen && (
@@ -378,33 +416,24 @@ export function AdminBlogTab({ posts, onSave, onDelete, uploadImage }: {
       )}
 
       {/* Confirmación de borrado */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0" onClick={() => setDeleteConfirm(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
-            <h3 className="font-display text-lg font-bold text-navy-700 mb-2">¿Eliminar publicación?</h3>
-            <p className="text-sm text-gray-500 mb-6">Esta acción no se puede deshacer.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  onDelete(deleteConfirm);
-                  toast.success('Publicación eliminada');
-                  setDeleteConfirm(null);
-                }}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-display font-bold py-3 rounded-lg transition-colors"
-              >
-                Eliminar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Confirmar
+        abierto={deleteConfirm !== null}
+        titulo="¿Eliminar publicación?"
+        mensaje={(
+          <>
+            {aBorrar && <p className="mb-1 font-semibold text-navy-700">«{aBorrar.title}»</p>}
+            Se borra del blog. Esta acción no se puede deshacer.
+          </>
+        )}
+        textoConfirmar="Eliminar"
+        alCerrar={() => setDeleteConfirm(null)}
+        alConfirmar={() => {
+          if (!deleteConfirm) return;
+          onDelete(deleteConfirm);
+          toast.success('Publicación eliminada');
+          setDeleteConfirm(null);
+        }}
+      />
     </div>
   );
 }
