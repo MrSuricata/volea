@@ -86,8 +86,10 @@ export function Dialogo({ abierto, titulo, descripcion, alCerrar, children, pie,
         aria-labelledby={idTitulo}
         tabIndex={-1}
         className={cn(
-          'relative flex max-h-[100dvh] w-full flex-col bg-white shadow-2xl outline-none sm:max-h-[90dvh] sm:rounded-2xl',
-          'h-[100dvh] sm:h-auto',
+          'relative flex w-full flex-col bg-white shadow-2xl outline-none sm:max-h-[90dvh] sm:rounded-2xl',
+          // Los chicos (confirmaciones) son una hoja que sube desde abajo; los formularios
+          // ocupan la pantalla entera en el celular (con el teclado abierto no hay lugar).
+          ancho === 'sm' ? 'max-h-[85dvh] rounded-t-2xl sm:h-auto' : 'h-[100dvh] max-h-[100dvh] sm:h-auto',
           ANCHOS[ancho],
         )}
       >
