@@ -20,8 +20,8 @@ import {
 // - Celular: carrusel nativo con scroll-snap (inercia y rebote del sistema) y miniaturas
 //   abajo, no puntitos: con puntitos la gente no descubre que hay más fotos.
 // - Tocar/clic en la foto abre el visor a pantalla completa (fondo blanco como el de las
-//   fotos) con doble toque, pellizco, arrastre y rueda para ampliar. El botón "atrás"
-//   del celular lo cierra en vez de sacarte de la ficha.
+//   fotos): clic o doble toque, pellizco y rueda para ampliar, arrastre para recorrerla y
+//   swipe para cambiar. El botón "atrás" del celular lo cierra sin sacarte de la ficha.
 
 type Props = { imagenes: string[]; nombre: string };
 type Zoom = { escala: number; x: number; y: number };
@@ -78,8 +78,8 @@ function bordeDe(img: HTMLImageElement): Rgba[] | null {
   try {
     const w = img.naturalWidth;
     const h = img.naturalHeight;
-    const xs = [2, w / 2, w - 3];
-    const ys = [2, h / 2, h - 3];
+    const xs = [2, w / 2, w - 3].map((x) => Math.min(Math.max(0, x), w - 1));
+    const ys = [2, h / 2, h - 3].map((y) => Math.min(Math.max(0, y), h - 1));
     const puntos = xs.flatMap((x) => ys.map((y) => [x, y])).filter(([x, y]) => x !== w / 2 || y !== h / 2);
     const c = document.createElement('canvas');
     c.width = puntos.length;
@@ -764,11 +764,14 @@ function VisorFotos({ imagenes, nombre, inicial, onCerrando, onCerrado }: {
     }
     if (!g.movio && e.type === 'pointerup') {
       const toque = { t: e.timeStamp, x: e.clientX, y: e.clientY };
-      if (esDobleToque(ultimoToque.current, toque)) {
-        ultimoToque.current = null;
+      const doble = esDobleToque(ultimoToque.current, toque);
+      ultimoToque.current = doble ? null : toque;
+      if (e.pointerType === 'mouse') {
+        // Con mouse el cursor ya dice "ampliar": alcanza un clic. El segundo clic de un
+        // doble clic se ignora, así el doble clic también amplía (no amplía y desamplía).
+        if (!doble) alternarZoom(relativo(toque));
+      } else if (doble) {
         alternarZoom(relativo(toque));
-      } else {
-        ultimoToque.current = toque;
       }
     }
   };
