@@ -19,6 +19,7 @@ import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
 import { conFotoPrimero, destacados, fotoDeCategoria, relacionados } from './tienda/catalogo';
 import GaleriaProducto from './tienda/GaleriaProducto';
+import { ajusteFoto } from './tienda/galeria';
 import { FOTO_HERO_HOME } from './lib/precarga';
 import { guardarMarcaDePago } from './pago/marcaPago';
 import { CLAVE_PEDIDO_MP, firmaPedido, idPedidoWeb, pedidoReusable, registroPedidoMP } from './pago/reintentoMP';
@@ -1073,11 +1074,27 @@ function ProductCard({ product }: { product: Product }) {
   const isNew = (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
   const segunda = CON_HOVER ? product.images[1] : undefined;
   const colores = product.colors.filter(c => c.hex);
+  // Muchas fotos son mockups apaisados (frente y espalda lado a lado): recortadas a 4:5
+  // quedaban dos medias remeras. Esas se muestran enteras sobre el gris (el blanco de la
+  // foto se funde con multiply); las casi verticales siguen llenando la caja. Mismo
+  // criterio que la galería de la ficha (ajusteFoto).
+  const fotoRef = useRef<HTMLImageElement>(null);
+  const [entera, setEntera] = useState(false);
+  const medirFoto = (img: HTMLImageElement) => {
+    if (img.naturalWidth > 0) setEntera(ajusteFoto(img.naturalWidth, img.naturalHeight, 4 / 5, 0.3) === 'contain');
+  };
+  useEffect(() => {
+    // Foto ya en caché: el onLoad pudo dispararse antes de que React lo enganchara.
+    if (fotoRef.current?.complete) medirFoto(fotoRef.current);
+  }, []);
+  // multiply siempre (no solo en las enteras): así TODAS las fotos sobre blanco quedan
+  // con el mismo gris de fondo y la grilla no alterna tarjetas blancas y grises.
+  const ajusteClase = `mix-blend-multiply ${entera ? 'object-contain p-2 sm:p-3' : 'object-cover'}`;
   return (
     // Rediseño 24/09: sin caja, borde ni sombra que salta (se veía a plantilla). La foto
     // manda: 4:5 como la ficha (la ropa es vertical), fondo neutro y un zoom corto.
     <Link to={`/producto/${product.id}`} className="product-card group block rounded-xl">
-      <div className="relative aspect-[4/5] overflow-hidden rounded-xl bg-gray-100">
+      <div className="relative isolate aspect-[4/5] overflow-hidden rounded-xl bg-gray-100">
         <img
           src={product.images[0] ? urlImagen(product.images[0], 640) : FALLBACK_IMG}
           srcSet={product.images[0] ? srcsetImagen(product.images[0], 960) : undefined}
@@ -1085,20 +1102,26 @@ function ProductCard({ product }: { product: Product }) {
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className="card-img absolute inset-0 h-full w-full object-cover"
+          ref={fotoRef}
+          onLoad={(e) => medirFoto(e.currentTarget)}
+          className={`card-img absolute inset-0 h-full w-full ${ajusteClase}`}
           onError={errorFoto(product.images[0])}
         />
         {segunda && (
-          <img
-            src={urlImagen(segunda, 640)}
-            srcSet={srcsetImagen(segunda, 960)}
-            sizes="(min-width: 1024px) 25vw, 33vw"
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="card-img card-img-2 absolute inset-0 h-full w-full object-cover"
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
+          // Envuelta en su propio fondo gris aislado: con multiply suelta, la 2ª foto se
+          // mezclaba con la 1ª de abajo y se veían las dos a la vez.
+          <div className="card-img-2 absolute inset-0 isolate bg-gray-100 transition-opacity duration-300">
+            <img
+              src={urlImagen(segunda, 640)}
+              srcSet={srcsetImagen(segunda, 960)}
+              sizes="(min-width: 1024px) 25vw, 33vw"
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className={`card-img h-full w-full ${ajusteClase}`}
+              onError={(e) => { e.currentTarget.parentElement!.style.display = 'none'; }}
+            />
+          </div>
         )}
         {totalStock === 0 && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/55">
@@ -2351,10 +2374,10 @@ function ProductDetailPage() {
         {/* Info */}
         <div>
           <div className="flex items-center gap-3 mb-3">
-            <span className="inline-block bg-navy-700/10 text-navy-700 text-xs font-bold px-3 py-1 rounded-full">{categoryLabel(categories, product.category)}</span>
-            {product.sku?.trim() && <span className="text-xs text-gray-500 font-mono">SKU: {product.sku}</span>}
+            <span className="font-display text-xs font-bold uppercase tracking-[0.2em] text-gray-500">{categoryLabel(categories, product.category)}</span>
+            {product.sku?.trim() && <span className="text-xs text-gray-400 font-mono">SKU: {product.sku}</span>}
           </div>
-          <h1 className="font-display text-3xl font-bold text-navy-700 mb-3">{product.name}</h1>
+          <h1 className="mb-3 font-display text-3xl font-black leading-tight tracking-tight text-navy-700 md:text-4xl">{product.name}</h1>
           <div className="flex items-center gap-3 mb-6 flex-wrap">
             {/* Con promo vigente manda la promo: precio descontado + lista tachado.
                 (La oferta propia del producto no se apila, para no mostrar 3 números.) */}
@@ -2400,12 +2423,14 @@ function ProductDetailPage() {
                     <button
                       key={size}
                       onClick={() => setSelectedSize(size)}
-                      className={`px-4 py-2 rounded-lg font-display text-sm font-semibold border-2 transition-colors relative ${
+                      // Elegido en azul marino lleno (no lima: sobre blanco el lima casi no
+                      // se distingue del resto a pleno sol).
+                      className={`relative min-w-[3rem] rounded-lg border px-4 py-2.5 font-display text-sm font-semibold transition-[background-color,border-color,color,transform] duration-200 active:scale-[0.97] ${
                         sizeStock === 0
                           ? 'border-gray-200 text-gray-300 line-through cursor-not-allowed'
                           : selectedSize === size
-                            ? 'border-lime-400 bg-lime-400 text-navy-700'
-                            : 'border-gray-200 text-navy-700 hover:border-navy-700'
+                            ? 'border-navy-700 bg-navy-700 text-white'
+                            : 'border-gray-300 text-navy-700 hover:border-navy-700'
                       }`}
                       disabled={sizeStock === 0}
                     >
@@ -2429,8 +2454,8 @@ function ProductDetailPage() {
                     title={color.name}
                     aria-label={`Color ${color.name}`}
                     aria-pressed={selectedColor === color.name}
-                    className={`w-10 h-10 rounded-full border-2 transition-all ${
-                      selectedColor === color.name ? 'border-lime-400 scale-110' : 'border-gray-300 hover:scale-105'
+                    className={`w-10 h-10 rounded-full border transition-shadow duration-200 ${
+                      selectedColor === color.name ? 'border-black/10 ring-2 ring-navy-700 ring-offset-2' : 'border-gray-300 hover:ring-2 hover:ring-gray-300 hover:ring-offset-2'
                     }`}
                     style={{ backgroundColor: color.hex }}
                   >
@@ -2489,12 +2514,12 @@ function ProductDetailPage() {
             ref={botonAgregarRef}
             onClick={handleAdd}
             disabled={!selectedSize || currentStock === 0}
-            className={`w-full font-display font-bold py-4 rounded-lg text-lg transition-all flex items-center justify-center gap-2 ${
+            className={`w-full font-display font-bold py-4 rounded-lg text-lg transition-[background-color,transform] duration-200 flex items-center justify-center gap-2 ${
               added
-                ? 'bg-green-500 text-white'
+                ? 'bg-green-600 text-white'
                 : !selectedSize || currentStock === 0
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-lime-400 hover:bg-lime-500 text-navy-700'
+                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  : 'bg-lime-400 hover:bg-lime-300 text-navy-900 active:scale-[0.98]'
             }`}
           >
             {added ? <><Check size={20} /> Agregado</> : <><ShoppingCart size={20} /> Agregar al carrito</>}
@@ -2531,9 +2556,9 @@ function ProductDetailPage() {
 
       {/* Related */}
       {related.length > 0 && (
-        <section className="mt-20">
-          <h2 className="font-display text-2xl font-bold text-navy-700 mb-6">También te puede interesar</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+        <section className="mt-20 border-t border-gray-200 pt-12 md:mt-24 md:pt-16">
+          <EncabezadoSeccion eyebrow="Completá el look" titulo="También te puede interesar" link={{ to: '/tienda', texto: 'Ver la tienda' }} />
+          <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-4">
             {related.map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </section>
