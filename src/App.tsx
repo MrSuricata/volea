@@ -1,7 +1,8 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { BrowserRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { LazyMotion, MotionConfig, m, useScroll, useTransform, type Variants } from 'framer-motion';
+import { LazyMotion, MotionConfig, m, useScroll, useTransform } from 'framer-motion';
+import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -215,58 +216,6 @@ function usePageMeta({ title, description, image }: PageMeta) {
     }
     canonical.href = url;
   }, [title, description, image]);
-}
-
-// ─── 2b. Reveal (framer-motion scroll reveal) ────────────────────────────────
-
-function Reveal({ children, className = '', delay = 0, y = 40 }: { children: React.ReactNode; className?: string; delay?: number; y?: number }) {
-  return (
-    <m.div
-      className={className}
-      initial={{ opacity: 0, y }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-80px' }}
-      transition={{ duration: 0.7, delay: delay / 1000, ease: [0.16, 1, 0.3, 1] }}
-    >
-      {children}
-    </m.div>
-  );
-}
-
-// Stagger container for grids — children animate sequentially
-const STAGGER_CONTAINER: Variants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
-  },
-};
-
-const STAGGER_ITEM: Variants = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.16, 1, 0.3, 1] } },
-};
-
-function StaggerGrid({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <m.div
-      className={className}
-      variants={STAGGER_CONTAINER}
-      initial="hidden"
-      whileInView="visible"
-      viewport={{ once: true, margin: '-80px' }}
-    >
-      {children}
-    </m.div>
-  );
-}
-
-function StaggerItem({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <m.div variants={STAGGER_ITEM} className={className}>
-      {children}
-    </m.div>
-  );
 }
 
 // Page transition wrapper — fades + subtle slide
