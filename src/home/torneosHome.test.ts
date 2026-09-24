@@ -50,7 +50,9 @@ function torneo(o: Opciones): TorneoPublico {
       },
     ],
     categoria: o.categoria ?? 'A',
-    evento: o.evento,
+    // El tipo hereda `evento?: string` de Torneo, pero en runtime llega null para los
+    // torneos sueltos (datos.ts): se replica eso.
+    evento: o.evento as string,
     updatedAt: o.updatedAt ?? HACE_DIAS,
   };
 }
