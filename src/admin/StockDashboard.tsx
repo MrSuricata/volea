@@ -1,246 +1,269 @@
-import { useState } from 'react';
-import { Search, Edit, Package, Tag, Check, AlertCircle, ChevronDown, XCircle } from 'lucide-react';
+import { useId, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Package, Pencil, SearchX, Tag, XCircle } from 'lucide-react';
 import type { Product } from '../types';
 import { urlImagen } from '../utils/imagenes';
-import { formatPrice } from '../lib/formato';
 import { FALLBACK_IMG, errorFoto } from '../lib/fotos';
+import { cn } from '../lib/cn';
+import { BarraFiltros, Boton, Chip, EncabezadoPagina, Estadistica, Insignia, Vacio, type TonoInsignia } from './ui';
+import {
+  COLOR_UNICO, UMBRAL_STOCK_BAJO, coincideBusqueda, ordenarPorUrgencia, pasaFiltro, porColor, resumirStock, totalesStock,
+  type EstadoVariante, type FiltroStock, type ResumenStock, type VarianteStock,
+} from './stockResumen';
 
-// ─── 12b. StockDashboard ─────────────────────────────────────────────────────
+// El umbral vive en stockResumen.ts (sin React); se re-exporta para quien ya importa esto.
+export { UMBRAL_STOCK_BAJO } from './stockResumen';
 
-type StockFilter = 'all' | 'low' | 'out';
+// ─── StockDashboard ──────────────────────────────────────────────────────────
+// Rediseño 24/09: pensado para el celular. Cada producto es una fila con sus variantes
+// en problema a la vista (talle · color + cantidad), "Editar" como botón de verdad y el
+// detalle completo como grilla color × talle (antes: una tabla de 4 columnas que a 390px
+// se salía de la pantalla). Solo lectura: el stock se cambia en el editor del producto.
+
+const TONO_VARIANTE: Record<EstadoVariante, TonoInsignia> = { sin: 'alerta', bajo: 'atencion', ok: 'neutro' };
+
+const CELDA_VARIANTE: Record<EstadoVariante, string> = {
+  sin: 'border-red-200 bg-red-50 text-red-700',
+  bajo: 'border-amber-200 bg-amber-50 text-amber-800',
+  ok: 'border-gray-200 bg-white text-navy-700',
+};
+
+const MAX_ALERTAS_EN_FILA = 4;
+
+const enProductos = (n: number) => (n === 0 ? 'Todo en orden' : `Variantes, en ${n} ${n === 1 ? 'producto' : 'productos'}`);
 
 export function StockDashboard({ products, onEdit }: { products: Product[]; onEdit: (p: Product) => void }) {
-  const [filter, setFilter] = useState<StockFilter>('all');
-  const [search, setSearch] = useState('');
-  const threshold = 3;
+  const [filtro, setFiltro] = useState<FiltroStock>('todos');
+  const [busqueda, setBusqueda] = useState('');
 
-  // Per-product variant breakdown
-  const enriched = products.map((p) => {
-    const variants = Object.entries(p.stockBySize).map(([key, qty]) => {
-      const [size, color] = key.split('|');
-      return { key, size, color: color || 'Único', qty };
-    });
-    const lowVariants = variants.filter((v) => v.qty > 0 && v.qty <= threshold);
-    const outVariants = variants.filter((v) => v.qty <= 0);
-    const totalUnits = variants.reduce((s, v) => s + Math.max(0, v.qty), 0);
-    return { product: p, variants, lowVariants, outVariants, totalUnits };
-  });
-
-  const totalUnits = enriched.reduce((s, e) => s + e.totalUnits, 0);
-  const totalVariants = enriched.reduce((s, e) => s + e.variants.length, 0);
-  const totalLow = enriched.reduce((s, e) => s + e.lowVariants.length, 0);
-  const totalOut = enriched.reduce((s, e) => s + e.outVariants.length, 0);
-
-  const filteredProducts = enriched
-    .filter((e) => {
-      if (search && !e.product.name.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filter === 'low') return e.lowVariants.length > 0;
-      if (filter === 'out') return e.outVariants.length > 0;
-      return true;
-    })
-    .sort((a, b) => {
-      // Sort by urgency: out > low > healthy
-      const score = (e: typeof a) => e.outVariants.length * 10 + e.lowVariants.length;
-      return score(b) - score(a);
-    });
+  const resumenes = useMemo(() => products.map(resumirStock), [products]);
+  const totales = useMemo(() => totalesStock(resumenes), [resumenes]);
+  const buscados = useMemo(() => resumenes.filter(r => coincideBusqueda(r.producto, busqueda)), [resumenes, busqueda]);
+  const cuenta: Record<FiltroStock, number> = {
+    todos: buscados.length,
+    sin: buscados.filter(r => pasaFiltro(r, 'sin')).length,
+    bajo: buscados.filter(r => pasaFiltro(r, 'bajo')).length,
+  };
+  const productosCon = {
+    sin: resumenes.filter(r => pasaFiltro(r, 'sin')).length,
+    bajo: resumenes.filter(r => pasaFiltro(r, 'bajo')).length,
+  };
+  const visibles = useMemo(() => ordenarPorUrgencia(buscados.filter(r => pasaFiltro(r, filtro))), [buscados, filtro]);
 
   return (
-    <div className="fade-in">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Stock &amp; Alertas</h1>
-      </div>
+    <div>
+      <EncabezadoPagina
+        rotulo="Tienda"
+        titulo="Stock"
+        descripcion={`Unidades por talle y color. Stock bajo = ${UMBRAL_STOCK_BAJO} o menos. Para cambiar cantidades, entrá a Editar.`}
+      />
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Unidades Totales" value={totalUnits} color="bg-green-50 text-green-700" icon={<Package size={20} />} />
-        <StatCard label="Variantes" value={totalVariants} color="bg-blue-50 text-blue-700" icon={<Tag size={20} />} />
-        <StatCard label="Bajo Stock (≤3)" value={totalLow} color="bg-yellow-50 text-yellow-700" icon={<AlertCircle size={20} />} />
-        <StatCard label="Sin Stock" value={totalOut} color="bg-red-50 text-red-700" icon={<XCircle size={20} />} />
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6 flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-        <div className="flex-1 relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar producto..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none text-sm"
-          />
-        </div>
-        <div className="flex gap-2">
-          {(['all', 'low', 'out'] as StockFilter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg font-display text-sm font-semibold transition-colors ${
-                filter === f ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
-              }`}
-            >
-              {f === 'all' ? 'Todos' : f === 'low' ? 'Bajo stock' : 'Sin stock'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Product list */}
-      {filteredProducts.length === 0 ? (
-        <div className="bg-white rounded-xl p-12 text-center text-gray-400">
-          <Check size={48} className="mx-auto mb-3 text-green-400" />
-          <p className="font-display">
-            {filter === 'out'
-              ? '¡Ningún producto sin stock!'
-              : filter === 'low'
-              ? '¡Sin alertas de bajo stock!'
-              : 'No se encontraron productos'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredProducts.map(({ product, variants, lowVariants, outVariants, totalUnits }) => (
-            <StockProductRow
-              key={product.id}
-              product={product}
-              variants={variants}
-              lowVariants={lowVariants}
-              outVariants={outVariants}
-              totalUnits={totalUnits}
-              threshold={threshold}
-              onEdit={() => onEdit(product)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatCard({ label, value, color, icon }: { label: string; value: number | string; color: string; icon: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${color}`}>{icon}</div>
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className="font-display text-2xl font-bold text-navy-700">{value}</p>
-    </div>
-  );
-}
-
-interface StockVariantInfo {
-  key: string;
-  size: string;
-  color: string;
-  qty: number;
-}
-
-function StockProductRow({
-  product,
-  variants,
-  lowVariants,
-  outVariants,
-  totalUnits,
-  threshold,
-  onEdit,
-}: {
-  product: Product;
-  variants: StockVariantInfo[];
-  lowVariants: StockVariantInfo[];
-  outVariants: StockVariantInfo[];
-  totalUnits: number;
-  threshold: number;
-  onEdit: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const hasAlert = lowVariants.length > 0 || outVariants.length > 0;
-
-  return (
-    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${hasAlert ? 'border-yellow-200' : 'border-gray-100'}`}>
-      <div className="p-4 flex items-center gap-4">
-        <img
-          src={product.images[0] ? urlImagen(product.images[0], 160) : FALLBACK_IMG}
-          alt={product.name}
-          className="w-16 h-16 object-cover rounded-lg flex-shrink-0"
-          onError={errorFoto(product.images[0])}
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Estadistica
+          etiqueta="Unidades"
+          valor={totales.unidades.toLocaleString('es-UY')}
+          icono={<Package size={16} />}
+          detalle={`${products.length} ${products.length === 1 ? 'producto' : 'productos'}`}
         />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-display font-bold text-navy-700">{product.name}</h3>
-            {outVariants.length > 0 && (
-              <span className="bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {outVariants.length} sin stock
-              </span>
-            )}
-            {lowVariants.length > 0 && (
-              <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {lowVariants.length} bajo stock
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {variants.length} variantes · {totalUnits} unidades · {formatPrice(product.price)}
-          </p>
-        </div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-navy-700 hover:text-lime-500 p-2 transition-colors"
-        >
-          <ChevronDown size={20} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </button>
-        <button
-          onClick={onEdit}
-          className="text-xs text-navy-700 hover:text-lime-500 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-          title="Editar producto y stock"
-        >
-          Editar <Edit size={12} />
-        </button>
+        <Estadistica etiqueta="Variantes" valor={totales.variantes} icono={<Tag size={16} />} detalle="Talle × color" />
+        <Estadistica
+          etiqueta="Stock bajo"
+          valor={totales.bajo}
+          tono={totales.bajo > 0 ? 'atencion' : 'neutro'}
+          icono={<AlertTriangle size={16} />}
+          detalle={enProductos(productosCon.bajo)}
+          onClick={() => setFiltro('bajo')}
+        />
+        <Estadistica
+          etiqueta="Sin stock"
+          valor={totales.sin}
+          tono={totales.sin > 0 ? 'alerta' : 'neutro'}
+          icono={<XCircle size={16} />}
+          detalle={enProductos(productosCon.sin)}
+          onClick={() => setFiltro('sin')}
+        />
       </div>
 
-      {expanded && (
-        <div className="border-t border-gray-100 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Variante</th>
-                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Color</th>
-                <th className="text-right px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Cantidad</th>
-                <th className="text-left px-4 py-2 font-display text-xs font-semibold text-gray-500 uppercase">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {variants
-                .slice()
-                .sort((a, b) => a.qty - b.qty)
-                .map((v) => {
-                  const isOut = v.qty <= 0;
-                  const isLow = v.qty > 0 && v.qty <= threshold;
-                  return (
-                    <tr key={v.key} className={`border-t border-gray-100 ${isOut ? 'bg-red-50/50' : isLow ? 'bg-yellow-50/50' : ''}`}>
-                      <td className="px-4 py-2 font-semibold text-navy-700">{v.size}</td>
-                      <td className="px-4 py-2 text-gray-600">{v.color}</td>
-                      <td className="px-4 py-2 text-right font-display font-bold tabular-nums">{v.qty}</td>
-                      <td className="px-4 py-2">
-                        {isOut ? (
-                          <span className="inline-flex items-center gap-1 text-red-700 text-xs font-semibold">
-                            <XCircle size={14} /> Sin stock
-                          </span>
-                        ) : isLow ? (
-                          <span className="inline-flex items-center gap-1 text-yellow-700 text-xs font-semibold">
-                            <AlertCircle size={14} /> Bajo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-green-700 text-xs font-semibold">
-                            <Check size={14} /> OK
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
+      <BarraFiltros
+        busqueda={busqueda}
+        alBuscar={setBusqueda}
+        placeholder="Buscar por nombre o SKU"
+        chips={(
+          <>
+            <Chip activo={filtro === 'todos'} onClick={() => setFiltro('todos')} cantidad={cuenta.todos}>Todos</Chip>
+            <Chip activo={filtro === 'sin'} onClick={() => setFiltro('sin')} cantidad={cuenta.sin}>Sin stock</Chip>
+            <Chip activo={filtro === 'bajo'} onClick={() => setFiltro('bajo')} cantidad={cuenta.bajo}>Stock bajo</Chip>
+          </>
+        )}
+      />
+
+      {visibles.length === 0 ? (
+        <SinResultados
+          hayProductos={products.length > 0}
+          busqueda={busqueda}
+          filtro={filtro}
+          alLimpiar={() => setBusqueda('')}
+        />
+      ) : (
+        <ul className="space-y-2">
+          {visibles.map(r => (
+            <FilaStock key={r.producto.id} resumen={r} onEdit={() => onEdit(r.producto)} />
+          ))}
+        </ul>
       )}
     </div>
+  );
+}
+
+function SinResultados({ hayProductos, busqueda, filtro, alLimpiar }: {
+  hayProductos: boolean;
+  busqueda: string;
+  filtro: FiltroStock;
+  alLimpiar: () => void;
+}) {
+  if (!hayProductos) {
+    return <Vacio icono={<Package size={22} />} titulo="Todavía no hay productos" descripcion="Cuando cargues productos, su stock aparece acá." />;
+  }
+  if (busqueda.trim()) {
+    return (
+      <Vacio
+        icono={<SearchX size={22} />}
+        titulo={`Nada coincide con “${busqueda.trim()}”`}
+        descripcion={filtro === 'todos' ? 'Probá con otra parte del nombre o del SKU.' : 'Probá con otra búsqueda o mirá todos los productos.'}
+        accion={<Boton variante="secundario" onClick={alLimpiar}>Limpiar búsqueda</Boton>}
+      />
+    );
+  }
+  return (
+    <Vacio
+      icono={<CheckCircle2 size={22} className="text-emerald-600" />}
+      titulo={filtro === 'sin' ? 'Ningún producto sin stock' : 'Sin alertas de stock bajo'}
+      descripcion="Todo en orden por ahora."
+    />
+  );
+}
+
+function ChipVariante({ v }: { v: VarianteStock }) {
+  return (
+    <Insignia tono={TONO_VARIANTE[v.estado]} className="gap-1 py-1">
+      <span>{v.talle}{v.color !== COLOR_UNICO && <span className="font-normal"> · {v.color}</span>}</span>
+      <span className="tabular-nums font-bold">{v.cantidad}</span>
+    </Insignia>
+  );
+}
+
+function FilaStock({ resumen, onEdit }: { resumen: ResumenStock; onEdit: () => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const idDetalle = useId();
+  const { producto, variantes, sinStock, bajo, unidades } = resumen;
+
+  // En la fila, lo que falta primero (0 antes que 1, 2, 3); el resto queda en el detalle.
+  const alertas = [...sinStock, ...bajo].sort((a, b) => a.cantidad - b.cantidad);
+  const aLaVista = alertas.slice(0, MAX_ALERTAS_EN_FILA);
+  const escondidas = alertas.length - aLaVista.length;
+  const hexDe = (color: string) => producto.colors?.find(c => c.name === color)?.hex;
+
+  const resumenLector = [
+    sinStock.length > 0 && `${sinStock.length} sin stock`,
+    bajo.length > 0 && `${bajo.length} con stock bajo`,
+  ].filter(Boolean).join(', ') || 'todo con stock';
+
+  return (
+    <li
+      className={cn(
+        'overflow-hidden rounded-xl border bg-white',
+        sinStock.length > 0 ? 'border-red-200' : bajo.length > 0 ? 'border-amber-200' : 'border-gray-200',
+      )}
+    >
+      <div className="flex items-start gap-3 p-3 sm:p-4">
+        <img
+          src={producto.images[0] ? urlImagen(producto.images[0], 160) : FALLBACK_IMG}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="h-14 w-14 shrink-0 rounded-lg border border-gray-100 object-cover"
+          onError={errorFoto(producto.images[0])}
+        />
+        <div className="min-w-0 flex-1 self-center">
+          <h3 className="line-clamp-2 font-display text-[15px] font-bold leading-snug text-navy-700">{producto.name}</h3>
+          {/* Las unidades primero: si no entra, lo que se corta es el SKU. */}
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-gray-500">
+            <span className="shrink-0 font-semibold tabular-nums text-navy-700">{unidades} u.</span>
+            {producto.sku && <><span aria-hidden className="shrink-0">·</span><span className="min-w-0 truncate">{producto.sku}</span></>}
+            {producto.active === false && <Insignia className="ml-1">Oculto</Insignia>}
+          </p>
+        </div>
+        <Boton
+          variante="secundario"
+          icono={<Pencil size={16} />}
+          onClick={onEdit}
+          className="shrink-0 px-3.5"
+          aria-label={`Editar ${producto.name}`}
+        >
+          Editar
+        </Boton>
+      </div>
+
+      <button
+        type="button"
+        aria-expanded={abierto}
+        aria-controls={idDetalle}
+        aria-label={`Variantes de ${producto.name}: ${resumenLector}`}
+        onClick={() => setAbierto(a => !a)}
+        className="flex min-h-[44px] w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left transition-colors hover:bg-gray-50 sm:px-4"
+      >
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {alertas.length > 0 ? (
+            <>
+              {aLaVista.map(v => <ChipVariante key={v.clave} v={v} />)}
+              {escondidas > 0 && <span className="text-[12px] font-semibold text-gray-500">+{escondidas}</span>}
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-emerald-700">
+              <CheckCircle2 size={15} aria-hidden /> Todo con stock
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-[13px] font-semibold text-navy-700">
+          {abierto ? 'Ocultar' : `${variantes.length} ${variantes.length === 1 ? 'variante' : 'variantes'}`}
+        </span>
+        <ChevronDown size={18} aria-hidden className={cn('shrink-0 text-navy-700 transition-transform', abierto && 'rotate-180')} />
+      </button>
+
+      <div id={idDetalle} hidden={!abierto} className="border-t border-gray-100 bg-gray-50/70 px-3 py-3 sm:px-4">
+        {abierto && (
+          variantes.length === 0 ? (
+            <p className="text-[13px] text-gray-500">Este producto no tiene talles ni colores cargados.</p>
+          ) : (
+            <div className="space-y-3">
+              {porColor(variantes).map(g => {
+                const hex = hexDe(g.color);
+                const total = g.variantes.reduce((s, v) => s + Math.max(0, v.cantidad), 0);
+                return (
+                  <div key={g.color}>
+                    <p className="mb-1.5 flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-gray-600">
+                      {hex && <span aria-hidden className="h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ring-black/15" style={{ backgroundColor: hex }} />}
+                      {g.color}
+                      <span className="font-semibold normal-case tracking-normal text-gray-400">· {total} u.</span>
+                    </p>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {g.variantes.map(v => (
+                        <li
+                          key={v.clave}
+                          className={cn('flex min-w-[52px] flex-col items-center rounded-lg border px-2 py-1', CELDA_VARIANTE[v.estado])}
+                          aria-label={`Talle ${v.talle}: ${v.cantidad} ${v.cantidad === 1 ? 'unidad' : 'unidades'}`}
+                        >
+                          <span className="text-[11px] font-semibold opacity-75">{v.talle}</span>
+                          <span className="font-display text-base font-bold leading-tight tabular-nums">{v.cantidad}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </div>
+    </li>
   );
 }
