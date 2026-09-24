@@ -6,12 +6,12 @@
 
 import { useState, useEffect, useCallback, useMemo, Suspense, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink } from 'lucide-react';
+import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Product, SocioName, VentaCajaInput, GastoPendienteInput } from '../types';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConnected } from '../services/supabaseClient';
-import { signInWithPassword, sesionAdminVencida } from '../services/authService';
+import { cambiarPassword, signInWithPassword, sesionAdminVencida } from '../services/authService';
 import { marcaVisitaInscripciones } from '../utils/inscripciones';
 import { mismoStock } from '../utils/stock';
 import { almacenSesion } from '../utils/almacen';
@@ -21,7 +21,7 @@ import { cn } from '../lib/cn';
 import { ATAJO_TAB_ADMIN } from '../lib/atajoAdmin';
 import { StockDashboard } from './StockDashboard';
 import { LineasCancha } from '../ui/LineasCancha';
-import { Boton, BotonIcono, Campo, CargandoFilas, Entrada, Vacio } from './ui';
+import { Boton, BotonIcono, Campo, CargandoFilas, Dialogo, Entrada, Vacio } from './ui';
 import { InicioTab } from './tabs/InicioTab';
 import { ProductosTab } from './tabs/ProductosTab';
 import { PedidosClientesTab } from './tabs/PedidosClientesTab';
@@ -168,6 +168,7 @@ export default function AdminPage() {
   }, [setParams]);
 
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [cambiarPass, setCambiarPass] = useState(false);
   // Un solo grupo abierto por vez: es lo que mantiene corta la barra.
   const [grupoAbierto, setGrupoAbierto] = useState<string | null>(null);
   const [buscarSeccion, setBuscarSeccion] = useState('');
@@ -519,6 +520,11 @@ export default function AdminPage() {
         <Link to="/" className="flex min-h-[40px] items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white">
           <ExternalLink size={16} /> Ver la web
         </Link>
+        {useSupabaseAuth && (
+          <button onClick={() => { setMenuAbierto(false); setCambiarPass(true); }} className="flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white">
+            <KeyRound size={16} /> Cambiar mi contraseña
+          </button>
+        )}
         <button
           onClick={() => setPanelOculto(true)}
           className="hidden min-h-[40px] w-full items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white lg:flex"
@@ -714,6 +720,8 @@ export default function AdminPage() {
         </button>
       </nav>
 
+      <CambiarPasswordDialogo abierto={cambiarPass} alCerrar={() => setCambiarPass(false)} />
+
       {/* Editor de producto global: se abre desde Productos y desde Stock */}
       {productModal && (
         <Suspense fallback={null}>
@@ -745,3 +753,48 @@ export default function AdminPage() {
 
 type ItemMenu = { id: string; label: string; icon: ReactNode };
 type GrupoMenu = { id: string; label: string; icon: ReactNode; items: ItemMenu[] };
+
+/** Cambiar la contraseña propia (la escribe la persona; nunca se guarda en ningún lado del front). */
+function CambiarPasswordDialogo({ abierto, alCerrar }: { abierto: boolean; alCerrar: () => void }) {
+  const [nueva, setNueva] = useState('');
+  const [repetida, setRepetida] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cerrar = () => { setNueva(''); setRepetida(''); setError(null); alCerrar(); };
+  const guardar = async () => {
+    if (nueva.length < 8) { setError('Tiene que tener al menos 8 caracteres.'); return; }
+    if (nueva !== repetida) { setError('Las dos no coinciden.'); return; }
+    setGuardando(true);
+    const r = await cambiarPassword(nueva);
+    setGuardando(false);
+    if (!r.success) { setError(r.error || 'No se pudo cambiar.'); return; }
+    toast.success('Contraseña cambiada. La próxima vez entrá con la nueva.');
+    cerrar();
+  };
+  return (
+    <Dialogo
+      abierto={abierto}
+      titulo="Cambiar mi contraseña"
+      descripcion="Mínimo 8 caracteres. Guardala en el gestor de contraseñas del navegador."
+      alCerrar={cerrar}
+      ancho="sm"
+      ocupado={guardando}
+      sucio={nueva !== '' || repetida !== ''}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={cerrar} disabled={guardando}>Cancelar</Boton>
+          <Boton type="submit" form="form-cambiar-pass" cargando={guardando}>Guardar contraseña</Boton>
+        </>
+      )}
+    >
+      <form id="form-cambiar-pass" className="space-y-4" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
+        <Campo etiqueta="Nueva contraseña" error={error}>
+          <Entrada type="password" autoComplete="new-password" value={nueva} onChange={(e) => { setNueva(e.target.value); setError(null); }} />
+        </Campo>
+        <Campo etiqueta="Repetila">
+          <Entrada type="password" autoComplete="new-password" value={repetida} onChange={(e) => { setRepetida(e.target.value); setError(null); }} />
+        </Campo>
+      </form>
+    </Dialogo>
+  );
+}

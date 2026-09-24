@@ -99,6 +99,22 @@ async function signInConPasswordInterno(email: string, password: string): Promis
 }
 
 /**
+ * Cambia la contraseña del admin logueado (la escribe él en el panel). Sirve sobre todo
+ * después de entrar con el link por email cuando nadie se acuerda de la contraseña: antes
+ * no había dónde poner una nueva sin ir al dashboard de Supabase.
+ */
+export async function cambiarPassword(nueva: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Sin conexión con el servidor' };
+  if (nueva.length < 8) return { success: false, error: 'Tiene que tener al menos 8 caracteres' };
+  const r = await conLimite(
+    supabase.auth.updateUser({ password: nueva }).then(({ error }) => (error ? { success: false, error: error.message } : { success: true })),
+    LOGIN_TIMEOUT_MS,
+    LOGIN_TARDO,
+  );
+  return r;
+}
+
+/**
  * Sign out the current user.
  */
 export async function signOut(): Promise<void> {
