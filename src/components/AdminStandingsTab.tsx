@@ -1,13 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { Plus, Edit, Trash2, X, Save, Info, Check, Trophy } from 'lucide-react';
+import { useId, useMemo, useState, type FormEvent } from 'react';
+import { Pencil, Plus, Trash2, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StandingEntry } from '../types';
-
-const formatPrice = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
-
-const inputClass =
-  'w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20 outline-none transition-colors';
-const labelClass = 'block text-sm font-semibold text-navy-700 mb-1';
+import { Boton, BotonIcono, Campo, Confirmar, Dialogo, EncabezadoPagina, Entrada, Tarjeta, Vacio } from '../admin/ui';
 
 const formatPoints = (n: number) =>
   n.toLocaleString('es-UY', { maximumFractionDigits: 2 });
@@ -44,7 +39,8 @@ export function AdminStandingsTab({ standings, onSave, onDelete }: {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<StandingEntry | null>(null);
   const [form, setForm] = useState<StandingForm>(emptyForm());
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<StandingEntry | null>(null);
+  const idForm = useId();
 
   const categories = useMemo(() => {
     const set = new Set<string>(['General']);
@@ -109,6 +105,8 @@ export function AdminStandingsTab({ standings, onSave, onDelete }: {
       category: form.category.trim() || 'General',
       notes: form.notes.trim(),
     };
+    // onSave (App.saveStanding) actualiza la lista al toque y sube en segundo plano; si la
+    // nube falla, avisa aparte. Por eso el toast dice lo que ya pasó: quedó en la tabla.
     onSave(entry);
     toast.success(editing ? 'Cambios guardados' : 'Se agregó a la clasificación');
     closeModal();
@@ -120,200 +118,115 @@ export function AdminStandingsTab({ standings, onSave, onDelete }: {
     toast.success('Se eliminó de la clasificación');
   };
 
+  const sucio = modalOpen && JSON.stringify(form) !== JSON.stringify(editing ? toForm(editing) : emptyForm());
+
   return (
-    <div className="fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="hidden lg:block font-display text-2xl font-bold text-navy-700">Clasificación</h1>
-        <button
-          onClick={openCreate}
-          className="bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 px-6 rounded-lg transition-colors flex items-center gap-2"
-        >
-          <Plus size={18} /> Agregar jugador/a
-        </button>
-      </div>
+    <div>
+      <EncabezadoPagina
+        rotulo="Torneos"
+        titulo="Clasificación"
+        descripcion="Se muestra en la web, en la sección Clasificación — Camino al Mundial."
+        acciones={<Boton icono={<Plus size={18} />} onClick={openCreate}>Agregar jugador/a</Boton>}
+      />
 
-      {/* Info banner */}
-      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 px-4 py-3 rounded-r-lg flex items-start gap-3 text-sm text-blue-900">
-        <Info size={18} className="flex-shrink-0 mt-0.5" />
-        <p>Esta tabla se muestra públicamente en la sección Clasificación — Camino al Mundial.</p>
-      </div>
-
-      {/* Empty state */}
       {standings.length === 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-400">
-          <Trophy size={48} strokeWidth={1} className="mx-auto mb-3" />
-          <p className="font-display">Todavía no hay nadie en la clasificación</p>
-          <p className="text-sm mt-1">Empezá a armar la tabla con el botón de arriba.</p>
-        </div>
+        <Vacio
+          icono={<Trophy size={22} />}
+          titulo="Todavía no hay nadie en la clasificación"
+          descripcion="Empezá a armar la tabla con «Agregar jugador/a»."
+          accion={<Boton icono={<Plus size={18} />} onClick={openCreate}>Agregar jugador/a</Boton>}
+        />
       )}
 
-      {/* Grouped tables */}
-      {grouped.map(group => (
-        <div key={group.category} className="mb-8">
-          <h2 className="font-display text-lg font-bold text-navy-700 mb-3">{group.category}</h2>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="space-y-6">
+        {grouped.map(group => (
+          <Tarjeta key={group.category} titulo={group.category} sinPadding acciones={<span className="text-[13px] text-gray-500">{group.entries.length}</span>}>
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="border-b border-gray-200 bg-gray-50">
                   <tr>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Pos</th>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Jugador/a</th>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Puntos</th>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase hidden md:table-cell">Notas</th>
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-gray-500 uppercase">Acciones</th>
+                    <th scope="col" className="w-14 px-4 py-2.5 text-left font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">Pos</th>
+                    <th scope="col" className="px-4 py-2.5 text-left font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">Jugador/a</th>
+                    <th scope="col" className="px-4 py-2.5 text-right font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">Puntos</th>
+                    <th scope="col" className="hidden px-4 py-2.5 text-left font-display text-[11px] font-bold uppercase tracking-wider text-gray-600 md:table-cell">Notas</th>
+                    <th scope="col" className="w-24 px-2 py-2.5"><span className="sr-only">Acciones</span></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {group.entries.map(entry => (
-                    <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-navy-700/10 text-navy-700 text-xs font-bold">
+                    <tr key={entry.id}>
+                      <td className="px-4 py-2">
+                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-navy-50 text-xs font-bold tabular-nums text-navy-700">
                           {entry.position}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-display font-semibold text-navy-700 text-sm">{entry.playerName}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-navy-700">{formatPoints(entry.points)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">{entry.notes}</td>
-                      <td className="px-4 py-3">
-                        {deleteConfirm === entry.id ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-red-600 font-semibold">¿Eliminar?</span>
-                            <button
-                              onClick={() => handleDelete(entry.id)}
-                              className="text-red-500 hover:text-red-700 transition-colors"
-                              title="Confirmar"
-                            >
-                              <Check size={16} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(null)}
-                              className="text-gray-400 hover:text-navy-700 transition-colors"
-                              title="Cancelar"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => openEdit(entry)}
-                              className="text-navy-700 hover:text-lime-500 transition-colors"
-                              title="Editar"
-                            >
-                              <Edit size={16} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(entry.id)}
-                              className="text-gray-400 hover:text-red-500 transition-colors"
-                              title="Eliminar"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        )}
+                      <td className="px-4 py-2">
+                        <span className="font-display font-semibold text-navy-700">{entry.playerName}</span>
+                        {entry.notes && <span className="block text-[13px] text-gray-500 md:hidden">{entry.notes}</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right font-bold tabular-nums text-navy-700">{formatPoints(entry.points)}</td>
+                      <td className="hidden px-4 py-2 text-gray-600 md:table-cell">{entry.notes}</td>
+                      <td className="px-2 py-1">
+                        <div className="flex justify-end">
+                          <BotonIcono etiqueta={`Editar ${entry.playerName}`} icono={<Pencil size={17} />} onClick={() => openEdit(entry)} />
+                          <BotonIcono etiqueta={`Eliminar ${entry.playerName}`} icono={<Trash2 size={17} />} tono="peligro" onClick={() => setDeleteConfirm(entry)} />
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-      ))}
+          </Tarjeta>
+        ))}
+      </div>
 
-      {/* Create/Edit Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0" onClick={closeModal} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-              <h2 className="font-display text-xl font-bold text-navy-700">
-                {editing ? 'Editar jugador/a' : 'Agregar jugador/a'}
-              </h2>
-              <button onClick={closeModal} className="text-gray-400 hover:text-navy-700 transition-colors">
-                <X size={24} />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass}>Posición</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={form.position}
-                    onChange={e => setForm({ ...form, position: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Puntos</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={form.points}
-                    onChange={e => setForm({ ...form, points: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Nombre *</label>
-                <input
-                  type="text"
-                  value={form.playerName}
-                  onChange={e => setForm({ ...form, playerName: e.target.value })}
-                  placeholder="Nombre y apellido"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Categoría</label>
-                <input
-                  type="text"
-                  list="standings-categories"
-                  value={form.category}
-                  onChange={e => setForm({ ...form, category: e.target.value })}
-                  placeholder="General"
-                  className={inputClass}
-                />
-                <datalist id="standings-categories">
-                  {categories.map(cat => (
-                    <option key={cat} value={cat} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className={labelClass}>Notas</label>
-                <input
-                  type="text"
-                  value={form.notes}
-                  onChange={e => setForm({ ...form, notes: e.target.value })}
-                  placeholder="Ej: campeón/a del Torneo Apertura"
-                  className={inputClass}
-                />
-              </div>
+      <Confirmar
+        abierto={deleteConfirm !== null}
+        titulo={deleteConfirm ? `¿Eliminar a ${deleteConfirm.playerName}?` : ''}
+        mensaje="Sale de la clasificación pública. No se puede deshacer."
+        textoConfirmar="Eliminar"
+        alCerrar={() => setDeleteConfirm(null)}
+        alConfirmar={() => { if (deleteConfirm) handleDelete(deleteConfirm.id); }}
+      />
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <Save size={18} /> Guardar
-                </button>
-              </div>
-            </form>
+      <Dialogo
+        abierto={modalOpen}
+        titulo={editing ? 'Editar jugador/a' : 'Agregar jugador/a'}
+        alCerrar={closeModal}
+        sucio={sucio}
+        pie={(
+          <>
+            <Boton variante="secundario" onClick={closeModal}>Cancelar</Boton>
+            <Boton type="submit" form={idForm}>Guardar</Boton>
+          </>
+        )}
+      >
+        <form id={idForm} onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Campo etiqueta="Posición">
+              <Entrada type="text" inputMode="numeric" value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} />
+            </Campo>
+            <Campo etiqueta="Puntos">
+              <Entrada type="text" inputMode="decimal" value={form.points} onChange={e => setForm({ ...form, points: e.target.value })} />
+            </Campo>
           </div>
-        </div>
-      )}
+          <Campo etiqueta="Nombre" requerido>
+            <Entrada type="text" value={form.playerName} onChange={e => setForm({ ...form, playerName: e.target.value })} placeholder="Nombre y apellido" />
+          </Campo>
+          <Campo etiqueta="Categoría">
+            <Entrada type="text" list="standings-categories" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="General" />
+          </Campo>
+          <datalist id="standings-categories">
+            {categories.map(cat => (
+              <option key={cat} value={cat} />
+            ))}
+          </datalist>
+          <Campo etiqueta="Notas">
+            <Entrada type="text" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Ej: campeón/a del Torneo Apertura" />
+          </Campo>
+        </form>
+      </Dialogo>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoGrupo, Torneo } from '../engine/tipos';
 import { resultadoValido } from '../engine/tipos';
@@ -6,6 +7,8 @@ import { calcularTabla } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
+import { Boton, Insignia, Segmentado, Selector } from '../../admin/ui';
+import { FilaMarcador, Nota, PiePaso } from './piezas';
 
 export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   const dialogos = useDialogos();
@@ -54,33 +57,45 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   }
 
   const rondas = [...new Set(torneo.partidosGrupo.map((p) => p.ronda))].sort((a, b) => a - b);
+  const porcentaje = total > 0 ? Math.round((jugados / total) * 100) : 0;
 
   return (
-    <section>
-      <div className="carta acciones" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <div className="acciones">
-          <button className={`boton ${vista === 'rondas' ? '' : 'secundario'}`} onClick={() => setVista('rondas')}>
-            Por rondas
-          </button>
-          <button className={`boton ${vista === 'grupos' ? '' : 'secundario'}`} onClick={() => setVista('grupos')}>
-            Por grupo
-          </button>
+    <section className="space-y-4">
+      {/* Barra de control: vista, canchas y avance (con barra: se lee de lejos). */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmentado
+            etiqueta="Ver partidos"
+            valor={vista}
+            alCambiar={setVista}
+            opciones={[{ valor: 'rondas', texto: 'Por rondas' }, { valor: 'grupos', texto: 'Por grupo' }]}
+          />
+          <label className="flex items-center gap-2 text-sm font-semibold text-navy-700">
+            Canchas
+            <Selector
+              value={canchas}
+              onChange={(e) => { const n = Number(e.target.value); actualizar((t) => ({ ...t, canchas: n })); }}
+              className="w-20"
+            >
+              {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+            </Selector>
+          </label>
         </div>
-        <label>
-          Canchas:{' '}
-          <select value={canchas} onChange={(e) => { const n = Number(e.target.value); actualizar((t) => ({ ...t, canchas: n })); }}>
-            {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-        <span className="chip">{jugados}/{total} jugados</span>
+        <div className="mt-3">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-semibold text-navy-700">{jugados} de {total} jugados</span>
+            <span className="text-[13px] text-gray-500">{faltan > 0 ? `faltan ${faltan}` : 'todos cargados'}</span>
+          </div>
+          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-100" aria-hidden>
+            <div className="h-full rounded-full bg-navy-700 transition-[width]" style={{ width: `${porcentaje}%` }} />
+          </div>
+        </div>
       </div>
 
       {torneo.partidosLlave && (
-        <div className="aviso" role="alert">
-          ⚠ La llave se armó con las posiciones de antes. Si corregiste algún resultado acá, rearmala para que tome
-          las posiciones nuevas:{' '}
-          <button className="boton secundario" onClick={rearmarLlave}>Rearmar llave</button>
-        </div>
+        <Nota accion={<Boton variante="secundario" onClick={() => void rearmarLlave()}>Rearmar llave</Boton>}>
+          La llave se armó con las posiciones de antes. Si corregiste algún resultado acá, rearmala para que tome las posiciones nuevas.
+        </Nota>
       )}
 
       {vista === 'rondas' &&
@@ -89,46 +104,62 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
           const turnos = ordenDeJuego(partidosDeLaRonda, canchas);
           const partidoPorId = new Map(partidosDeLaRonda.map((p) => [p.id, p]));
           const maxTanda = turnos.length > 0 ? turnos[turnos.length - 1].tanda : 0;
+          const tandas = [...new Set(turnos.map((t) => t.tanda))];
           return (
-            <div key={r} className="carta" style={{ marginTop: 12 }}>
-              <div className="grupo-titulo"><h3>Ronda {r}</h3></div>
-              {turnos.map((turno, i) => (
-                <div key={turno.partidoId}>
-                  {maxTanda > 1 && (i === 0 || turnos[i - 1].tanda !== turno.tanda) && (
-                    <div className="tanda-titulo">Tanda {turno.tanda}</div>
-                  )}
-                  <FilaPartido
-                    torneo={torneo}
-                    partido={partidoPorId.get(turno.partidoId)!}
-                    onCargar={cargarResultado}
-                    conGrupo
-                    cancha={turno.cancha}
-                  />
-                </div>
-              ))}
+            <div key={r} className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 sm:p-4">
+              <h3 className="mb-3 font-display text-base font-bold uppercase tracking-wide text-navy-700">Ronda {r}</h3>
+              <div className="space-y-4">
+                {tandas.map((tanda) => (
+                  <div key={tanda}>
+                    {maxTanda > 1 && (
+                      <p className="mb-2 font-display text-[12px] font-bold uppercase tracking-[0.15em] text-gray-600">Tanda {tanda}</p>
+                    )}
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {turnos.filter((t) => t.tanda === tanda).map((turno) => (
+                        <FilaPartido
+                          key={turno.partidoId}
+                          torneo={torneo}
+                          partido={partidoPorId.get(turno.partidoId)!}
+                          onCargar={cargarResultado}
+                          conGrupo
+                          cancha={turno.cancha}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })}
 
       {vista === 'grupos' &&
         torneo.grupos.map((g) => (
-          <div key={g.id} className="carta" style={{ marginTop: 12 }}>
-            <div className="grupo-titulo"><h3>Grupo {g.nombre}</h3></div>
+          <div key={g.id} className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 sm:p-4">
+            <h3 className="mb-3 font-display text-base font-bold uppercase tracking-wide text-navy-700">Grupo {g.nombre}</h3>
             <TablaGrupo torneo={torneo} grupoId={g.id} />
-            {torneo.partidosGrupo
-              .filter((p) => p.grupoId === g.id)
-              .map((p) => (
-                <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} />
-              ))}
+            <div className="grid gap-2 md:grid-cols-2">
+              {torneo.partidosGrupo
+                .filter((p) => p.grupoId === g.id)
+                .map((p) => (
+                  <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} />
+                ))}
+            </div>
           </div>
         ))}
 
-      <footer className="pie-paso">
-        <button className="boton secundario" onClick={() => actualizar((t) => ({ ...t, fase: 'grupos' }))}>← Grupos</button>
-        <button className="boton" onClick={irALlave}>
-          {torneo.partidosLlave ? 'Ver llave →' : 'Armar llave →'}
-        </button>
-      </footer>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'grupos' }))}>
+            Grupos
+          </Boton>
+        )}
+        derecha={(
+          <Boton onClick={() => void irALlave()} icono={<ArrowRight size={18} />} className="flex-row-reverse">
+            {torneo.partidosLlave ? 'Ver llave' : 'Armar llave'}
+          </Boton>
+        )}
+      />
     </section>
   );
 }
@@ -144,29 +175,24 @@ function FilaPartido({ torneo, partido, onCargar, conGrupo, cancha }: {
   const valido = resultadoValido(partido.puntosA, partido.puntosB);
   const ganaA = valido && (partido.puntosA as number) > (partido.puntosB as number);
   const invalido = partido.puntosA !== null && partido.puntosB !== null && !valido;
+  const encabezado = (cancha !== undefined || (conGrupo && grupo)) ? (
+    <>
+      {cancha !== undefined && <Insignia tono="navy" className="bg-navy-700 text-white ring-0">Cancha {cancha}</Insignia>}
+      {conGrupo && grupo && <Insignia>Grupo {grupo.nombre}</Insignia>}
+    </>
+  ) : undefined;
   return (
-    <div className="fila-partido">
-      {cancha !== undefined && <span className="chip chip-cancha">Cancha {cancha}</span>}
-      {conGrupo && grupo && <span className="chip">Grupo {grupo.nombre}</span>}
-      <span className={`lado ${ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.aId)}</span>
-      <input
-        className="puntos" type="number" min={0} value={partido.puntosA ?? ''}
-        onWheel={(e) => e.currentTarget.blur()}
-        onChange={(e) => onCargar(partido.id, e.target.value === '' ? null : Number(e.target.value), partido.puntosB)}
-      />
-      <span>–</span>
-      <input
-        className="puntos" type="number" min={0} value={partido.puntosB ?? ''}
-        onWheel={(e) => e.currentTarget.blur()}
-        onChange={(e) => onCargar(partido.id, partido.puntosA, e.target.value === '' ? null : Number(e.target.value))}
-      />
-      <span className={`lado der ${valido && !ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.bId)}</span>
-      {invalido && (
-        <span className="chip" style={{ color: 'var(--rojo)' }}>
-          {partido.puntosA === partido.puntosB ? 'empate no vale' : 'resultado no vale'}
-        </span>
-      )}
-    </div>
+    <FilaMarcador
+      nombreA={nombreDe(torneo, partido.aId)}
+      nombreB={nombreDe(torneo, partido.bId)}
+      puntosA={partido.puntosA}
+      puntosB={partido.puntosB}
+      ganador={valido ? (ganaA ? 'A' : 'B') : null}
+      valido={valido}
+      aviso={invalido ? (partido.puntosA === partido.puntosB ? 'Empate: no vale (en pickleball no hay empate).' : 'Resultado que no vale.') : null}
+      encabezado={encabezado}
+      onGuardar={(a, b) => onCargar(partido.id, a, b)}
+    />
   );
 }
 

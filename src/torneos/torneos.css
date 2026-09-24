@@ -15,8 +15,17 @@
   --carta: var(--navy-3);
   --amarillo: rgba(204, 255, 0, 0.1);
 
+  /* Tokens de forma (24/09): el admin (.rk--admin, al final) los pisa con la piel
+     del panel. Acá valen lo mismo que antes, así las páginas públicas y la TV del
+     club no cambian ni un pixel. */
+  --sobre-acento: #001f3f;  /* texto sobre el acento (lima) */
+  --rk-fuente: system-ui, 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
+  --rk-radio: 16px;
+  --rk-curva: ease;
+  --rk-sombra: 0 10px 30px rgba(0, 8, 20, 0.35);
+
   color: var(--texto);
-  font-family: system-ui, 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
+  font-family: var(--rk-fuente);
   font-size: 17px;
   background: var(--navy-2);
   border-radius: 16px;
@@ -32,14 +41,14 @@
 .rk .acciones { display: flex; gap: 8px; align-items: center; }
 .rk .boton {
   background: var(--lima);
-  color: #001f3f;
+  color: var(--sobre-acento);
   border: 0;
   border-radius: 12px;
   padding: 10px 18px;
   font-size: 1rem;
   font-weight: 800;
   cursor: pointer;
-  transition: transform .06s ease, filter .15s ease;
+  transition: transform .06s var(--rk-curva), filter .15s var(--rk-curva);
 }
 .rk .boton:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .rk .boton:active { transform: translateY(0); }
@@ -47,7 +56,7 @@
 .rk .boton.secundario { background: transparent; color: var(--texto); border: 1px solid var(--borde); }
 .rk .boton.secundario:hover { border-color: var(--lima); color: var(--lima); }
 .rk .boton.peligro { background: transparent; color: var(--rojo); border: 1px solid var(--rojo); }
-.rk .carta { background: var(--navy-3); border: 1px solid var(--borde); border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0, 8, 20, 0.35); }
+.rk .carta { background: var(--navy-3); border: 1px solid var(--borde); border-radius: var(--rk-radio); padding: 16px; box-shadow: var(--rk-sombra); }
 .rk .vacio { color: var(--texto-suave); text-align: center; padding: 40px 0; }
 .rk .lista-torneos { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
 .rk .lista-torneos .carta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -55,7 +64,7 @@
 .rk .titulo-torneo span { color: var(--texto-suave); font-size: 0.9rem; }
 .rk .pasos { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
 .rk .paso { padding: 8px 14px; border-radius: 999px; background: transparent; border: 1px solid var(--borde); color: var(--texto-suave); font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.rk .paso.activo { background: var(--lima); border-color: var(--lima); color: #001f3f; }
+.rk .paso.activo { background: var(--lima); border-color: var(--lima); color: var(--sobre-acento); }
 .rk .paso.hecho { color: var(--lima); border-color: var(--lima); }
 .rk button.paso.hecho { cursor: pointer; }
 .rk button.paso.hecho:hover { background: var(--lima-suave); }
@@ -107,9 +116,9 @@
 .rk .oculto-accesible { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .rk label.boton:focus-within { outline: 2px solid var(--lima); outline-offset: 2px; }
 .rk .tanda-titulo { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--lima); opacity: 0.85; margin: 10px 0 2px; }
-.rk .chip-cancha { background: var(--lima); color: #001f3f; font-weight: 800; }
+.rk .chip-cancha { background: var(--lima); color: var(--sobre-acento); font-weight: 800; }
 .rk .partido-llave .slot.slot-cancha { min-height: 0; padding: 2px 10px; justify-content: center; }
-.rk ::selection { background: var(--lima); color: #001f3f; }
+.rk ::selection { background: var(--lima); color: var(--sobre-acento); }
 .rk ::-webkit-scrollbar { width: 10px; height: 10px; }
 .rk ::-webkit-scrollbar-track { background: var(--navy-1); }
 .rk ::-webkit-scrollbar-thumb { background: var(--navy-3); border-radius: 999px; border: 2px solid var(--navy-1); }
@@ -125,6 +134,8 @@
 .rk .modal {
   background: var(--navy-3); border: 1px solid var(--borde); border-radius: 16px;
   box-shadow: 0 20px 60px rgba(0, 8, 20, 0.55); padding: 22px; width: 100%; max-width: 440px;
+  /* Con el teclado del celular abierto el modal no entraba y los botones quedaban afuera. */
+  max-height: 90vh; overflow: auto;
 }
 .rk .modal h3 { margin: 0 0 10px; font-size: 1.2rem; }
 .rk .modal-mensaje { margin: 0 0 6px; color: var(--texto); line-height: 1.5; }
@@ -175,3 +186,127 @@
 @media (max-width: 900px) {
   .rk .envivo-grid { grid-template-columns: 1fr; grid-template-areas: "der" "centro" "izq"; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Gestor dentro del panel admin (.rk.rk--admin) — rediseño 24/09
+   Mismo gestor, piel del panel: fondo claro, primario azul marino, bordes de 1px
+   sin sombras, Lexend/Montserrat. Se usa desde el celular en el torneo y al sol:
+   el lima sobre blanco no se lee, así que acá el "acento" es el azul marino.
+   Todo va con el prefijo .rk.rk--admin: las páginas públicas y la TV del club
+   (Chrome 60) no se enteran. Nada de :has(), color-mix(), nesting ni dvh.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.rk.rk--admin {
+  --navy-1: #f9fafb;        /* fondos hundidos (chips, filas abiertas) */
+  --navy-2: transparent;
+  --navy-3: #ffffff;        /* cartas */
+  --lima: #001f3f;          /* acento = azul marino */
+  --lima-suave: #f0f4ff;    /* navy-50 */
+  --texto: #001f3f;
+  --texto-suave: #4b5563;   /* gray-600: se lee al sol */
+  --borde: #e5e7eb;         /* gray-200 */
+  --rojo: #b91c1c;          /* red-700 */
+  --sobre-acento: #ffffff;
+  --rk-fuente: 'Montserrat', system-ui, sans-serif;
+  --rk-radio: 12px;
+  --rk-curva: cubic-bezier(0.2, 0, 0, 1);
+  --rk-sombra: none;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  font-size: 16px;
+}
+.rk.rk--admin h1 { letter-spacing: -0.02em; }
+.rk.rk--admin h2, .rk.rk--admin h3 { font-family: 'Lexend', system-ui, sans-serif; letter-spacing: 0.02em; }
+.rk.rk--admin .contenedor { max-width: none; padding: 0 0 96px; } /* abajo: aire para la píldora de sincronización */
+.rk.rk--admin .acciones { flex-wrap: wrap; }
+.rk.rk--admin .carta { padding: 16px; }
+.rk.rk--admin .vacio { color: #6b7280; }
+
+/* Botones de clase (quedan en la llave y en algún rincón): iguales al Boton del kit. */
+.rk.rk--admin .boton {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 20px; border-radius: 8px;
+  font-family: 'Lexend', system-ui, sans-serif; font-size: 14px; font-weight: 700;
+  background: #001f3f; color: #fff;
+  transition: background-color .15s var(--rk-curva), border-color .15s var(--rk-curva), transform .15s var(--rk-curva);
+}
+.rk.rk--admin .boton:hover { filter: none; transform: none; background: #001830; }
+.rk.rk--admin .boton:active { transform: scale(0.97); }
+.rk.rk--admin .boton:disabled { opacity: 1; background: #d1d5db; color: #6b7280; transform: none; }
+.rk.rk--admin .boton.secundario { background: #fff; color: #001f3f; border: 1px solid #d1d5db; }
+.rk.rk--admin .boton.secundario:hover { border-color: #001f3f; color: #001f3f; }
+.rk.rk--admin .boton.secundario:disabled { background: #fff; color: #9ca3af; border-color: #e5e7eb; }
+.rk.rk--admin .boton.peligro { background: #fff; color: #b91c1c; border: 1px solid #fca5a5; }
+.rk.rk--admin .boton.peligro:hover { background: #fef2f2; border-color: #b91c1c; }
+
+/* Campos: los del kit (44px, 16px en celular para que iOS no haga zoom, foco azul). */
+.rk.rk--admin input[type='text'], .rk.rk--admin input[type='number'], .rk.rk--admin select, .rk.rk--admin textarea {
+  min-height: 44px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px;
+  background: #fff; color: #001f3f; font-size: 16px;
+}
+.rk.rk--admin textarea { padding: 10px 12px; line-height: 1.5; }
+.rk.rk--admin input[type='text']:focus, .rk.rk--admin input[type='number']:focus, .rk.rk--admin select:focus, .rk.rk--admin textarea:focus {
+  border-color: #001f3f; box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.15);
+}
+.rk.rk--admin input::placeholder, .rk.rk--admin textarea::placeholder { color: #9ca3af; }
+@media (min-width: 640px) {
+  .rk.rk--admin input[type='text'], .rk.rk--admin input[type='number'], .rk.rk--admin select, .rk.rk--admin textarea { font-size: 14px; }
+}
+.rk.rk--admin :focus-visible { outline: 2px solid #001f3f; outline-offset: 2px; }
+
+/* Caja de puntos (fase de grupos y llave): grande, centrada, teclado numérico. */
+.rk.rk--admin input.caja-puntos {
+  width: 56px; min-width: 56px; height: 48px; min-height: 48px; padding: 0 4px;
+  text-align: center; font-family: 'Lexend', system-ui, sans-serif; font-size: 22px; font-weight: 800;
+  font-variant-numeric: tabular-nums; color: #001f3f; background: #fff;
+  border: 1px solid #d1d5db; border-radius: 8px;
+}
+.rk.rk--admin input.caja-puntos:focus { border-color: #001f3f; box-shadow: 0 0 0 3px rgba(0, 31, 63, 0.18); }
+.rk.rk--admin input.caja-puntos.sin-guardar { border-color: #d97706; background: #fffbeb; }
+.rk.rk--admin input.caja-puntos.gana { border-color: #001f3f; border-width: 2px; }
+
+/* Chips, avisos y tablas que quedan en clases. */
+.rk.rk--admin .chip { background: #f3f4f6; border-color: transparent; color: #374151; font-size: 12px; font-weight: 600; border-radius: 6px; padding: 2px 8px; }
+.rk.rk--admin .chip-cancha { background: #001f3f; color: #fff; font-weight: 700; }
+.rk.rk--admin .aviso { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; border-radius: 8px; }
+.rk.rk--admin th { background: #f9fafb; color: #4b5563; font-size: 12px; font-family: 'Lexend', system-ui, sans-serif; }
+.rk.rk--admin .tabla-scroll { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; }
+.rk.rk--admin table { border-radius: 0; }
+.rk.rk--admin td { color: #374151; font-variant-numeric: tabular-nums; }
+.rk.rk--admin td.nombre { color: #001f3f; }
+.rk.rk--admin tbody tr:last-child td { border-bottom: 0; }
+.rk.rk--admin tr[style*="cursor"]:hover td { background: #f9fafb; }
+@media (max-width: 640px) {
+  .rk.rk--admin th, .rk.rk--admin td { padding: 10px 8px; }
+}
+
+/* Llave del admin: mismas clases que la pública, más aire para el dedo y colores del panel. */
+.rk.rk--admin .ronda-llave { min-width: 240px; }
+.rk.rk--admin .ronda-llave h3 { color: #4b5563; font-size: 12px; letter-spacing: 0.12em; }
+.rk.rk--admin .partido-llave { border-radius: 10px; font-size: 15px; }
+.rk.rk--admin .partido-llave .slot { min-height: 56px; padding: 4px 6px 4px 12px; }
+.rk.rk--admin .partido-llave .slot.slot-cancha { min-height: 0; padding: 6px 12px; justify-content: flex-start; background: #f9fafb; }
+.rk.rk--admin .partido-llave .slot.ganador { background: #f0f4ff; color: #001f3f; }
+.rk.rk--admin .partido-llave .chip { font-size: 11px; padding: 1px 6px; }
+.rk.rk--admin .partido-llave .slot.slot-guardar { min-height: 0; padding: 6px; background: #fffbeb; }
+
+/* Campeón: sin brillo lima; borde azul marino y nada más. */
+.rk.rk--admin .campeon { border-color: #001f3f; box-shadow: none; background: #fff; }
+.rk.rk--admin .campeon h2 { font-size: 2rem; }
+@media (max-width: 640px) {
+  .rk.rk--admin .campeon h2 { font-size: 1.5rem; }
+}
+
+/* Barra de pasos del asistente: activo lleno en azul marino, hechos con borde. */
+.rk.rk--admin .paso { font-family: 'Lexend', system-ui, sans-serif; }
+.rk.rk--admin .paso.activo { background: #001f3f; border-color: #001f3f; color: #fff; }
+.rk.rk--admin .paso.hecho { color: #001f3f; border-color: #001f3f; }
+.rk.rk--admin ::selection { background: #b8c9ff; color: #001f3f; }
+/* Scrollbar de la llave: con las cartas blancas el pulgar oscuro-sobre-oscuro quedaba invisible. */
+.rk.rk--admin ::-webkit-scrollbar-track { background: #f3f4f6; }
+.rk.rk--admin ::-webkit-scrollbar-thumb { background: #cbd5e1; border-color: #f3f4f6; }
+.rk.rk--admin ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+/* Parche del Interruptor del kit: la bolita es `absolute` sin `left` y Chrome la ubica
+   en el centro del botón (layout de <button>), así que prendido quedaba afuera. Sacarlo
+   cuando src/admin/ui/Campo.tsx le ponga left-0 a la bolita. */
+.rk.rk--admin button[role='switch'] > span { left: 0; }
