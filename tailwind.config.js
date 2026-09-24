@@ -9,6 +9,9 @@
 // src/utils/tailwindClases.test.ts.
 export default {
   // Los tests no se renderizan: sin el '!' sus clases de ejemplo inflaban el CSS de producción.
+  // Los hover: de Tailwind solo en dispositivos con mouse: en el celular el primer toque
+  // dejaba el hover "pegado" (tarjetas agrandadas, botones cambiados de color).
+  future: { hoverOnlyWhenSupported: true },
   content: ['./index.html', './src/**/*.{ts,tsx}', '!./src/**/*.test.{ts,tsx}'],
   theme: {
     extend: {

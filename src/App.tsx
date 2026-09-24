@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { BrowserRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { LazyMotion, MotionConfig, m, useScroll, useTransform } from 'framer-motion';
 import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
+import { EncabezadoSeccion } from './ui/EncabezadoSeccion';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -218,14 +219,14 @@ function usePageMeta({ title, description, image }: PageMeta) {
   }, [title, description, image]);
 }
 
-// Page transition wrapper — fades + subtle slide
+// Cambio de página: solo un fundido corto (≤250 ms). El leve ascenso ya lo pone el
+// .fade-in de cada página; sumarle otro desplazamiento acá lo hacía sentir lento.
 function PageTransition({ children }: { children: React.ReactNode }) {
   return (
     <m.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
     >
       {children}
     </m.div>
@@ -784,10 +785,38 @@ function TopBar() {
 
 // ─── 5. Navbar ───────────────────────────────────────────────────────────────
 
+/**
+ * true = el header tiene que esconderse: se bajó más de 160px y el último movimiento
+ * fue hacia abajo. Subir apenas un poco lo devuelve (así lo hacen las tiendas grandes:
+ * más pantalla para la ropa sin perder el menú). Umbral de 8px para que el temblor del
+ * dedo no lo haga parpadear.
+ */
+function useHeaderEscondido(bloqueado: boolean) {
+  const [escondido, setEscondido] = useState(false);
+  useEffect(() => {
+    if (bloqueado) { setEscondido(false); return; }
+    let ultimo = window.scrollY;
+    let pendiente = false;
+    const medir = () => {
+      pendiente = false;
+      const y = window.scrollY;
+      if (y < 160) setEscondido(false);
+      else if (y - ultimo > 8) setEscondido(true);
+      else if (ultimo - y > 8) setEscondido(false);
+      if (Math.abs(y - ultimo) > 8 || y < 160) ultimo = y;
+    };
+    const onScroll = () => { if (!pendiente) { pendiente = true; requestAnimationFrame(medir); } };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [bloqueado]);
+  return escondido;
+}
+
 function Navbar() {
-  const { cart, setCartOpen } = useStore();
+  const { cart, setCartOpen, cartOpen } = useStore();
   const [mobileOpen, setMobileOpen] = useState(false);
   const totalItems = cart.reduce((s, i) => s + i.quantity, 0);
+  const escondido = useHeaderEscondido(mobileOpen || cartOpen);
 
   const navLinks = [
     { to: '/', label: 'Inicio' },
@@ -807,7 +836,7 @@ function Navbar() {
   ];
 
   return (
-    <nav className="sticky top-0 z-50 bg-navy-700 shadow-lg">
+    <nav className={`barra-nav sticky top-0 z-50 bg-navy-700 shadow-lg ${escondido ? 'escondida' : ''}`}>
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
         {/* Logo */}
         <Link to="/" className="flex-shrink-0">
@@ -845,7 +874,7 @@ function Navbar() {
           >
             <ShoppingCart size={24} />
             {totalItems > 0 && (
-              <span className="absolute top-0.5 right-0.5 bg-lime-400 text-navy-700 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              <span key={totalItems} className="carrito-salto absolute top-0.5 right-0.5 bg-lime-400 text-navy-700 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                 {totalItems}
               </span>
             )}
@@ -1030,14 +1059,23 @@ function CartDrawer() {
 
 // ─── Helper: ProductCard ─────────────────────────────────────────────────────
 
+// La 2ª foto al pasar el mouse solo existe donde hay mouse: en el celular sería bajar
+// el doble de fotos por tarjeta para un efecto que nadie ve.
+const CON_HOVER = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
 function ProductCard({ product }: { product: Product }) {
   const { categories } = useStore();
   const { activa: promo } = usePromo();
   const totalStock = getTotalStock(product);
   const isNew = (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
+  const segunda = CON_HOVER ? product.images[1] : undefined;
+  const colores = product.colors.filter(c => c.hex);
   return (
-    <Link to={`/producto/${product.id}`} className="product-card group block bg-white rounded-2xl overflow-hidden shadow-md border border-gray-100">
-      <div className="relative aspect-square bg-gray-100 overflow-hidden">
+    // Rediseño 24/09: sin caja, borde ni sombra que salta (se veía a plantilla). La foto
+    // manda: 4:5 como la ficha (la ropa es vertical), fondo neutro y un zoom corto.
+    <Link to={`/producto/${product.id}`} className="product-card group block rounded-xl">
+      <div className="relative aspect-[4/5] overflow-hidden rounded-xl bg-gray-100">
         <img
           src={product.images[0] ? urlImagen(product.images[0], 640) : FALLBACK_IMG}
           srcSet={product.images[0] ? srcsetImagen(product.images[0], 960) : undefined}
@@ -1045,61 +1083,72 @@ function ProductCard({ product }: { product: Product }) {
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className="card-img w-full h-full object-cover"
+          className="card-img absolute inset-0 h-full w-full object-cover"
           onError={errorFoto(product.images[0])}
         />
-        {/* Hover overlay (solo con mouse: en el celular el toque ya abre la ficha) */}
-        <div className="card-overlay absolute inset-0 bg-navy-700/60 hidden sm:flex items-center justify-center z-10">
-          <span className="bg-lime-400 text-navy-700 font-display font-bold text-sm px-6 py-2 rounded-full flex items-center gap-2">
-            <Eye size={16} /> Ver producto
-          </span>
-        </div>
-        {/* Badges */}
+        {segunda && (
+          <img
+            src={urlImagen(segunda, 640)}
+            srcSet={srcsetImagen(segunda, 960)}
+            sizes="(min-width: 1024px) 25vw, 33vw"
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="card-img card-img-2 absolute inset-0 h-full w-full object-cover"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        )}
         {totalStock === 0 && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
-            <span className="bg-red-600 text-white text-xs sm:text-sm font-display font-bold px-3 py-1.5 sm:px-4 sm:py-2 rounded-full tracking-wider">AGOTADO</span>
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/55">
+            <span className="rounded-md bg-navy-700 px-3 py-1.5 font-display text-[11px] font-bold uppercase tracking-[0.15em] text-white">Agotado</span>
           </div>
         )}
-        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex flex-col items-start gap-1 z-10">
+        <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1 sm:left-3 sm:top-3">
           {promo && (
-            <span className="bg-navy-900 text-lime-400 text-xs font-black px-2 py-1 rounded-full">−{promo.percent}%</span>
+            <span className="rounded-md bg-navy-900 px-2 py-1 font-display text-[11px] font-black text-lime-400">−{promo.percent}%</span>
           )}
           {product.isOffer && !promo && (
-            <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">OFERTA</span>
+            <span className="rounded-md bg-red-600 px-2 py-1 font-display text-[11px] font-bold uppercase tracking-wider text-white">Oferta</span>
           )}
           {isNew && totalStock > 0 && (
-            <span className="bg-lime-400 text-navy-700 text-xs font-bold px-2 py-1 rounded-full">NUEVO</span>
+            <span className="rounded-md bg-lime-400 px-2 py-1 font-display text-[11px] font-bold uppercase tracking-wider text-navy-900">Nuevo</span>
           )}
         </div>
-        {/* En 2 columnas de celular la etiqueta de categoría tapaba media foto: solo desde sm. */}
-        <span className="absolute top-3 right-3 hidden sm:inline bg-navy-700/80 text-white text-xs px-2 py-1 rounded-full z-10">{categoryLabel(categories, product.category)}</span>
+        {/* "Ver producto" que sube desde abajo (solo con mouse; en el celular el toque abre la ficha). */}
+        <span className="card-cta absolute inset-x-3 bottom-3 z-10 hidden items-center justify-center gap-2 rounded-lg bg-white/95 py-2.5 font-display text-sm font-bold text-navy-700 shadow-sm sm:flex">
+          Ver producto <ArrowRight size={15} />
+        </span>
       </div>
-      <div className="p-3 sm:p-4">
-        <h3 className="font-display font-semibold text-sm sm:text-base text-navy-700 group-hover:text-lime-600 transition-colors line-clamp-2">{product.name}</h3>
-        <div className="mt-1 sm:mt-2 flex flex-wrap items-baseline gap-x-2">
+      <div className="px-0.5 pt-3">
+        <p className="hidden text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-500 sm:block">{categoryLabel(categories, product.category)}</p>
+        <h3 className="mt-0.5 line-clamp-2 font-display text-sm font-semibold leading-snug text-navy-700 sm:text-[15px]">{product.name}</h3>
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
           {/* Con promo vigente: precio descontado (el que se cobra de verdad) y el de
               lista tachado. La oferta previa del producto no se muestra a la vez para
               no apilar tres números. */}
           {promo ? (
             <>
-              <span className="font-display font-bold text-base sm:text-lg text-navy-700">{formatPrice(precioConPromo(product.price, promo.percent))}</span>
-              <span className="text-xs sm:text-sm text-gray-400 line-through">{formatPrice(product.price)}</span>
+              <span className="font-display text-sm font-bold text-navy-700 sm:text-base">{formatPrice(precioConPromo(product.price, promo.percent))}</span>
+              <span className="text-xs text-gray-400 line-through sm:text-sm">{formatPrice(product.price)}</span>
             </>
           ) : (
             <>
-              <span className="font-display font-bold text-base sm:text-lg text-navy-700">{formatPrice(product.price)}</span>
+              <span className="font-display text-sm font-bold text-navy-700 sm:text-base">{formatPrice(product.price)}</span>
               {product.isOffer && product.originalPrice && (
-                <span className="text-xs sm:text-sm text-gray-400 line-through">{formatPrice(product.originalPrice)}</span>
+                <span className="text-xs text-gray-400 line-through sm:text-sm">{formatPrice(product.originalPrice)}</span>
               )}
             </>
           )}
         </div>
-        <div className="mt-3 hidden sm:flex items-center justify-between">
-          {/* lime-800, no 500/600: sobre blanco esos tonos no llegan ni a 3:1 (ilegible al sol) */}
-          <span className="text-lime-800 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
-            Ver producto <ArrowRight size={14} />
-          </span>
-        </div>
+        {/* Colores disponibles como puntitos: se decide desde la grilla sin abrir la ficha. */}
+        {colores.length > 1 && (
+          <div className="mt-2 flex items-center gap-1.5" aria-label={`${colores.length} colores`}>
+            {colores.slice(0, 5).map(c => (
+              <span key={c.name} title={c.name} className="h-3 w-3 rounded-full ring-1 ring-black/10" style={{ backgroundColor: c.hex }} />
+            ))}
+            {colores.length > 5 && <span className="text-[11px] text-gray-500">+{colores.length - 5}</span>}
+          </div>
+        )}
       </div>
     </Link>
   );
@@ -1396,7 +1445,9 @@ function HomePage() {
       {torneoDestacado?.imageUrl && <FlyerTorneo evento={torneoDestacado} wa={waTorneo} />}
 
       {/* ── 1. Hero ─────────────────────────────────────────────────────── */}
-      <section className="relative min-h-screen flex items-center overflow-hidden">
+      {/* 80vh en celular (no pantalla entera): así asoma la franja de abajo y se entiende
+          que hay más para ver sin necesidad del viejo cartelito "Deslizá". */}
+      <section className="relative flex min-h-[80vh] items-center overflow-hidden md:min-h-[92vh]">
         <m.div
           aria-hidden
           className="absolute inset-0 -top-20 -bottom-20"
@@ -1407,52 +1458,52 @@ function HomePage() {
             backgroundPosition: 'center',
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-navy-900/95 via-navy-800/85 to-navy-700/70" />
-        <div
-          className="absolute inset-0 opacity-5"
-          style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '40px 40px' }}
-        />
+        <div className="absolute inset-0 bg-gradient-to-br from-navy-900/95 via-navy-800/80 to-navy-700/50" />
+        <div aria-hidden className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-navy-900/90 to-transparent" />
 
-        <m.div style={{ y: heroTextY }} className="relative z-10 max-w-7xl mx-auto px-4 py-24 w-full">
-          <div className="max-w-3xl">
-            <p className="hero-enter hero-enter-1 opacity-0 text-lime-400 font-display font-bold text-sm md:text-base uppercase tracking-[0.3em] mb-6">
+        <m.div style={{ y: heroTextY }} className="relative z-10 mx-auto w-full max-w-7xl px-4 py-20 md:py-24">
+          <div className="max-w-4xl">
+            <p className="hero-enter hero-enter-1 mb-5 inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400 opacity-0 md:mb-6 md:text-sm">
+              <span aria-hidden className="h-px w-8 bg-lime-400" />
               La primera marca de pickleball de Uruguay
             </p>
-            <h1 className="hero-enter hero-enter-2 opacity-0 font-display text-5xl md:text-6xl lg:text-7xl font-black leading-[1.05] mb-6 text-white">
-              EL <span className="text-gradient">PICKLEBALL</span> URUGUAYO YA TIENE SU MARCA
+            {/* Lime liso, sin el brillo que corría en loop: lo quieto se lee más caro. */}
+            <h1 className="hero-enter hero-enter-2 mb-6 font-display text-[44px] font-black uppercase leading-[0.92] tracking-tight text-white opacity-0 sm:text-6xl lg:text-[88px]">
+              El <span className="text-lime-400">pickleball</span> uruguayo ya tiene su marca
             </h1>
-            <p className="hero-enter hero-enter-3 opacity-0 text-lg md:text-xl text-gray-300 mb-10 font-body max-w-xl leading-relaxed">
+            <p className="hero-enter hero-enter-3 mb-9 max-w-xl font-body text-base leading-relaxed text-white/75 opacity-0 md:mb-10 md:text-xl">
               Indumentaria técnica pensada acá, para los que juegan acá. Evolucionamos distinto. Jugamos distinto.
             </p>
-            <div className="hero-enter hero-enter-4 opacity-0 flex flex-col sm:flex-row gap-4">
+            <div className="hero-enter hero-enter-4 flex flex-col gap-3 opacity-0 sm:flex-row sm:gap-4">
               <Link
                 to="/tienda"
-                className="pulse-glow inline-flex items-center justify-center gap-2 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-4 px-10 rounded-lg text-lg transition-colors"
+                className="group inline-flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-9 py-4 font-display text-base font-bold text-navy-900 transition-[background-color,transform] duration-200 hover:bg-lime-300 active:scale-[0.97] md:text-lg"
               >
-                Ver la colección <ArrowRight size={20} />
+                Ver la colección <ArrowRight size={20} className="transition-transform duration-300 group-hover:translate-x-1" />
               </Link>
               <Link
-                to="/ranking"
-                className="inline-flex items-center justify-center gap-2 border-2 border-white/30 hover:border-lime-400 text-white hover:text-lime-400 font-display font-bold py-4 px-10 rounded-lg text-lg transition-colors"
+                to="/torneos"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/30 px-9 py-4 font-display text-base font-bold text-white transition-[border-color,color,transform] duration-200 hover:border-lime-400 hover:text-lime-400 active:scale-[0.97] md:text-lg"
               >
-                <Trophy size={20} /> Ranking VOLEA
+                <Trophy size={20} /> Torneos y ranking
               </Link>
             </div>
           </div>
 
-          {/* Mini-stats */}
-          <div className="mt-16 grid grid-cols-3 gap-6 max-w-lg">
+          {/* Antes: "10+ clubes · 32 canchas", números que nadie podía confirmar. Ahora
+              tres cosas ciertas de la marca; los números de verdad (jugadores, torneos)
+              están en la sección de torneos, calculados de los resultados. */}
+          <ul className="hero-enter hero-enter-4 mt-12 flex flex-col gap-3 text-sm text-white/70 opacity-0 sm:flex-row sm:flex-wrap sm:gap-x-8 md:mt-16">
             {[
-              { num: '10+', label: 'Clubes' },
-              { num: '32', label: 'Canchas' },
-              { num: '100%', label: 'Uruguay' },
-            ].map((stat, i) => (
-              <div key={i} className="text-center">
-                <p className="font-display text-3xl md:text-4xl font-black text-lime-400">{stat.num}</p>
-                <p className="text-gray-400 text-sm font-body mt-1">{stat.label}</p>
-              </div>
+              { icon: <MapPin size={16} />, texto: 'Diseñada en Uruguay' },
+              { icon: <Truck size={16} />, texto: 'Envíos a todo el país' },
+              { icon: <CreditCard size={16} />, texto: 'Pagás online o por WhatsApp' },
+            ].map((item) => (
+              <li key={item.texto} className="flex items-center gap-2">
+                <span className="text-lime-400">{item.icon}</span> {item.texto}
+              </li>
             ))}
-          </div>
+          </ul>
 
           {/* ── Cartel neón del torneo ─────────────────────────────────────
               Vive DENTRO de este contenedor (y no suelto en la <section>) a
@@ -1539,14 +1590,30 @@ function HomePage() {
           )}
         </m.div>
 
-        {/* Scroll indicator */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/50">
-          <span className="text-xs font-body tracking-widest uppercase">Deslizá</span>
-          <div className="w-5 h-8 border-2 border-white/30 rounded-full flex justify-center pt-1">
-            <div className="w-1 h-2 bg-lime-400 rounded-full animate-bounce" />
-          </div>
-        </div>
       </section>
+
+      {/* ── 1'. Franja de marca ─────────────────────────────────────────────
+          Cinta lima que corre (el recurso de las marcas deportivas para cortar el
+          hero del catálogo con energía). Decorativa: aria-hidden, y quieta para
+          quien pidió menos movimiento (.marquee en index.html). */}
+      <div aria-hidden className="overflow-hidden border-y border-navy-900 bg-lime-400 py-3 md:py-4">
+        <div className="marquee flex w-max whitespace-nowrap" style={{ animationDuration: '40s' }}>
+          {[0, 1].map((vuelta) => (
+            <div key={vuelta} className="flex shrink-0 items-center">
+              {['VOLEA', 'Pickleball uruguayo', 'Indumentaria técnica', 'Torneos', 'Ranking', 'Comunidad'].map((txt) => (
+                <span key={txt} className="flex items-center font-display text-sm font-black uppercase tracking-[0.12em] text-navy-900 md:text-base">
+                  <span className="px-5 md:px-7">{txt}</span>
+                  <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 md:h-4 md:w-4" fill="currentColor">
+                    <circle cx="10" cy="10" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+                    <circle cx="7" cy="7" r="1.6" /><circle cx="13" cy="7" r="1.6" /><circle cx="10" cy="10" r="1.6" />
+                    <circle cx="7" cy="13" r="1.6" /><circle cx="13" cy="13" r="1.6" />
+                  </svg>
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── 1a. Promo ───────────────────────────────────────────────────────
           Pegada al hero, ANTES del torneo: es una ventana de venta con fecha de
@@ -1667,82 +1734,35 @@ function HomePage() {
           grilla vacía debajo — lo primero que ve alguien que entra con mala red, y parece
           rota. Si todavía no hay nada que destacar, no se dibuja. */}
       {(featured.length > 0 || datosListos) && (
-      <section className="py-14 md:py-20 bg-gradient-to-b from-white to-gray-50">
+      <section className="bg-white py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
-          <Reveal>
-            <div className="text-center mb-8 md:mb-12">
-              <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">La selección de la casa</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Destacados de la colección</h2>
-              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-            </div>
-          </Reveal>
-          <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+          <EncabezadoSeccion
+            eyebrow="La selección de la casa"
+            titulo="Destacados"
+            link={{ to: '/tienda', texto: 'Ver toda la tienda' }}
+          />
+          <StaggerGrid className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-4">
             {featured.map(p => (
               <StaggerItem key={p.id}>
                 <ProductCard product={p} />
               </StaggerItem>
             ))}
           </StaggerGrid>
-          <Reveal>
-            <div className="text-center mt-10">
-              <Link
-                to="/tienda"
-                className="inline-flex items-center gap-2 border-2 border-navy-700 text-navy-700 hover:bg-navy-700 hover:text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
-              >
-                Ver toda la colección <ArrowRight size={18} />
-              </Link>
-            </div>
-          </Reveal>
+          {/* En celular el "Ver toda la tienda" de arriba quedó varias pantallas atrás. */}
+          <Link
+            to="/tienda"
+            className="mt-10 flex items-center justify-center gap-2 rounded-lg border border-navy-700 py-3.5 font-display font-bold text-navy-700 transition-transform active:scale-[0.97] md:hidden"
+          >
+            Ver toda la tienda <ArrowRight size={18} />
+          </Link>
         </div>
       </section>
       )}
 
-      {/* ── 3. Cómo comprar (después de los productos: quien entra quiere ver ropa, no el
-          instructivo; en celular son tres renglones, no tres tarjetas de pantalla entera) ─────────────────────────────────────────────── */}
-      <section className="bg-navy-700 py-12 md:py-16">
-        <div className="max-w-7xl mx-auto px-4">
-          <Reveal>
-            <div className="text-center mb-8 md:mb-10">
-              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Así de simple</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">Cómo comprar en VOLEA</h2>
-            </div>
-          </Reveal>
-          <StaggerGrid className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 max-w-5xl mx-auto">
-            {steps.map((step, i) => (
-              <StaggerItem key={i}>
-                <div className="relative flex items-start gap-4 md:block bg-navy-800/60 border border-navy-600 rounded-2xl p-5 md:p-8 h-full">
-                  <span className="absolute top-6 right-6 hidden md:block font-display font-black text-5xl text-navy-600 select-none">
-                    {i + 1}
-                  </span>
-                  <div className="w-11 h-11 md:w-12 md:h-12 shrink-0 bg-lime-400 rounded-xl flex items-center justify-center text-navy-700 md:mb-5">
-                    {step.icon}
-                  </div>
-                  <div>
-                    <h3 className="font-display font-bold text-white text-base md:text-lg mb-1 md:mb-2"><span className="md:hidden">{i + 1}. </span>{step.title}</h3>
-                    <p className="text-gray-400 text-sm leading-relaxed">{step.desc}</p>
-                  </div>
-                </div>
-              </StaggerItem>
-            ))}
-          </StaggerGrid>
-          <Reveal delay={150}>
-            <p className="text-center text-gray-400 text-sm mt-8">
-              Pagá online con Mercado Pago o coordiná pago y entrega por WhatsApp — transferencia o efectivo, como prefieras.
-            </p>
-          </Reveal>
-        </div>
-      </section>
-
       {/* ── 4. Categorías ───────────────────────────────────────────────── */}
-      <section className="bg-gray-50 py-14 md:py-20">
+      <section className="bg-gray-50 py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
-          <Reveal>
-            <div className="text-center mb-8 md:mb-12">
-              <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">Encontrá lo tuyo</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Explorá por categoría</h2>
-              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-            </div>
-          </Reveal>
+          <EncabezadoSeccion eyebrow="Encontrá lo tuyo" titulo="Explorá por categoría" />
           {/* Foto real de cada categoría (antes: íconos genéricos, cinco cajitas iguales).
               En celular, una fila que se desliza en vez de seis filas de tarjetas. */}
           <Reveal>
@@ -1753,7 +1773,7 @@ function HomePage() {
                   <Link
                     key={cat.id}
                     to={`/tienda?category=${encodeURIComponent(cat.id)}`}
-                    className="group relative block aspect-[4/5] w-36 shrink-0 snap-start overflow-hidden rounded-xl bg-navy-700 shadow-md ring-1 ring-gray-100 transition-shadow hover:shadow-lg hover:ring-lime-400 md:w-auto"
+                    className="group relative block aspect-[4/5] w-36 shrink-0 snap-start overflow-hidden rounded-xl bg-navy-700 md:w-auto"
                   >
                     {foto ? (
                       <img
@@ -1763,7 +1783,7 @@ function HomePage() {
                         alt=""
                         loading="lazy"
                         decoding="async"
-                        className="h-full w-full bg-white object-cover transition-transform duration-500 group-hover:scale-105"
+                        className="h-full w-full bg-white object-cover transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.05]"
                         onError={errorFoto(foto)}
                       />
                     ) : (
@@ -1771,9 +1791,9 @@ function HomePage() {
                         {categoryIcons[cat.name] || <Package size={32} />}
                       </div>
                     )}
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-navy-900/90 via-navy-900/50 to-transparent p-3 pt-10">
-                      <span className="font-display text-sm font-bold text-white">{cat.name}</span>
-                      <ChevronRight size={16} className="shrink-0 text-lime-400 transition-transform group-hover:translate-x-0.5" />
+                    <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-navy-900/85 via-navy-900/40 to-transparent p-3 pt-12 md:p-4 md:pt-16">
+                      <span className="font-display text-sm font-black uppercase tracking-wide text-white md:text-base">{cat.name}</span>
+                      <ArrowRight size={16} className="mb-0.5 shrink-0 text-lime-400 transition-transform duration-300 group-hover:translate-x-1" />
                     </div>
                   </Link>
                 );
@@ -1783,68 +1803,86 @@ function HomePage() {
         </div>
       </section>
 
+      {/* ── 4b. Torneos (resultados reales, se carga al acercarse) ─────── */}
+      {/* SLOT_TORNEOS */}
+
+      {/* ── 4c. Cómo comprar ───────────────────────────────────────────────
+          Franja clara y corta: después de ver ropa y torneos, tres pasos y listo.
+          En celular son tres renglones, no tres tarjetas de pantalla entera. */}
+      <section className="border-b border-gray-200 bg-white py-14 md:py-20">
+        <div className="mx-auto grid max-w-7xl gap-8 px-4 md:grid-cols-4 md:gap-10">
+          <Reveal>
+            <p className="inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-800">
+              <span aria-hidden className="h-px w-6 bg-lime-400" /> Así de simple
+            </p>
+            <h2 className="mt-3 font-display text-3xl font-black uppercase leading-[0.95] tracking-tight text-navy-700 md:text-4xl">Cómo comprar</h2>
+            <p className="mt-3 text-sm leading-relaxed text-gray-500">
+              Pagás online con Mercado Pago o coordinás pago y entrega por WhatsApp: transferencia o efectivo.
+            </p>
+          </Reveal>
+          <StaggerGrid className="grid gap-6 md:col-span-3 md:grid-cols-3 md:gap-8">
+            {steps.map((step, i) => (
+              <StaggerItem key={i} className="flex gap-4 border-t border-gray-200 pt-5 md:block md:pt-6">
+                <span className="font-display text-4xl font-black leading-none text-navy-700/15 tabular-nums md:text-6xl">
+                  0{i + 1}
+                </span>
+                <div className="md:mt-4">
+                  <h3 className="flex items-center gap-2 font-display text-base font-bold text-navy-700 md:text-lg">
+                    <span className="text-navy-400 [&>svg]:h-5 [&>svg]:w-5">{step.icon}</span>
+                    {step.title}
+                  </h3>
+                  <p className="mt-1 text-sm leading-relaxed text-gray-500">{step.desc}</p>
+                </div>
+              </StaggerItem>
+            ))}
+          </StaggerGrid>
+        </div>
+      </section>
+
       {/* ── 5. Últimas del blog ─────────────────────────────────────────── */}
       {publishedPosts.length > 0 && (
-        <section className="py-20 bg-white">
+        <section className="bg-gray-50 py-16 md:py-24">
           <div className="max-w-7xl mx-auto px-4">
-            <Reveal>
-              <div className="text-center mb-12">
-                <span className="text-lime-800 font-display font-bold text-sm uppercase tracking-[0.2em]">Historias del deporte</span>
-                <h2 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2">Últimas del blog</h2>
-                <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-              </div>
-            </Reveal>
-            <StaggerGrid className={
-              publishedPosts.length === 1 ? 'grid grid-cols-1 gap-6 max-w-md mx-auto'
-                : publishedPosts.length === 2 ? 'grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto'
-                  : 'grid grid-cols-1 md:grid-cols-3 gap-6'
-            }>
+            <EncabezadoSeccion eyebrow="Historias del deporte" titulo="Del blog" link={{ to: '/blog', texto: 'Ver el blog' }} />
+            {/* Con una sola nota, formato editorial (foto grande al lado del texto) en vez de
+                una tarjetita sola en el medio de la pantalla. */}
+            <StaggerGrid className={publishedPosts.length === 1 ? 'grid gap-6' : publishedPosts.length === 2 ? 'grid gap-8 md:grid-cols-2' : 'grid gap-8 md:grid-cols-3'}>
               {publishedPosts.map(post => (
                 <StaggerItem key={post.slug}>
                   <Link
                     to={`/blog/${post.slug}`}
-                    className="hover-scale block bg-white rounded-2xl overflow-hidden shadow-md border border-gray-100 hover:border-lime-400 transition-all h-full"
+                    className={`group grid h-full gap-5 ${publishedPosts.length === 1 ? 'md:grid-cols-2 md:items-center md:gap-10' : ''}`}
                   >
-                    <div className="img-zoom h-48">
+                    <div className="aspect-[16/10] overflow-hidden rounded-xl bg-navy-800">
                       {post.coverUrl ? (
                         <img
                           src={post.coverUrl}
-                          alt={post.title}
+                          alt=""
                           loading="lazy"
                           decoding="async"
-                          className="w-full h-full object-cover"
+                          className="h-full w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.04]"
                           onError={handleImgError}
                         />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-navy-700 to-navy-900 flex items-center justify-center">
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-navy-700 to-navy-900">
                           <Newspaper size={36} className="text-lime-400" />
                         </div>
                       )}
                     </div>
-                    <div className="p-6">
-                      <p className="flex items-center gap-2 text-gray-400 text-xs font-body uppercase tracking-wide mb-3">
+                    <div>
+                      <p className="flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-[0.15em] text-gray-500">
                         <Calendar size={14} /> {formatPostDate(post)}
                       </p>
-                      <h3 className="font-display font-bold text-navy-700 text-lg leading-snug mb-2">{post.title}</h3>
-                      <p className="text-gray-500 text-sm leading-relaxed line-clamp-3">{post.excerpt}</p>
-                      <span className="inline-flex items-center gap-1 text-lime-800 font-display font-bold text-sm mt-4">
-                        Leer más <ChevronRight size={16} />
+                      <h3 className={`mt-3 font-display font-bold leading-snug text-navy-700 transition-colors group-hover:text-navy-500 ${publishedPosts.length === 1 ? 'text-2xl md:text-3xl' : 'text-lg'}`}>{post.title}</h3>
+                      <p className="mt-2 line-clamp-3 max-w-prose text-sm leading-relaxed text-gray-500 md:text-base">{post.excerpt}</p>
+                      <span className="mt-4 inline-flex items-center gap-1.5 font-display text-sm font-bold uppercase tracking-wider text-navy-700">
+                        Leer nota <ArrowRight size={16} className="transition-transform duration-300 group-hover:translate-x-1" />
                       </span>
                     </div>
                   </Link>
                 </StaggerItem>
               ))}
             </StaggerGrid>
-            <Reveal>
-              <div className="text-center mt-10">
-                <Link
-                  to="/blog"
-                  className="inline-flex items-center gap-2 border-2 border-navy-700 text-navy-700 hover:bg-navy-700 hover:text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
-                >
-                  Ver el blog <ArrowRight size={18} />
-                </Link>
-              </div>
-            </Reveal>
           </div>
         </section>
       )}
@@ -1935,94 +1973,89 @@ function HomePage() {
 
       {/* ── 8. Nuestra esencia + Equipo ─────────────────────────────────── */}
       {/* Sin backgroundAttachment: 'fixed': iOS lo ignora y en desktop fuerza repaints en cada scroll. */}
-      <section
-        className="relative py-24 overflow-hidden"
-        style={{
-          backgroundImage: 'url(/products/lifestyle-sunset-2.jpg)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        <div className="absolute inset-0 bg-gradient-to-r from-navy-900/95 via-navy-700/90 to-navy-700/80" />
+      {/* Rediseño 24/09: fondo liso con la palabra VOLEA gigante calada (textura tipográfica)
+          en vez de otra foto del mismo atardecer del hero, y los valores como lista con
+          líneas en vez de tarjetas de vidrio. */}
+      <section className="relative overflow-hidden bg-navy-800 py-16 md:py-28">
+        <p aria-hidden className="pointer-events-none absolute -right-8 top-6 select-none font-display text-[120px] font-black leading-none tracking-tighter text-white/[0.035] md:text-[260px]">
+          VOLEA
+        </p>
         <div className="relative z-10 max-w-7xl mx-auto px-4">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <Reveal>
-              <div>
-                <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Nuestra esencia</span>
-                <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2 mb-6">
-                  Hecha para el <span className="text-gradient">pickleball</span>, hecha en Uruguay
-                </h2>
-                <p className="text-gray-300 mb-10 leading-relaxed text-lg">
-                  VOLEA nació en la cancha, entre partidos y mates. Somos la primera marca de indumentaria de pickleball de Uruguay, y cada prenda está pensada para lo que el juego exige: comodidad, rendimiento y un estilo que te acompaña también fuera de la cancha.
-                </p>
-                <div className="space-y-5">
-                  {[
-                    { icon: <Shield size={20} />, title: 'Calidad Premium', desc: 'Materiales de alto rendimiento con tecnología Dry-Fit' },
-                    { icon: <Zap size={20} />, title: 'Máximo Rendimiento', desc: 'Diseñado para la comodidad y libertad de movimiento' },
-                    { icon: <Users size={20} />, title: 'Comunidad', desc: 'Parte del crecimiento del pickleball en Uruguay' },
-                  ].map((v, i) => (
-                    <Reveal key={i} delay={i * 150}>
-                      <div className="flex items-start gap-4 bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                        <div className="w-10 h-10 bg-lime-400 rounded-lg flex items-center justify-center text-navy-700 flex-shrink-0">
-                          {v.icon}
-                        </div>
-                        <div>
-                          <h3 className="font-display font-semibold text-white">{v.title}</h3>
-                          <p className="text-gray-400 text-sm">{v.desc}</p>
-                        </div>
-                      </div>
-                    </Reveal>
-                  ))}
-                </div>
-              </div>
-            </Reveal>
-            <Reveal delay={200}>
-              <div className="relative flex justify-center">
+          <div className="grid items-center gap-10 md:grid-cols-2 md:gap-16">
+            <Reveal className="order-2 md:order-1">
+              <div className="relative">
                 <img
                   src="/products/7.jpg"
                   alt="Indumentaria VOLEA"
-                  className="w-full max-w-md rounded-2xl shadow-2xl"
+                  loading="lazy"
+                  decoding="async"
+                  className="aspect-[4/5] w-full rounded-2xl object-cover"
                   onError={handleImgError}
                 />
-                <div className="absolute -bottom-4 -right-4 bg-lime-400 text-navy-700 font-display font-bold py-3 px-6 rounded-xl shadow-lg text-sm">
-                  100% Uruguayo
+                <div className="absolute -bottom-4 right-4 rotate-[-4deg] rounded-lg bg-lime-400 px-5 py-2.5 font-display text-sm font-black uppercase tracking-wide text-navy-900 md:-right-5">
+                  100% uruguayo
                 </div>
               </div>
             </Reveal>
+            <div className="order-1 md:order-2">
+              <Reveal>
+                <p className="inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">
+                  <span aria-hidden className="h-px w-6 bg-lime-400" /> Nuestra esencia
+                </p>
+                <h2 className="mt-3 font-display text-3xl font-black uppercase leading-[0.95] tracking-tight text-white md:text-5xl">
+                  Hecha para el <span className="text-lime-400">pickleball</span>. Hecha en Uruguay.
+                </h2>
+                <p className="mt-6 max-w-prose leading-relaxed text-white/70 md:text-lg">
+                  VOLEA nació en la cancha, entre partidos y mates. Somos la primera marca de indumentaria de pickleball de Uruguay, y cada prenda está pensada para lo que el juego exige: comodidad, rendimiento y un estilo que te acompaña también fuera de la cancha.
+                </p>
+              </Reveal>
+              <StaggerGrid className="mt-8 md:mt-10">
+                {[
+                  { icon: <Shield size={18} />, title: 'Calidad premium', desc: 'Materiales de alto rendimiento con tecnología Dry-Fit.' },
+                  { icon: <Zap size={18} />, title: 'Máximo rendimiento', desc: 'Pensada para moverte cómodo y sin límites.' },
+                  { icon: <Users size={18} />, title: 'Comunidad', desc: 'Torneos, ranking y el crecimiento del pickleball en Uruguay.' },
+                ].map((v) => (
+                  <StaggerItem key={v.title} className="flex items-start gap-4 border-t border-white/10 py-4">
+                    <span className="mt-0.5 text-lime-400">{v.icon}</span>
+                    <div>
+                      <h3 className="font-display font-bold text-white">{v.title}</h3>
+                      <p className="mt-0.5 text-sm text-white/60">{v.desc}</p>
+                    </div>
+                  </StaggerItem>
+                ))}
+              </StaggerGrid>
+            </div>
           </div>
 
           {/* Equipo */}
-          <Reveal>
-            <div className="text-center mt-24 mb-12">
-              <span className="text-lime-400 font-display font-bold text-sm uppercase tracking-[0.2em]">Las caras de la marca</span>
-              <h2 className="font-display text-3xl md:text-4xl font-bold text-white mt-2">El equipo VOLEA</h2>
-              <div className="w-20 h-1 bg-lime-400 mx-auto mt-4" />
-            </div>
-          </Reveal>
-          <StaggerGrid className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 max-w-4xl mx-auto">
-            {[
-              { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador VOLEA' },
-              { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador VOLEA' },
-              { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora VOLEA' },
-            ].map((member, i) => (
-              <StaggerItem key={i}>
-                <div className="group relative rounded-2xl overflow-hidden aspect-[3/4] bg-navy-800">
-                  <img
-                    src={member.src}
-                    alt={member.name}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    onError={handleImgError}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-transparent to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-2 sm:p-4">
-                    <div className="w-6 sm:w-8 h-1 bg-lime-400 mb-1 sm:mb-2" />
-                    <h3 className="font-display font-bold text-white text-xs leading-tight sm:text-base md:text-lg">{member.name}</h3>
-                    <p className="text-gray-300 text-[11px] sm:text-sm">{member.role}</p>
+          <div className="mt-20 md:mt-28">
+            <EncabezadoSeccion tono="oscuro" eyebrow="Las caras de la marca" titulo="El equipo" />
+            <StaggerGrid className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6">
+              {[
+                { src: '/products/team-brian.jpg', name: 'Brian Ridvanovich', role: 'Fundador' },
+                { src: '/products/lifestyle-sunset-front.jpg', name: 'Gastón Moirano', role: 'Fundador' },
+                { src: '/products/team-paula.jpg', name: 'Paula Segura', role: 'Fundadora' },
+              ].map((member) => (
+                <StaggerItem key={member.name}>
+                  <div className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-navy-900">
+                    <img
+                      src={member.src}
+                      alt={member.name}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-[1.04]"
+                      onError={handleImgError}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-navy-900/90 via-navy-900/10 to-transparent" />
+                    <div className="absolute inset-x-0 bottom-0 p-2.5 sm:p-5">
+                      <h3 className="font-display text-xs font-black uppercase leading-tight text-white sm:text-lg md:text-xl">{member.name}</h3>
+                      <p className="mt-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.15em] text-lime-400 sm:text-xs">{member.role}</p>
+                    </div>
                   </div>
-                </div>
-              </StaggerItem>
-            ))}
-          </StaggerGrid>
+                </StaggerItem>
+              ))}
+            </StaggerGrid>
+          </div>
         </div>
       </section>
 
@@ -2087,8 +2120,17 @@ function ShopPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-8 md:py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Nuestra colección</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-6 md:mb-8" />
+      <div className="mb-6 flex items-end justify-between gap-4 md:mb-8">
+        <div>
+          <p className="inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-800">
+            <span aria-hidden className="h-px w-6 bg-lime-400" /> Tienda VOLEA
+          </p>
+          <h1 className="mt-2 font-display text-3xl font-black uppercase leading-[0.95] tracking-tight text-navy-700 md:text-5xl">Nuestra colección</h1>
+        </div>
+        {filtered.length > 0 && (
+          <p className="shrink-0 pb-1 text-sm text-gray-500">{filtered.length} {filtered.length === 1 ? 'producto' : 'productos'}</p>
+        )}
+      </div>
       <PromoBanner compacto />
 
       {/* Filters */}
@@ -2146,11 +2188,18 @@ function ShopPage() {
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
           {!datosListos && products.length === 0 ? (
-            // Los datos siguen viajando (red lenta): decir "no hay" acá sería mentira.
-            <>
-              <Package size={64} strokeWidth={1} className="mx-auto mb-4 animate-pulse" />
-              <p className="font-display text-lg">Cargando la colección…</p>
-            </>
+            // Los datos siguen viajando (red lenta): decir "no hay" acá sería mentira. Esqueleto
+            // con la forma de las tarjetas (no un ícono): la página ya tiene su forma final y
+            // la espera se siente más corta (NN/g, skeleton screens).
+            <div role="status" aria-label="Cargando la colección" className="grid grid-cols-2 gap-x-3 gap-y-8 text-left sm:gap-x-6 sm:gap-y-10 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} aria-hidden>
+                  <div className="aspect-[4/5] rounded-xl bg-gray-100 motion-safe:animate-pulse" />
+                  <div className="mt-3 h-3 w-3/4 rounded bg-gray-100 motion-safe:animate-pulse" />
+                  <div className="mt-2 h-3 w-1/3 rounded bg-gray-100 motion-safe:animate-pulse" />
+                </div>
+              ))}
+            </div>
           ) : (
             <>
               <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
@@ -2159,7 +2208,7 @@ function ShopPage() {
           )}
         </div>
       ) : (
-        <StaggerGrid className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+        <StaggerGrid className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((p) => (
             <StaggerItem key={p.id}>
               <ProductCard product={p} />

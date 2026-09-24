@@ -65,17 +65,22 @@
       ::-webkit-scrollbar { width: 8px; }
       ::-webkit-scrollbar-track { background: #001F3F; }
       ::-webkit-scrollbar-thumb { background: #ccff00; border-radius: 4px; }
-      .fade-in { animation: fadeIn 0.5s ease-in; }
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+      /* Curva única de la web (src/ui/movimiento.ts, EASE_VOLEA): arranca rápido y frena largo.
+         Nada de ease-in en entradas: se siente lento justo al principio, que es cuando se mira. */
+      .fade-in { animation: fadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       .slide-in-right { animation: slideInRight 0.3s ease-out; }
       @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
       .slide-in-left { animation: slideInLeft 0.3s ease-out; }
       @keyframes slideInLeft { from { transform: translateX(-100%); } to { transform: translateX(0); } }
       .hover-scale { transition: transform 0.3s ease, box-shadow 0.3s ease; }
-      .hover-scale:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,31,63,0.15); }
       .img-zoom { overflow: hidden; }
-      .img-zoom img { transition: transform 0.5s ease; }
-      .img-zoom:hover img { transform: scale(1.05); }
+      .img-zoom img { transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+      /* Hovers solo donde hay mouse: en el celular el primer toque "pegaba" el hover. */
+      @media (hover: hover) {
+        .hover-scale:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,31,63,0.15); }
+        .img-zoom:hover img { transform: scale(1.05); }
+      }
 
       /* Scroll reveal */
       .reveal { opacity: 0; transform: translateY(40px); transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -88,13 +93,26 @@
       .gradient-overlay { position: relative; }
       .gradient-overlay::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(0,31,63,0.9) 0%, rgba(0,31,63,0.4) 100%); }
 
-      /* Product card enhanced hover */
-      .product-card { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-      .product-card:hover { transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,31,63,0.2); }
-      .product-card .card-img { transition: transform 0.6s ease; }
-      .product-card:hover .card-img { transform: scale(1.08); }
-      .product-card .card-overlay { opacity: 0; transition: opacity 0.3s ease; }
-      .product-card:hover .card-overlay { opacity: 1; }
+      /* Tarjeta de producto (rediseño 24/09): sin caja ni sombra que salta; la foto hace
+         un zoom corto y, si el producto tiene una segunda foto, se cruza a ella (patrón de
+         las tiendas deportivas grandes; Baymard: la 2ª foto en hover ayuda a decidir). */
+      .product-card .card-img { transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease; }
+      .product-card .card-img-2 { opacity: 0; }
+      .product-card .card-cta { opacity: 0; transform: translateY(8px); transition: opacity 0.25s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+      @media (hover: hover) {
+        .product-card:hover .card-img { transform: scale(1.04); }
+        .product-card:hover .card-img-2 { opacity: 1; }
+        .product-card:hover .card-cta { opacity: 1; transform: translateY(0); }
+      }
+      .product-card:focus-visible .card-cta { opacity: 1; transform: translateY(0); }
+
+      /* El número del carrito salta cuando entra algo (key nueva = animación nueva). */
+      .carrito-salto { animation: carritoSalto 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+      @keyframes carritoSalto { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+
+      /* Header: se esconde al bajar y vuelve al subir (más pantalla para la ropa). */
+      .barra-nav { transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease; }
+      .barra-nav.escondida { transform: translateY(-100%); }
 
       /* Stagger animation */
       .stagger-1 { animation-delay: 0.1s; }
@@ -122,12 +140,14 @@
       @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 
       /* Hero text stagger entrance */
-      .hero-enter { opacity: 0; transform: translateY(30px); animation: heroEnter 0.8s ease-out forwards; }
+      /* Entrada corta a propósito: el título del hero es lo más grande de la primera
+         pantalla (candidato a LCP) y no se cuenta como pintado mientras está invisible. */
+      .hero-enter { opacity: 0; transform: translateY(24px); animation: heroEnter 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       @keyframes heroEnter { to { opacity: 1; transform: translateY(0); } }
-      .hero-enter-1 { animation-delay: 0.1s; }
-      .hero-enter-2 { animation-delay: 0.3s; }
-      .hero-enter-3 { animation-delay: 0.5s; }
-      .hero-enter-4 { animation-delay: 0.7s; }
+      .hero-enter-1 { animation-delay: 0s; }
+      .hero-enter-2 { animation-delay: 0.06s; }
+      .hero-enter-3 { animation-delay: 0.14s; }
+      .hero-enter-4 { animation-delay: 0.22s; }
 
       /* Banner de promo: rayas diagonales que corren + destello que barre.
          Las rayas se trasladan EXACTAMENTE un período horizontal del patrón
@@ -149,11 +169,12 @@
       @media (prefers-reduced-motion: reduce) {
         .promo-cinta, .promo-brillo, .promo-latido, .pulse-glow { animation: none; }
         /* Quien pide menos movimiento (mareos, vestibular) ve todo quieto y ya visible. */
-        .marquee, .text-gradient, .float, .fade-in, .slide-in-right, .slide-in-left { animation: none; }
+        .marquee, .text-gradient, .float, .fade-in, .slide-in-right, .slide-in-left, .carrito-salto { animation: none; }
+        .barra-nav, .product-card .card-cta { transition: none; }
         .hero-enter { animation: none; opacity: 1; transform: none; }
         .reveal { opacity: 1; transform: none; transition: none; }
-        .product-card, .product-card .card-img, .hover-scale, .img-zoom img, .gallery-item img { transition: none; }
-        .product-card:hover, .hover-scale:hover { transform: none; }
+        .product-card .card-img, .hover-scale, .img-zoom img, .gallery-item img { transition: none; }
+        .hover-scale:hover { transform: none; }
         .product-card:hover .card-img, .img-zoom:hover img, .gallery-item:hover img { transform: none; }
         .parallax-bg { background-attachment: scroll; }
       }
@@ -176,9 +197,11 @@
       /* Gallery hover */
       .gallery-item { position: relative; overflow: hidden; }
       .gallery-item img { transition: transform 0.6s ease; }
-      .gallery-item:hover img { transform: scale(1.1); }
       .gallery-item .gallery-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,31,63,0.8) 0%, transparent 60%); opacity: 0; transition: opacity 0.3s ease; }
-      .gallery-item:hover .gallery-overlay { opacity: 1; }
+      @media (hover: hover) {
+        .gallery-item:hover img { transform: scale(1.1); }
+        .gallery-item:hover .gallery-overlay { opacity: 1; }
+      }
     </style>
   </head>
   <body class="bg-white text-navy-700 font-body">
