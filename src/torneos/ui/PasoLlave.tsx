@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft, Check, ChevronDown, ListChecks, Medal, RotateCcw, Shuffle, Trophy } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoLlave, Torneo } from '../engine/tipos';
 import { resultadoValido } from '../engine/tipos';
@@ -11,6 +12,9 @@ import { calcularTabla } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
+import { Boton, Insignia, Interruptor, Segmentado, Tarjeta } from '../../admin/ui';
+import { cn } from '../../lib/cn';
+import { CajaPuntos, Nota, PiePaso, useBorradorMarcador } from './piezas';
 
 export default function PasoLlave({ torneo, actualizar }: PropsPaso) {
   const individual = (torneo.formato ?? 'grupos') === 'individual';
@@ -23,6 +27,19 @@ export default function PasoLlave({ torneo, actualizar }: PropsPaso) {
   }
   if (!torneo.partidosLlave) return <ConfigurarLlave torneo={torneo} actualizar={actualizar} />;
   return <VerLlave torneo={torneo} actualizar={actualizar} />;
+}
+
+/** Lista numerada de nombres (orden de la ronda 1, seeds, clasificados). */
+function ListaOrden({ children }: { children: ReactNode }) {
+  return <ol className="divide-y divide-gray-100 rounded-lg border border-gray-200">{children}</ol>;
+}
+function ItemOrden({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <li className="flex min-h-[44px] items-center gap-3 px-3 py-2">
+      <span className="w-6 shrink-0 text-right text-[13px] font-semibold tabular-nums text-gray-500">{n}</span>
+      <span className="min-w-0 flex-1 text-[15px] text-navy-700">{children}</span>
+    </li>
+  );
 }
 
 function ConfigurarLlaveIndividual({ torneo, actualizar }: PropsPaso) {
@@ -44,38 +61,35 @@ function ConfigurarLlaveIndividual({ torneo, actualizar }: PropsPaso) {
   }
 
   return (
-    <section>
-      <div className="carta">
-        <h2>Armar la llave</h2>
-        <p>Los jugadores se emparejan en el orden de abajo (1 vs 2, 3 vs 4…). Sorteá si querés cambiarlo.</p>
-        <div className="acciones">
-          <button className="boton secundario" onClick={sortear}>🎲 Sortear orden</button>
-          <button className="boton" onClick={armar}>Armar llave 🎯</button>
+    <section className="space-y-4">
+      <Tarjeta titulo="Armar la llave">
+        <p className="text-sm text-gray-600">Los jugadores se emparejan en el orden de abajo (1 vs 2, 3 vs 4…). Sorteá si querés cambiarlo.</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <Boton variante="secundario" icono={<Shuffle size={18} />} onClick={sortear}>Sortear orden</Boton>
+          <Boton icono={<Check size={18} />} onClick={armar}>Armar llave</Boton>
         </div>
-      </div>
+      </Tarjeta>
 
-      <div className="carta" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Así arranca la ronda 1</h3>
-        <ol style={{ margin: 0, paddingLeft: 24, lineHeight: 1.9 }}>
+      <Tarjeta titulo="Así arranca la ronda 1">
+        <ListaOrden>
           {pares.map(([a, b], i) => (
-            <li key={i}>
-              <strong>{nombreDe(torneo, a)}</strong> vs <strong>{nombreDe(torneo, b)}</strong>
-            </li>
+            <ItemOrden key={i} n={i + 1}>
+              <strong className="font-semibold">{nombreDe(torneo, a)}</strong> <span className="text-gray-500">vs</span> <strong className="font-semibold">{nombreDe(torneo, b)}</strong>
+            </ItemOrden>
           ))}
-        </ol>
+        </ListaOrden>
         {zafa && (
-          <p className="aviso" style={{ marginTop: 10 }}>
-            ⚠ {nombreDe(torneo, zafa)} zafa la ronda 1 (número impar) y entra directo a la ronda 2.
-          </p>
+          <Nota className="mt-3">{nombreDe(torneo, zafa)} zafa la ronda 1 (número impar) y entra directo a la ronda 2.</Nota>
         )}
-      </div>
+      </Tarjeta>
 
-      <footer className="pie-paso">
-        <button className="boton secundario" onClick={() => actualizar((t) => ({ ...t, fase: 'parejas' }))}>
-          ← Jugadores
-        </button>
-        <span />
-      </footer>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'parejas' }))}>
+            Jugadores
+          </Boton>
+        )}
+      />
     </section>
   );
 }
@@ -132,46 +146,51 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
   }
 
   return (
-    <section>
-      <div className="carta">
-        <h2>¿Cómo se arma la llave?</h2>
-        <p>Elegí cuántos clasifican. La primera es la recomendada: la llave más justa con estos grupos.</p>
-        <div className="opciones-clasificacion">
-          {opciones.map((o, i) => (
-            <label key={`${o.porGrupo}-${o.mejoresExtra}`} className={`opcion-clasificacion ${elegida === i ? 'elegida' : ''}`}>
-              <input type="radio" name="opcion" checked={elegida === i} onChange={() => elegirOpcion(i)} />
-              <span>
-                {i === 0 && (
-                  <span className="chip" style={{ background: 'var(--lima)', color: '#001f3f' }}>Recomendada</span>
-                )}{' '}
-                {o.descripcion}
-              </span>
-            </label>
-          ))}
+    <section className="space-y-4">
+      <Tarjeta titulo="¿Cómo se arma la llave?">
+        <p className="mb-3 text-sm text-gray-600">Elegí cuántos clasifican. La primera es la recomendada: la llave más justa con estos grupos.</p>
+        <div role="radiogroup" aria-label="Cómo se arma la llave" className="grid gap-2">
+          {opciones.map((o, i) => {
+            const activa = elegida === i;
+            return (
+              <label
+                key={`${o.porGrupo}-${o.mejoresExtra}`}
+                className={cn(
+                  'flex min-h-[52px] cursor-pointer items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors',
+                  activa ? 'border-navy-700 bg-navy-50 ring-1 ring-inset ring-navy-700' : 'border-gray-300 bg-white hover:border-navy-700',
+                )}
+              >
+                <input type="radio" name="opcion" checked={activa} onChange={() => elegirOpcion(i)} className="mt-0.5 h-5 w-5 shrink-0 accent-navy-700" />
+                <span className="min-w-0 text-[15px] text-navy-700">
+                  {i === 0 && <Insignia tono="bien" className="mb-1 mr-1.5">Recomendada</Insignia>}
+                  {o.descripcion}
+                </span>
+              </label>
+            );
+          })}
         </div>
-        <label style={{ display: 'block', marginTop: 8 }}>
-          <input
-            type="checkbox"
-            checked={tercerPuesto && !!opcion && opcion.tamanoLlave >= 4}
+        <div className="mt-3 border-t border-gray-100 pt-1">
+          <Interruptor
+            activo={tercerPuesto && !!opcion && opcion.tamanoLlave >= 4}
             disabled={!opcion || opcion.tamanoLlave < 4}
-            onChange={(e) => setTercerPuesto(e.target.checked)}
-          />{' '}
-          Jugar partido por el 3er puesto
-        </label>
-      </div>
+            alCambiar={setTercerPuesto}
+            etiqueta="Jugar partido por el 3er puesto"
+            descripcion={!opcion || opcion.tamanoLlave < 4 ? 'Solo con llave de 4 o más.' : undefined}
+          />
+        </div>
+      </Tarjeta>
 
       {opcion && clasificados.length > 0 && (
-        <div className="carta" style={{ marginTop: 12 }}>
-          <h3 style={{ marginTop: 0 }}>Así entran (orden de seed)</h3>
-          <ol style={{ margin: 0, paddingLeft: 24, lineHeight: 1.9 }}>
-            {clasificados.map((c) => (
-              <li key={c.parejaId}>
-                <strong>{nombreDe(torneo, c.parejaId)}</strong>{' '}
-                <span className="chip">{c.puesto}º del grupo {c.grupoNombre}</span>
-              </li>
+        <Tarjeta titulo="Así entran (orden de seed)">
+          <ListaOrden>
+            {clasificados.map((c, i) => (
+              <ItemOrden key={c.parejaId} n={i + 1}>
+                <span className="mr-2 font-semibold">{nombreDe(torneo, c.parejaId)}</span>
+                <Insignia>{c.puesto}º del grupo {c.grupoNombre}</Insignia>
+              </ItemOrden>
             ))}
-          </ol>
-        </div>
+          </ListaOrden>
+        </Tarjeta>
       )}
 
       {opcion && opcion.mejoresExtra > 0 && (
@@ -183,19 +202,23 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
         />
       )}
 
-      <footer className="pie-paso">
-        <button className="boton secundario" onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
-          ← Fase de grupos
-        </button>
-        <div className="acciones">
-          {esGrupoUnico && (
-            <button className="boton secundario" onClick={terminarSinLlave}>Terminar sin llave</button>
-          )}
-          <button className="boton" disabled={!opcion || !extrasCompletos} onClick={armar}>
-            {extrasCompletos ? 'Armar llave 🎯' : `Elegí ${opcion?.mejoresExtra ?? 0} para armar`}
-          </button>
-        </div>
-      </footer>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
+            Fase de grupos
+          </Boton>
+        )}
+        derecha={(
+          <>
+            {esGrupoUnico && (
+              <Boton variante="secundario" onClick={() => void terminarSinLlave()}>Terminar sin llave</Boton>
+            )}
+            <Boton disabled={!opcion || !extrasCompletos} onClick={armar} icono={extrasCompletos ? <Check size={18} /> : undefined}>
+              {extrasCompletos ? 'Armar llave' : `Elegí ${opcion?.mejoresExtra ?? 0} para armar`}
+            </Boton>
+          </>
+        )}
+      />
     </section>
   );
 }
@@ -215,8 +238,10 @@ function ComparacionExtras({ torneo, config }: { torneo: Torneo; config: Pick<Co
     corte < candidatos.length &&
     compararMetricas(candidatos[corte - 1].metricas, candidatos[corte].metricas) === 0;
   return (
-    <div className="carta" style={{ marginTop: 12 }}>
-      <h3 style={{ marginTop: 0 }}>¿Qué {puesto}º entra? (mejores {PUESTO_PLURAL[puesto] ?? `${puesto}ºs`})</h3>
+    <div className="mt-4">
+      <h3 className="mb-2 font-display text-sm font-bold uppercase tracking-wide text-navy-700">
+        ¿Qué {puesto}º entra? (mejores {PUESTO_PLURAL[puesto] ?? `${puesto}ºs`})
+      </h3>
       <div className="tabla-scroll">
         <table>
           <thead>
@@ -233,22 +258,18 @@ function ComparacionExtras({ torneo, config }: { torneo: Torneo; config: Pick<Co
                 <td>{c.dif > 0 ? `+${c.dif}` : c.dif}</td>
                 <td>{c.pf}</td>
                 <td>{c.pj > 0 ? `${Math.round((c.pg / c.pj) * 100)}%` : '—'}</td>
-                <td>
-                  {c.entra
-                    ? <span className="chip chip-cancha">ENTRA</span>
-                    : <span className="chip">afuera</span>}
-                </td>
+                <td>{c.entra ? <Insignia tono="bien">Entra</Insignia> : <Insignia>Afuera</Insignia>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {empateEnCorte && (
-        <p className="aviso" style={{ marginTop: 10 }}>
-          ⚠ Empate total entre <strong>{nombreDe(torneo, candidatos[corte - 1].parejaId)}</strong> y{' '}
+        <Nota className="mt-3">
+          Empate total entre <strong>{nombreDe(torneo, candidatos[corte - 1].parejaId)}</strong> y{' '}
           <strong>{nombreDe(torneo, candidatos[corte].parejaId)}</strong> (mismas victorias y mismos puntos):
           entra el del grupo {candidatos[corte - 1].grupoNombre} por orden de grupos (A antes que B).
-        </p>
+        </Nota>
       )}
     </div>
   );
@@ -268,15 +289,21 @@ function SelectorExtras({ torneo, config, elegidos, onToggle }: {
   const hayEmpate = candidatos.some((c, i) => i > 0 && compararMetricas(candidatos[i - 1].metricas, c.metricas) === 0);
   const faltan = config.mejoresExtra - elegidos.length;
   return (
-    <div className="carta" style={{ marginTop: 12 }}>
-      <h3 style={{ marginTop: 0 }}>
-        ¿Qué {puesto}º entra? Elegí {config.mejoresExtra} (mejores {PUESTO_PLURAL[puesto] ?? `${puesto}ºs`})
-      </h3>
+    <Tarjeta
+      titulo={`¿Qué ${puesto}º entra? Elegí ${config.mejoresExtra}`}
+      acciones={(
+        <Insignia tono={faltan === 0 ? 'bien' : 'alerta'}>
+          {elegidos.length} / {config.mejoresExtra}
+          {faltan > 0 && ` · falta${faltan > 1 ? 'n' : ''} ${faltan}`}
+          {faltan < 0 && ` · sacá ${-faltan}`}
+        </Insignia>
+      )}
+    >
+      <p className="mb-3 text-[13px] text-gray-500">Mejores {PUESTO_PLURAL[puesto] ?? `${puesto}ºs`}: tocá la fila para marcar o desmarcar.</p>
       {hayEmpate && (
-        <p className="aviso">
-          ⚠ Hay empatados en el corte. Definilo en la cancha (sorteo, piedra-papel-tijera o partido a 11)
-          y marcá acá quién pasa.
-        </p>
+        <Nota className="mb-3">
+          Hay empatados en el corte. Definilo en la cancha (sorteo, piedra-papel-tijera o partido a 11) y marcá acá quién pasa.
+        </Nota>
       )}
       <div className="tabla-scroll">
         <table>
@@ -296,6 +323,7 @@ function SelectorExtras({ torneo, config, elegidos, onToggle }: {
                       checked={marcado}
                       onChange={() => onToggle(c.parejaId)}
                       aria-label={`Elegir ${nombreDe(torneo, c.parejaId)}`}
+                      className="h-5 w-5 cursor-pointer accent-navy-700"
                     />
                   </td>
                   <td>{c.grupoNombre}</td>
@@ -310,13 +338,23 @@ function SelectorExtras({ torneo, config, elegidos, onToggle }: {
           </tbody>
         </table>
       </div>
-      <p style={{ color: faltan === 0 ? 'var(--lima)' : 'var(--rojo)', marginTop: 8, fontWeight: 700 }}>
-        Elegidos: {elegidos.length} / {config.mejoresExtra}
-        {faltan > 0 && ` — falta${faltan > 1 ? 'n' : ''} ${faltan}`}
-        {faltan < 0 && ` — sacá ${-faltan}`}
-      </p>
-    </div>
+    </Tarjeta>
   );
+}
+
+// Compu: el cuadro entero. Celular: de a una ronda (el cuadro de 4 columnas obligaba a
+// deslizar de costado con el dedo sobre las cajas de puntos). Se puede cambiar a mano.
+const CONSULTA_ANCHO = '(min-width: 768px)';
+function useEsAncho(): boolean {
+  const [ancho, setAncho] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(CONSULTA_ANCHO).matches : true));
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(CONSULTA_ANCHO);
+    const alCambiar = () => setAncho(mq.matches);
+    mq.addEventListener('change', alCambiar);
+    return () => mq.removeEventListener('change', alCambiar);
+  }, []);
+  return ancho;
 }
 
 function VerLlave({ torneo, actualizar }: PropsPaso) {
@@ -327,6 +365,9 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
   const maxRonda = Math.max(...partidos.filter((p) => !p.esTercerPuesto).map((p) => p.ronda));
   const rondas = Array.from({ length: maxRonda }, (_, i) => i + 1);
   const tercero = partidos.find((p) => p.esTercerPuesto);
+  const esAncho = useEsAncho();
+  const [modo, setModo] = useState<'ronda' | 'cuadro' | null>(null);
+  const modoVisible = modo ?? (esAncho ? 'cuadro' : 'ronda');
 
   // Procedencia "2º B" por pareja según la tabla ACTUAL de su grupo (solo formato grupos):
   // explica cada cruce de la ronda 1 y se mantiene coherente con las tablas del paso 3.
@@ -382,68 +423,114 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
     return `Ronda ${r}`;
   }
 
+  // Partidos de una ronda con su etiqueta de cancha/tanda (misma cuenta de antes).
+  function partidosDeRonda(r: number) {
+    const matchesDeLaRonda = partidos
+      .filter((p) => !p.esTercerPuesto && p.ronda === r)
+      .sort((a, b) => a.posicion - b.posicion);
+    const canchas = torneo.canchas ?? 2;
+    const turnos =
+      !individual && matchesDeLaRonda.length >= 2
+        ? ordenDeJuego(matchesDeLaRonda.map((m) => ({ id: m.id, grupoId: '' })), canchas)
+        : [];
+    const turnoPorId = new Map(turnos.map((t) => [t.partidoId, t]));
+    return matchesDeLaRonda.map((p) => {
+      const t = turnoPorId.get(p.id);
+      const etiquetaCancha = t
+        ? turnos.length > canchas
+          ? `Cancha ${t.cancha} · Tanda ${t.tanda}`
+          : `Cancha ${t.cancha}`
+        : undefined;
+      const procA = r === 1 && p.a?.tipo === 'seed' ? procedencia.get(p.a.parejaId) : undefined;
+      const procB = r === 1 && p.b?.tipo === 'seed' ? procedencia.get(p.b.parejaId) : undefined;
+      return (
+        <CajaPartido
+          key={p.id}
+          torneo={torneo}
+          partido={p}
+          partidos={partidos}
+          onCargar={cargar}
+          etiquetaCancha={etiquetaCancha}
+          procedenciaA={procA}
+          procedenciaB={procB}
+        />
+      );
+    });
+  }
+
+  // Avance por ronda (para las pestañas del celular) y la ronda que conviene mostrar primero:
+  // la primera con partidos para cargar; si no queda ninguno, la final.
+  const avance = rondas.map((r) => {
+    const deRonda = partidos.filter((p) => !p.esTercerPuesto && p.ronda === r);
+    const jugables = deRonda.filter((p) => p.a !== null && p.b !== null && resolverSlot(p.a, partidos) !== null && resolverSlot(p.b, partidos) !== null);
+    const jugados = jugables.filter((p) => resultadoValido(p.puntosA, p.puntosB));
+    return { r, jugables: jugables.length, jugados: jugados.length };
+  });
+  const rondaSugerida = avance.find((a) => a.jugables > a.jugados)?.r ?? maxRonda;
+  const [rondaElegida, setRondaElegida] = useState<number | null>(null);
+  const rondaVisible = rondaElegida !== null && rondaElegida <= maxRonda ? rondaElegida : rondaSugerida;
+
   return (
-    <section>
+    <section className="space-y-4">
       {resultado.campeon && (
-        <div className="carta campeon">
-          <div style={{ fontSize: '3rem' }}>🏆</div>
-          <h2>{nombreDe(torneo, resultado.campeon)}</h2>
-          <p>
-            {resultado.subcampeon && <>🥈 {nombreDe(torneo, resultado.subcampeon)}</>}
-            {resultado.tercero && <> · 🥉 {nombreDe(torneo, resultado.tercero)}</>}
-          </p>
-          {torneo.fase !== 'terminado' && (
-            <button className="boton" onClick={() => actualizar((t) => ({ ...t, fase: 'terminado' }))}>
+        <Campeon
+          nombre={nombreDe(torneo, resultado.campeon)}
+          subcampeon={resultado.subcampeon ? nombreDe(torneo, resultado.subcampeon) : null}
+          tercero={resultado.tercero ? nombreDe(torneo, resultado.tercero) : null}
+          accion={torneo.fase !== 'terminado' ? (
+            <Boton variante="acento" onClick={() => actualizar((t) => ({ ...t, fase: 'terminado' }))}>
               Dar por terminado el torneo
-            </button>
-          )}
+            </Boton>
+          ) : undefined}
+        />
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-display text-base font-bold uppercase tracking-wide text-navy-700">Llave</h3>
+        <Segmentado
+          etiqueta="Cómo ver la llave"
+          valor={modoVisible}
+          alCambiar={setModo}
+          opciones={[{ valor: 'ronda', texto: 'Por ronda' }, { valor: 'cuadro', texto: 'Cuadro completo' }]}
+        />
+      </div>
+
+      {modoVisible === 'ronda' ? (
+        <div>
+          <Segmentado
+            etiqueta="Ronda"
+            valor={String(rondaVisible)}
+            alCambiar={(v) => setRondaElegida(Number(v))}
+            anchoCompleto
+            className="mb-3"
+            opciones={avance.map((a) => ({
+              valor: String(a.r),
+              texto: (
+                <>
+                  {nombreRonda(a.r)}
+                  {a.jugables > 0 && (
+                    <span className="ml-1 text-[11px] font-bold tabular-nums opacity-70">{a.jugados}/{a.jugables}</span>
+                  )}
+                </>
+              ),
+            }))}
+          />
+          <div className="grid gap-3 md:grid-cols-2">{partidosDeRonda(rondaVisible)}</div>
+        </div>
+      ) : (
+        <div className="llave">
+          {rondas.map((r) => (
+            <div key={r} className="ronda-llave">
+              <h3 style={{ textAlign: 'center', margin: '0 0 4px' }}>{nombreRonda(r)}</h3>
+              {partidosDeRonda(r)}
+            </div>
+          ))}
         </div>
       )}
 
-      <div className="llave">
-        {rondas.map((r) => {
-          const matchesDeLaRonda = partidos
-            .filter((p) => !p.esTercerPuesto && p.ronda === r)
-            .sort((a, b) => a.posicion - b.posicion);
-          const canchas = torneo.canchas ?? 2;
-          const turnos =
-            !individual && matchesDeLaRonda.length >= 2
-              ? ordenDeJuego(matchesDeLaRonda.map((m) => ({ id: m.id, grupoId: '' })), canchas)
-              : [];
-          const turnoPorId = new Map(turnos.map((t) => [t.partidoId, t]));
-          return (
-            <div key={r} className="ronda-llave">
-              <h3 style={{ textAlign: 'center', margin: '0 0 4px' }}>{nombreRonda(r)}</h3>
-              {matchesDeLaRonda.map((p) => {
-                const t = turnoPorId.get(p.id);
-                const etiquetaCancha = t
-                  ? turnos.length > canchas
-                    ? `Cancha ${t.cancha} · Tanda ${t.tanda}`
-                    : `Cancha ${t.cancha}`
-                  : undefined;
-                const procA = r === 1 && p.a?.tipo === 'seed' ? procedencia.get(p.a.parejaId) : undefined;
-                const procB = r === 1 && p.b?.tipo === 'seed' ? procedencia.get(p.b.parejaId) : undefined;
-                return (
-                  <CajaPartido
-                    key={p.id}
-                    torneo={torneo}
-                    partido={p}
-                    partidos={partidos}
-                    onCargar={cargar}
-                    etiquetaCancha={etiquetaCancha}
-                    procedenciaA={procA}
-                    procedenciaB={procB}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-
       {tercero && (
-        <div className="carta" style={{ marginTop: 8, maxWidth: 430 }}>
-          <div className="grupo-titulo"><h3>3er puesto</h3></div>
+        <div className="max-w-md">
+          <h3 className="mb-2 font-display text-sm font-bold uppercase tracking-wide text-navy-700">3er puesto</h3>
           <CajaPartido torneo={torneo} partido={tercero} partidos={partidos} onCargar={cargar} />
         </div>
       )}
@@ -452,12 +539,18 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
         <ResumenClasificacion torneo={torneo} config={torneo.configLlave} partidosLlave={partidos} />
       )}
 
-      <footer className="pie-paso">
-        <button className="boton secundario" onClick={() => actualizar((t) => ({ ...t, fase: individual ? 'parejas' : 'faseGrupos' }))}>
-          {individual ? '← Jugadores' : '← Fase de grupos'}
-        </button>
-        <button className="boton peligro" onClick={rearmar}>Rearmar llave</button>
-      </footer>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: individual ? 'parejas' : 'faseGrupos' }))}>
+            {individual ? 'Jugadores' : 'Fase de grupos'}
+          </Boton>
+        )}
+        derecha={(
+          <Boton variante="secundario" icono={<RotateCcw size={18} />} onClick={() => void rearmar()} className="text-red-700 hover:border-red-700">
+            Rearmar llave
+          </Boton>
+        )}
+      />
     </section>
   );
 }
@@ -483,40 +576,44 @@ function ResumenClasificacion({ torneo, config, partidosLlave }: {
     clasifActuales.length !== seedsArmados.size || clasifActuales.some((c) => !seedsArmados.has(c.parejaId));
 
   return (
-    <div className="carta" style={{ marginTop: 8 }}>
-      <button className="boton secundario" onClick={() => setAbierto((a) => !a)}>
-        {abierto ? 'Ocultar resumen de clasificación' : '📋 Resumen de clasificación (quién pasó y por qué)'}
+    <section className="rounded-xl border border-gray-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setAbierto((a) => !a)}
+        aria-expanded={abierto}
+        className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left"
+      >
+        <ListChecks size={18} className="shrink-0 text-navy-700" aria-hidden />
+        <span className="min-w-0 flex-1 font-display text-sm font-bold text-navy-700">Resumen de clasificación (quién pasó y por qué)</span>
+        {desactualizada && <Insignia tono="atencion">Desactualizada</Insignia>}
+        <ChevronDown size={18} aria-hidden className={cn('shrink-0 text-gray-500 transition-transform', abierto && 'rotate-180')} />
       </button>
       {abierto && (
-        <div style={{ marginTop: 12 }}>
+        <div className="space-y-3 border-t border-gray-100 px-4 py-4">
           {desactualizada && (
-            <p className="aviso" role="alert">
-              ⚠ Las posiciones actuales de los grupos ya no coinciden con los clasificados de esta llave
+            <Nota>
+              Las posiciones actuales de los grupos ya no coinciden con los clasificados de esta llave
               (corregiste resultados después de armarla). Si corresponde, usá "Rearmar llave".
-            </p>
+            </Nota>
           )}
-          <p style={{ color: 'var(--texto-suave)', marginTop: 4 }}>
+          <p className="text-sm text-gray-600">
             Cruce de la ronda 1: el mejor seed juega contra el más bajo (1º de un grupo vs 2º del otro),
             evitando cruces del mismo grupo cuando se puede. Orden de seeds: todos los 1º (por sus números),
             después los 2º, después los mejores extra.
           </p>
-          <h3 style={{ marginBottom: 4 }}>Así entraron</h3>
-          <ol style={{ margin: 0, paddingLeft: 24, lineHeight: 1.9 }}>
-            {clasifActuales.map((c) => (
-              <li key={c.parejaId}>
-                <strong>{nombreDe(torneo, c.parejaId)}</strong>{' '}
-                <span className="chip">{c.puesto}º del grupo {c.grupoNombre}</span>
-              </li>
+          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-navy-700">Así entraron</h3>
+          <ListaOrden>
+            {clasifActuales.map((c, i) => (
+              <ItemOrden key={c.parejaId} n={i + 1}>
+                <span className="mr-2 font-semibold">{nombreDe(torneo, c.parejaId)}</span>
+                <Insignia>{c.puesto}º del grupo {c.grupoNombre}</Insignia>
+              </ItemOrden>
             ))}
-          </ol>
-          {config.mejoresExtra > 0 && (
-            <div style={{ marginTop: 4 }}>
-              <ComparacionExtras torneo={torneo} config={config} />
-            </div>
-          )}
+          </ListaOrden>
+          {config.mejoresExtra > 0 && <ComparacionExtras torneo={torneo} config={config} />}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -524,7 +621,8 @@ function CajaPartido({ torneo, partido, partidos, onCargar, etiquetaCancha, proc
   torneo: Torneo;
   partido: PartidoLlave;
   partidos: PartidoLlave[];
-  onCargar: (partido: PartidoLlave, a: number | null, b: number | null) => void;
+  /** Mismo camino de antes (confirma borradosSiCorrijo antes de actualizar); ahora se llama una vez por resultado. */
+  onCargar: (partido: PartidoLlave, a: number | null, b: number | null) => void | Promise<void>;
   etiquetaCancha?: string;
   procedenciaA?: string;
   procedenciaB?: string;
@@ -536,6 +634,7 @@ function CajaPartido({ torneo, partido, partidos, onCargar, etiquetaCancha, proc
   const jugable = !esBye && idA !== null && idB !== null;
   const invalido =
     partido.puntosA !== null && partido.puntosB !== null && !resultadoValido(partido.puntosA, partido.puntosB);
+  const borrador = useBorradorMarcador(partido.puntosA, partido.puntosB, (a, b) => onCargar(partido, a, b));
 
   function etiqueta(slot: PartidoLlave['a'], id: string | null): string {
     if (slot === null) return 'BYE';
@@ -544,42 +643,74 @@ function CajaPartido({ torneo, partido, partidos, onCargar, etiquetaCancha, proc
     return 'A definir';
   }
 
+  function lado(l: 'a' | 'b') {
+    const slot = l === 'a' ? partido.a : partido.b;
+    const id = l === 'a' ? idA : idB;
+    const proc = l === 'a' ? procedenciaA : procedenciaB;
+    const gana = ganador !== null && ganador === id;
+    const nombre = etiqueta(slot, id);
+    return (
+      <div className={`slot ${gana ? 'ganador' : ''}`}>
+        <span className={cn('min-w-0', id === null && 'text-gray-500')}>
+          {nombre}
+          {proc && <> <span className="chip">{proc}</span></>}
+        </span>
+        {jugable && (
+          <CajaPuntos
+            valor={borrador.mostrado[l]}
+            alCambiar={(t) => borrador.cambiar(l, t)}
+            alTeclear={borrador.alTeclear}
+            etiqueta={`Puntos de ${nombre}`}
+            gana={gana && !borrador.sucio}
+            sinGuardar={borrador.sucio}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="partido-llave">
+    <div className="partido-llave" onBlur={jugable ? borrador.alSalirDeLaFila : undefined}>
       {etiquetaCancha && <div className="slot slot-cancha"><span className="chip chip-cancha">{etiquetaCancha}</span></div>}
-      <div className={`slot ${ganador !== null && ganador === idA ? 'ganador' : ''}`}>
-        <span>
-          {etiqueta(partido.a, idA)}
-          {procedenciaA && <> <span className="chip">{procedenciaA}</span></>}
-        </span>
-        {jugable && (
-          <input
-            className="puntos" type="number" min={0} value={partido.puntosA ?? ''}
-            onWheel={(e) => e.currentTarget.blur()}
-            onChange={(e) => onCargar(partido, e.target.value === '' ? null : Number(e.target.value), partido.puntosB)}
-          />
-        )}
-      </div>
-      <div className={`slot ${ganador !== null && ganador === idB ? 'ganador' : ''}`}>
-        <span>
-          {etiqueta(partido.b, idB)}
-          {procedenciaB && <> <span className="chip">{procedenciaB}</span></>}
-        </span>
-        {jugable && (
-          <input
-            className="puntos" type="number" min={0} value={partido.puntosB ?? ''}
-            onWheel={(e) => e.currentTarget.blur()}
-            onChange={(e) => onCargar(partido, partido.puntosA, e.target.value === '' ? null : Number(e.target.value))}
-          />
-        )}
-      </div>
-      {invalido && (
+      {lado('a')}
+      {lado('b')}
+      {jugable && borrador.sucio && (
+        <div className="slot slot-guardar">
+          <Boton anchoCompleto icono={<Check size={18} strokeWidth={3} />} onClick={() => void borrador.confirmar()}>
+            Guardar resultado
+          </Boton>
+        </div>
+      )}
+      {invalido && !borrador.sucio && (
         <div className="slot">
-          <span className="chip" style={{ color: 'var(--rojo)' }}>
-            {partido.puntosA === partido.puntosB ? 'empate no vale' : 'resultado no vale'}
+          <span className="text-[13px] font-semibold text-red-700">
+            {partido.puntosA === partido.puntosB ? 'Empate: no vale' : 'Resultado que no vale'}
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Podio: tarjeta oscura (el lima va solo sobre fondo oscuro). */
+function Campeon({ nombre, subcampeon, tercero, accion }: {
+  nombre: string;
+  subcampeon: string | null;
+  tercero: string | null;
+  accion?: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl bg-navy-700 px-5 py-7 text-center text-white">
+      <Trophy size={40} className="mx-auto text-lime-400" aria-hidden />
+      <p className="mt-2 font-display text-[11px] font-bold uppercase tracking-[0.25em] text-white/70">Campeón</p>
+      <h2 className="mt-1 break-words font-display text-2xl font-black uppercase leading-tight md:text-3xl">{nombre}</h2>
+      {(subcampeon || tercero) && (
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm text-white/85">
+          {subcampeon && <span className="inline-flex items-center gap-1.5"><Medal size={16} aria-hidden className="text-gray-300" /> {subcampeon}</span>}
+          {tercero && <span className="inline-flex items-center gap-1.5"><Medal size={16} aria-hidden className="text-amber-500" /> {tercero}</span>}
+        </div>
+      )}
+      {accion && <div className="mt-5">{accion}</div>}
     </div>
   );
 }
@@ -589,17 +720,20 @@ function CampeonDeGrupoUnico({ torneo, actualizar }: PropsPaso) {
   const filas = grupo ? calcularTabla(grupo.parejaIds, torneo.partidosGrupo) : [];
   return (
     <section>
-      <div className="carta campeon">
-        <div style={{ fontSize: '3rem' }}>🏆</div>
-        <h2>{filas[0] ? nombreDe(torneo, filas[0].parejaId) : '—'}</h2>
-        <p>
-          {filas[1] && <>🥈 {nombreDe(torneo, filas[1].parejaId)}</>}
-          {filas[2] && <> · 🥉 {nombreDe(torneo, filas[2].parejaId)}</>}
-        </p>
-        <button className="boton secundario" onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
-          ← Volver a la tabla
-        </button>
-      </div>
+      <Campeon
+        nombre={filas[0] ? nombreDe(torneo, filas[0].parejaId) : '—'}
+        subcampeon={filas[1] ? nombreDe(torneo, filas[1].parejaId) : null}
+        tercero={filas[2] ? nombreDe(torneo, filas[2].parejaId) : null}
+        accion={(
+          <button
+            type="button"
+            onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}
+            className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/30 px-5 font-display text-sm font-bold text-white transition-colors hover:bg-white/10"
+          >
+            <ArrowLeft size={18} aria-hidden /> Volver a la tabla
+          </button>
+        )}
+      />
     </section>
   );
 }
