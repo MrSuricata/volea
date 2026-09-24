@@ -1,8 +1,35 @@
-import { useState } from 'react';
-import { X, Save } from 'lucide-react';
+import { useId, useState, type ChangeEvent, type FormEvent } from 'react';
+import { AlertTriangle, CheckCircle2, ExternalLink, MapPin, Save } from 'lucide-react';
 import type { Club } from '../types';
+import { AreaTexto, Boton, Campo, Dialogo, Entrada, Interruptor, Segmentado } from './ui';
+import { hayCambios, usuarioInstagram } from './formulario';
+import { CLASE_FORMULARIO, GrupoFormulario, Rotulo, confirmarDescarte } from './PiezasFormulario';
+import {
+  esPuntoPorDefecto, fueraDeSudamerica, leerCoordenadas, leerNumeroCoordenada, linkMapa, type Coordenadas,
+} from './coordenadas';
 
 // ─── ClubModal ───────────────────────────────────────────────────────────────
+// Rediseño 24/09. Lo importante: la ubicación. Antes latitud/longitud arrancaban en
+// -34,9 / -56,2 y un club nuevo quedaba solo en el centro de Montevideo. Ahora arrancan
+// vacías (obligatorias de verdad) y se completan pegando el link o el pin de Google Maps.
+
+const PAISES: { valor: Club['country']; texto: string }[] = [
+  { valor: 'Uruguay', texto: 'Uruguay' },
+  { valor: 'Argentina', texto: 'Argentina' },
+  { valor: 'Chile', texto: 'Chile' },
+  { valor: 'Brasil', texto: 'Brasil' },
+];
+
+type Aviso = { tipo: 'ok' | 'error'; texto: string } | null;
+
+/** Latitud/longitud tipeadas → número, o el error a mostrar en el campo. */
+function validarCoordenada(texto: string, tope: 90 | 180): { valor: number | null; error: string | null } {
+  if (!texto.trim()) return { valor: null, error: 'Falta. Pegá el link de Google Maps arriba.' };
+  const n = leerNumeroCoordenada(texto);
+  if (n === null) return { valor: null, error: 'Tiene que ser un número, ej. -34.9011' };
+  if (Math.abs(n) > tope) return { valor: null, error: `Va de -${tope} a ${tope}.` };
+  return { valor: n, error: null };
+}
 
 export function ClubModal({
   club, onClose, onSave
@@ -11,7 +38,7 @@ export function ClubModal({
   onClose: () => void;
   onSave: (c: Club) => void;
 }) {
-  const [form, setForm] = useState<Club>(
+  const [inicial] = useState<Club>(() =>
     club || {
       id: `club-${Date.now()}`,
       name: '',
@@ -26,151 +53,212 @@ export function ClubModal({
       description: '',
     }
   );
+  const [form, setForm] = useState<Club>(inicial);
+  // Las coordenadas se editan como texto (acepta coma decimal y el "-" del teclado común).
+  // Un club nuevo arranca SIN punto: el -34,9/-56,2 de arriba nunca llega a guardarse solo.
+  const [latTexto, setLatTexto] = useState(club ? String(club.lat) : '');
+  const [lngTexto, setLngTexto] = useState(club ? String(club.lng) : '');
+  const [pegado, setPegado] = useState('');
+  const [aviso, setAviso] = useState<Aviso>(null);
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
+  const idForm = useId();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave(form);
+  const cambiar = <K extends keyof Club>(campo: K, valor: Club[K]) => setForm((f) => ({ ...f, [campo]: valor }));
+
+  const sucio =
+    hayCambios(inicial, form) || latTexto !== (club ? String(club.lat) : '') || lngTexto !== (club ? String(club.lng) : '');
+
+  const lat = validarCoordenada(latTexto, 90);
+  const lng = validarCoordenada(lngTexto, 180);
+  const punto: Coordenadas | null = lat.valor !== null && lng.valor !== null ? { lat: lat.valor, lng: lng.valor } : null;
+
+  const usarPegado = (texto: string, avisarError: boolean) => {
+    const r = leerCoordenadas(texto);
+    if (r.ok) {
+      setLatTexto(String(r.lat));
+      setLngTexto(String(r.lng));
+      setAviso({ tipo: 'ok', texto: `Listo: ${r.lat}, ${r.lng}` });
+    } else {
+      setAviso(avisarError && texto.trim() ? { tipo: 'error', texto: r.error } : null);
+    }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="font-display text-xl font-bold text-navy-700">
-            {club ? 'Editar Club' : 'Nuevo Club'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-navy-700 transition-colors">
-            <X size={24} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre *</label>
-            <input
-              type="text"
-              required
-              value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Dirección *</label>
-            <input
-              type="text"
-              required
-              value={form.address}
-              onChange={e => setForm({ ...form, address: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Ciudad *</label>
-              <input
-                type="text"
-                required
-                value={form.city}
-                onChange={e => setForm({ ...form, city: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">País *</label>
-              <select
-                value={form.country}
-                onChange={e => setForm({ ...form, country: e.target.value as 'Uruguay' | 'Argentina' | 'Chile' | 'Brasil' })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors bg-white"
-              >
-                <option value="Uruguay">🇺🇾 Uruguay</option>
-                <option value="Argentina">🇦🇷 Argentina</option>
-                <option value="Chile">🇨🇱 Chile</option>
-                <option value="Brasil">🇧🇷 Brasil</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Latitud *</label>
-              <input
-                type="number"
-                step="any"
-                required
-                value={form.lat}
-                onChange={e => setForm({ ...form, lat: Number(e.target.value) })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Longitud *</label>
-              <input
-                type="number"
-                step="any"
-                required
-                value={form.lng}
-                onChange={e => setForm({ ...form, lng: Number(e.target.value) })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono</label>
-              <input
-                type="text"
-                value={form.phone || ''}
-                onChange={e => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Instagram</label>
-              <input
-                type="text"
-                value={form.instagram || ''}
-                onChange={e => setForm({ ...form, instagram: e.target.value })}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors"
-                placeholder="sin @"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-navy-700 mb-1">Descripción</label>
-            <textarea
-              rows={3}
-              value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-lime-400 outline-none transition-colors resize-none"
-            />
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.hasPickleball}
-              onChange={e => setForm({ ...form, hasPickleball: e.target.checked })}
-              className="w-4 h-4 text-lime-400 border-gray-300 rounded focus:ring-lime-400"
-            />
-            <span className="text-sm font-semibold text-navy-700">Tiene canchas de pickleball</span>
-          </label>
+  const alPegar = (e: ChangeEvent<HTMLInputElement>) => {
+    const texto = e.target.value;
+    // Si entró de golpe (pegado), el error se muestra ya; tipeando, recién al salir.
+    const deGolpe = texto.length - pegado.length > 3;
+    setPegado(texto);
+    usarPegado(texto, deGolpe);
+  };
 
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-navy-700 font-display font-semibold py-3 rounded-lg transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-lime-400 hover:bg-lime-500 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Save size={18} /> Guardar
-            </button>
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setIntentoGuardar(true);
+    if (!punto) return;
+    onSave({ ...form, lat: punto.lat, lng: punto.lng });
+  };
+
+  const cancelar = () => { if (confirmarDescarte(sucio)) onClose(); };
+
+  return (
+    <Dialogo
+      abierto
+      titulo={club ? 'Editar club' : 'Nuevo club'}
+      descripcion={club ? club.name : 'Aparece en el mapa y en la lista de Clubes.'}
+      alCerrar={onClose}
+      ancho="lg"
+      sucio={sucio}
+      pie={(
+        <>
+          <Boton variante="secundario" onClick={cancelar}>Cancelar</Boton>
+          <Boton type="submit" form={idForm} icono={<Save size={17} />}>Guardar club</Boton>
+        </>
+      )}
+    >
+      <form id={idForm} onSubmit={handleSubmit} className={CLASE_FORMULARIO}>
+        <GrupoFormulario titulo="Club">
+          <Campo etiqueta="Nombre" requerido>
+            <Entrada type="text" required autoComplete="off" placeholder="Ej. Club Biguá" value={form.name} onChange={e => cambiar('name', e.target.value)} />
+          </Campo>
+          <Campo etiqueta="Descripción">
+            <AreaTexto rows={3} value={form.description} onChange={e => cambiar('description', e.target.value)} className="resize-y" />
+          </Campo>
+          <div className="rounded-xl border border-gray-200 px-4 py-1">
+            <Interruptor
+              etiqueta="Tiene canchas de pickleball"
+              descripcion="Muestra la etiqueta “Pickleball” en la ficha del club."
+              activo={form.hasPickleball}
+              alCambiar={v => cambiar('hasPickleball', v)}
+            />
           </div>
-        </form>
-      </div>
-    </div>
+        </GrupoFormulario>
+
+        <GrupoFormulario titulo="Ubicación">
+          <Campo etiqueta="Dirección" requerido>
+            <Entrada type="text" required autoComplete="off" placeholder="Ej. Av. Rivera 3500" value={form.address} onChange={e => cambiar('address', e.target.value)} />
+          </Campo>
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+            <Campo etiqueta="Ciudad" requerido>
+              <Entrada type="text" required autoComplete="off" placeholder="Ej. Montevideo" value={form.city} onChange={e => cambiar('city', e.target.value)} />
+            </Campo>
+            <div className="min-w-0">
+              <Rotulo>País</Rotulo>
+              <Segmentado etiqueta="País" opciones={PAISES} valor={form.country} alCambiar={v => cambiar('country', v)} anchoCompleto />
+            </div>
+          </div>
+
+          {/* Punto en el mapa: lo que se ve en /clubes. */}
+          <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-700 text-white" aria-hidden>
+                <MapPin size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-navy-700">Punto en el mapa</p>
+                <p className="text-[13px] text-gray-500">
+                  En Google Maps mantené apretado el lugar y copiá los números de arriba, o pegá el link largo del navegador.
+                </p>
+              </div>
+            </div>
+
+            <Campo etiqueta="Pegá el link de Google Maps o las coordenadas">
+              <Entrada
+                type="text"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Ej. -34.9011, -56.1645 o el link"
+                value={pegado}
+                onChange={alPegar}
+                onBlur={() => usarPegado(pegado, true)}
+                className="bg-white"
+              />
+            </Campo>
+            {aviso && (
+              <p
+                role={aviso.tipo === 'error' ? 'alert' : 'status'}
+                className={
+                  aviso.tipo === 'ok'
+                    ? '-mt-2 flex items-start gap-1.5 text-[13px] font-medium text-emerald-700'
+                    : '-mt-2 flex items-start gap-1.5 text-[13px] font-medium text-red-700'
+                }
+              >
+                {aviso.tipo === 'ok'
+                  ? <CheckCircle2 size={15} className="mt-px shrink-0" aria-hidden />
+                  : <AlertTriangle size={15} className="mt-px shrink-0" aria-hidden />}
+                {aviso.texto}
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Campo etiqueta="Latitud" requerido error={intentoGuardar ? lat.error : null}>
+                <Entrada
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="Ej. -34.9011"
+                  value={latTexto}
+                  onChange={e => { setLatTexto(e.target.value); setAviso(null); }}
+                  className="bg-white tabular-nums"
+                />
+              </Campo>
+              <Campo etiqueta="Longitud" requerido error={intentoGuardar ? lng.error : null}>
+                <Entrada
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="Ej. -56.1645"
+                  value={lngTexto}
+                  onChange={e => { setLngTexto(e.target.value); setAviso(null); }}
+                  className="bg-white tabular-nums"
+                />
+              </Campo>
+            </div>
+
+            {punto && esPuntoPorDefecto(punto) && (
+              <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+                <AlertTriangle size={15} className="mt-px shrink-0" aria-hidden />
+                Es el punto por defecto (centro de Montevideo): seguro no es donde queda el club.
+              </p>
+            )}
+            {punto && !esPuntoPorDefecto(punto) && fueraDeSudamerica(punto) && (
+              <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[13px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+                <AlertTriangle size={15} className="mt-px shrink-0" aria-hidden />
+                Ese punto queda fuera de Sudamérica. ¿Están latitud y longitud al revés?
+              </p>
+            )}
+            {punto && (
+              <a
+                href={linkMapa(punto)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 items-center gap-2 rounded-lg px-1 text-sm font-bold text-navy-700 underline-offset-4 hover:underline"
+              >
+                Ver el punto en Google Maps <ExternalLink size={15} aria-hidden />
+              </a>
+            )}
+          </div>
+        </GrupoFormulario>
+
+        <GrupoFormulario titulo="Contacto">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo etiqueta="Teléfono">
+              <Entrada type="tel" inputMode="tel" autoComplete="off" placeholder="099 123 456" value={form.phone || ''} onChange={e => cambiar('phone', e.target.value)} />
+            </Campo>
+            <Campo etiqueta="Instagram" ayuda="El usuario o el link del perfil.">
+              <Entrada
+                type="text"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="usuario, sin @"
+                value={form.instagram || ''}
+                onChange={e => cambiar('instagram', usuarioInstagram(e.target.value))}
+              />
+            </Campo>
+          </div>
+        </GrupoFormulario>
+      </form>
+    </Dialogo>
   );
 }
