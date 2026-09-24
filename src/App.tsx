@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Link, NavLink, useLocation, useNavigate, 
 import { LazyMotion, MotionConfig, m, useScroll, useTransform } from 'framer-motion';
 import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
 import { EncabezadoSeccion } from './ui/EncabezadoSeccion';
+import { SeccionTorneosDiferida } from './home/SeccionTorneosDiferida';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -1803,8 +1804,9 @@ function HomePage() {
         </div>
       </section>
 
-      {/* ── 4b. Torneos (resultados reales, se carga al acercarse) ─────── */}
-      {/* SLOT_TORNEOS */}
+      {/* ── 4b. Torneos: campeones de la última fecha, top 5 del año y números, calculados
+          de los resultados reales. Baja su código y sus datos recién al acercarse. ── */}
+      <SeccionTorneosDiferida />
 
       {/* ── 4c. Cómo comprar ───────────────────────────────────────────────
           Franja clara y corta: después de ver ropa y torneos, tres pasos y listo.
