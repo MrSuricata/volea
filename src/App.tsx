@@ -3448,8 +3448,13 @@ function CheckoutPage() {
     ? { ...customer, address: 'Retiro / entrega a coordinar por WhatsApp', city: '', department: '' }
     : customer;
   const [success, setSuccess] = useState(false);
-  // Link de WhatsApp del pedido recién armado: el pedido recién llega cuando el
-  // cliente toca Enviar en WhatsApp, así que la pantalla de éxito lo ofrece de
+  // El pedido se registra en la base sin esperar la respuesta (así WhatsApp se abre
+  // dentro del toque del cliente); de ese registro sale el aviso automático al
+  // equipo. La pantalla de éxito cuenta cómo terminó: si falló, el mensaje de
+  // WhatsApp pasa a ser el único canal y se pide en serio.
+  const [registro, setRegistro] = useState<'registrando' | 'ok' | 'fallo'>('registrando');
+  const [refPedido, setRefPedido] = useState('');
+  // Link de WhatsApp del pedido recién armado: la pantalla de éxito lo ofrece de
   // nuevo por si la ventana no se abrió (el navegador de Instagram la bloquea).
   const [whatsappPedido, setWhatsappPedido] = useState('');
 
@@ -3506,13 +3511,26 @@ function CheckoutPage() {
   if (success) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-          <Check size={40} className="text-green-500" />
+        <div className={`w-20 h-20 ${registro === 'fallo' ? 'bg-amber-100' : 'bg-green-100'} rounded-full flex items-center justify-center mx-auto mb-6`}>
+          {registro === 'fallo' ? <MessageCircle size={40} className="text-amber-600" /> : <Check size={40} className="text-green-500" />}
         </div>
-        <h1 className="font-display text-3xl font-bold text-navy-700 mb-4">¡Tu pedido está listo!</h1>
+        <h1 className="font-display text-3xl font-bold text-navy-700 mb-2">
+          {registro === 'fallo' ? 'Falta un paso' : registro === 'ok' ? '¡Recibimos tu pedido!' : 'Registrando tu pedido…'}
+        </h1>
+        {refPedido && <p className="text-sm text-gray-500 mb-4">Referencia {refPedido}</p>}
         <p className="text-gray-600 mb-8 max-w-md mx-auto">
-          Se abrió WhatsApp con el pedido escrito: <strong>tocá Enviar</strong> para
-          que nos llegue. Te respondemos para coordinar la entrega y el pago.
+          {registro === 'fallo' ? (
+            <>
+              No pudimos registrar el pedido por un problema de conexión.{' '}
+              <strong>Mandanos el mensaje por WhatsApp</strong> y lo tomamos desde ahí.
+            </>
+          ) : (
+            <>
+              {registro === 'ok' ? 'Ya nos llegó. ' : ''}Para coordinar la entrega y el pago,{' '}
+              <strong>tocá Enviar</strong> en el WhatsApp que se abrió con el detalle. Si no se
+              abrió, usá el botón de abajo.
+            </>
+          )}
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           {whatsappPedido && (
@@ -3522,7 +3540,7 @@ function CheckoutPage() {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white font-display font-bold py-3 px-8 rounded-lg transition-colors"
             >
-              <MessageCircle size={18} /> No se abrió WhatsApp: abrir de nuevo
+              <MessageCircle size={18} /> Abrir WhatsApp con el pedido
             </a>
           )}
           <Link
@@ -3560,7 +3578,10 @@ function CheckoutPage() {
     e.preventDefault();
     const order = construirPedido();
     if (!order) return;
-    addOrder(order);
+    setRefPedido(order.id);
+    Promise.resolve(addOrder(order))
+      .then(ok => setRegistro(ok ? 'ok' : 'fallo'))
+      .catch(() => setRegistro('fallo'));
 
     // Build WhatsApp message
     const lines = [
@@ -3725,9 +3746,10 @@ function CheckoutPage() {
                 </>
               ) : (
                 <>
-                  Completá tus datos y tu pedido nos llega al instante. Te escribimos
-                  por WhatsApp para coordinar la entrega y el pago (transferencia,
-                  efectivo o el medio que te quede más cómodo).
+                  Completá tus datos y confirmá: el pedido nos llega al instante y se
+                  abre WhatsApp con el detalle para que nos lo mandes. Por ahí
+                  coordinamos la entrega y el pago (transferencia, efectivo o el medio
+                  que te quede más cómodo).
                 </>
               )}
             </p>

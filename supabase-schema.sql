@@ -1471,3 +1471,68 @@ $post$;
 --   · Probada en producción dentro de una transacción que se deshace.
 --   ⚠ Operativo: un pedido pagado por MP ya descontó stock; no registrar esa
 --     venta en la Caja eligiendo el producto (descontaría dos veces).
+
+-- ============================================
+-- v26 (2026-09-30): aviso automático de cada pedido web (pg_net → n8n → Telegram + mail)
+-- ============================================
+create extension if not exists pg_net;
+
+-- Solo la primera vez (los valores reales no se guardan en el repo):
+-- select vault.create_secret('<URL_WEBHOOK>', 'volea_aviso_pedido_url',
+--   'URL del webhook de n8n que avisa cada pedido web de VOLEA');
+-- select vault.create_secret('<SECRETO>', 'volea_aviso_pedido_secreto',
+--   'Secreto que el workflow de n8n verifica en el header x-volea-secreto');
+
+create or replace function public.orders_avisar_pedido_web()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_rol text;
+  v_url text;
+  v_secreto text;
+begin
+  v_rol := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '');
+  if v_rol <> 'anon' or coalesce(new.source, '') not in ('whatsapp', 'web') then
+    return new;
+  end if;
+
+  select decrypted_secret into v_url from vault.decrypted_secrets where name = 'volea_aviso_pedido_url';
+  select decrypted_secret into v_secreto from vault.decrypted_secrets where name = 'volea_aviso_pedido_secreto';
+  if v_url is null or v_secreto is null then
+    return new;
+  end if;
+
+  perform net.http_post(
+    url := v_url,
+    body := jsonb_build_object('pedido', to_jsonb(new)),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-volea-secreto', v_secreto),
+    timeout_milliseconds := 8000
+  );
+  return new;
+exception when others then
+  -- Un aviso caído nunca puede voltear el alta del pedido.
+  return new;
+end;
+$$;
+
+drop trigger if exists orders_avisar_pedido_web_insert on public.orders;
+create trigger orders_avisar_pedido_web_insert
+  after insert on public.orders
+  for each row execute function public.orders_avisar_pedido_web();
+
+-- Post-check
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pg_net') then
+    raise exception 'v26 post: falta pg_net';
+  end if;
+  if (select count(*) from vault.secrets where name in ('volea_aviso_pedido_url', 'volea_aviso_pedido_secreto')) <> 2 then
+    raise exception 'v26 post: faltan los secretos en Vault';
+  end if;
+  if not exists (select 1 from pg_trigger where tgrelid = 'public.orders'::regclass and tgname = 'orders_avisar_pedido_web_insert') then
+    raise exception 'v26 post: falta el trigger orders_avisar_pedido_web_insert';
+  end if;
+end $$;
