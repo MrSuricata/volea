@@ -15,7 +15,9 @@ export function costoInscripcion(nCategorias: number, tarifa: TarifaEvento): num
  * La tarifa dicha para el público: "$ 900 las primeras 2 categorías · $ 300 cada
  * categoría adicional · máximo 4 categorías por participante". `plata` formatea montos.
  */
-export function textoTarifa(tarifa: TarifaEvento, plata: (n: number) => string): string {
+export function textoTarifa(tarifa: TarifaEvento, formato: (n: number) => string): string {
+  // Espacio duro dentro del monto: en el celular "$ 300" se partía con el "$" al final de un renglón.
+  const plata = (n: number) => formato(n).replace(/ /g, '\u00A0');
   const partes = tarifa.extra > 0
     ? [
         `${plata(tarifa.base)} ${tarifa.incluye === 1 ? 'la primera categoría' : `las primeras ${tarifa.incluye} categorías`}`,

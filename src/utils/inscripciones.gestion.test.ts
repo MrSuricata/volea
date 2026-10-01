@@ -73,6 +73,11 @@ describe('textoTarifa', () => {
   it('sin adicional es un precio fijo', () => {
     expect(textoTarifa({ base: 600, incluye: 1, extra: 0 }, plata)).toBe('$600 la inscripción');
   });
+  it('el monto no se parte entre renglones: el espacio de "$ 900" sale duro', () => {
+    const texto = textoTarifa({ base: 900, incluye: 2, extra: 300 }, n => `$ ${n}`);
+    expect(texto).toContain('$\u00A0900 las primeras');
+    expect(texto).toContain('$\u00A0300 cada');
+  });
 });
 const insc = (id: string, nombre: string, categorias: string, parejas: Record<string, string> = {}): Inscripcion =>
   ({ ...base, id, nombre, categorias, parejas });
