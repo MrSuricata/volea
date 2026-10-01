@@ -103,6 +103,17 @@ function nombreCartel(nombre: string): string {
   return nombre.replace(/^\s*volea\s+/i, '').trim() || nombre;
 }
 
+/**
+ * Tamaño del nombre en el cartel neón. Manda la palabra más larga: el cartel mide
+ * 256px por dentro y a 40px una palabra de 10 letras o más ("ANIVERSARIO",
+ * "PICKLEBALL") no entra y `break-words` la parte al medio.
+ */
+function tamanoCartel(nombre: string): string {
+  const palabraMasLarga = Math.max(0, ...nombre.split(/\s+/).map(p => p.length));
+  if (palabraMasLarga >= 10) return 'text-[32px]';
+  return nombre.length > 14 ? 'text-[40px]' : 'text-[52px]';
+}
+
 /** "22·23·24 AGO" — los días sueltos para el cartel neón del hero. */
 const diasCortos = (desde: string, hasta?: string): string => {
   const d1 = new Date(`${desde}T12:00:00Z`);
@@ -1570,7 +1581,7 @@ function HomePage() {
                     escrito "Racket Roll" fijo, y el próximo torneo iba a salir con ese nombre. */}
                 <p
                   className={`mt-1.5 font-display font-black uppercase leading-[0.88] text-white break-words ${
-                    nombreCartel(torneoDestacado.name).length > 14 ? 'text-[40px]' : 'text-[52px]'
+                    tamanoCartel(nombreCartel(torneoDestacado.name))
                   }`}
                   style={{
                     textShadow:
