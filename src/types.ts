@@ -215,6 +215,8 @@ export interface Event {
   endDate?: string;
   /** true = el form público de inscripción está abierto para este evento. */
   inscripcionesAbiertas?: boolean;
+  /** Último día para inscribirse ("YYYY-MM-DD", inclusive). Vacío = hasta que termine el evento. Se setea por SQL. */
+  inscripcionesCierre?: string;
   /** Categorías del evento, separadas por coma ("Singles A,Doble Mixto B"). */
   categorias?: string;
   /** Tarifa de inscripción ({base, incluye, extra}); null = evento sin cobro. Se setea por SQL. */

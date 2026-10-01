@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   armarSeccionesCategoria, buscanPareja, costoInscripcion, estadisticasTorneo, faltaInscribirse, generoDe, resumenArmado,
-  textoTarifa, MIN_UNIDADES_VIABLE,
+  inscripcionAbierta, textoTarifa, MIN_UNIDADES_VIABLE,
 } from './inscripciones';
 import type { Inscripcion } from '../types';
 
@@ -57,6 +57,25 @@ describe('costoInscripcion', () => {
   it('aniversario de Pickleball City: $900 las 2 primeras y $300 cada adicional', () => {
     const t = { base: 900, incluye: 2, extra: 300, max: 4 };
     expect([1, 2, 3, 4].map(n => costoInscripcion(n, t))).toEqual([900, 900, 1200, 1500]);
+  });
+});
+
+describe('inscripcionAbierta', () => {
+  const evt = { inscripcionesAbiertas: true, inscripcionesCierre: '2026-10-08', date: '2026-10-09', endDate: '2026-10-10' };
+  it('hasta el día de cierre, inclusive, se puede', () => {
+    expect(inscripcionAbierta(evt, '2026-10-01')).toBe(true);
+    expect(inscripcionAbierta(evt, '2026-10-08')).toBe(true);
+  });
+  it('desde el día siguiente al cierre ya no', () => {
+    expect(inscripcionAbierta(evt, '2026-10-09')).toBe(false);
+  });
+  it('sin fecha de cierre corre hasta el último día del evento', () => {
+    const sinCierre = { ...evt, inscripcionesCierre: '' };
+    expect(inscripcionAbierta(sinCierre, '2026-10-10')).toBe(true);
+    expect(inscripcionAbierta(sinCierre, '2026-10-11')).toBe(false);
+  });
+  it('con el interruptor del admin apagado, nunca', () => {
+    expect(inscripcionAbierta({ ...evt, inscripcionesAbiertas: false }, '2026-10-01')).toBe(false);
   });
 });
 

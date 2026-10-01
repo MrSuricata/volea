@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
-import { costoInscripcion, marcaVisitaInscripciones, textoTarifa } from './utils/inscripciones';
+import { costoInscripcion, inscripcionAbierta, marcaVisitaInscripciones, textoTarifa } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, Promo } from './types';
 import { hoyMontevideo, precioConPromo, totalesConPromo, ventanaPromo } from './utils/promo';
 import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
@@ -24,7 +24,7 @@ import { FOTO_HERO_HOME } from './lib/precarga';
 import { guardarMarcaDePago } from './pago/marcaPago';
 import { CLAVE_PEDIDO_MP, firmaPedido, idPedidoWeb, pedidoReusable, registroPedidoMP } from './pago/reintentoMP';
 import { lazyConRecarga, cargandoTab } from './lib/lazyConRecarga';
-import { formatPrice, TZ_UY, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
+import { formatPrice, TZ_UY, fechaConDia, fechaEventoLarga, rangoLargo, getTotalStock, categoryLabel } from './lib/formato';
 import { FALLBACK_IMG, handleImgError, errorFoto } from './lib/fotos';
 import { ATAJO_TAB_ADMIN } from './lib/atajoAdmin';
 import { cargarFeaturesMotion } from './lib/animaciones';
@@ -1341,7 +1341,7 @@ function FlyerTorneo({ evento, wa }: { evento: Event; wa: string | null }) {
             {rangoLargo(evento.date, evento.endDate)} · {evento.location}
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            {evento.inscripcionesAbiertas && (
+            {inscripcionAbierta(evento, hoyMontevideo()) && (
               <Link
                 to={`/inscripcion/${evento.id}`}
                 onClick={cerrar}
@@ -1410,6 +1410,8 @@ function HomePage() {
   const waTorneo = waUruguay(torneoDestacado?.phone);
   const torneoEnCurso = !!torneoDestacado &&
     torneoDestacado.date <= new Date().toLocaleDateString('en-CA', { timeZone: TZ_UY });
+  // Inscripción online: interruptor del admin + fecha de cierre (después queda solo WhatsApp).
+  const torneoInscribe = !!torneoDestacado && inscripcionAbierta(torneoDestacado, hoyMontevideo());
 
   const categoryIcons: Record<string, React.ReactNode> = {
     'Remeras': <Zap size={26} />,
@@ -1703,7 +1705,7 @@ function HomePage() {
                   <div className="flex w-full flex-col gap-3 lg:w-56 lg:flex-shrink-0">
                     {/* Con inscripción online abierta, ese es el botón principal;
                         WhatsApp queda como alternativa. */}
-                    {torneoDestacado.inscripcionesAbiertas && (
+                    {torneoInscribe && (
                       <Link
                         to={`/inscripcion/${torneoDestacado.id}`}
                         className="pulse-glow flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300"
@@ -1717,12 +1719,12 @@ function HomePage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className={
-                          torneoDestacado.inscripcionesAbiertas
+                          torneoInscribe
                             ? 'flex items-center justify-center gap-2 rounded-lg border border-white/25 px-5 py-2.5 font-display text-sm font-bold text-white transition-colors hover:border-lime-400 hover:text-lime-400'
                             : 'flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900 transition-colors hover:bg-lime-300'
                         }
                       >
-                        <MessageCircle size={18} /> {torneoDestacado.inscripcionesAbiertas ? 'O por WhatsApp' : 'Inscribirme'}
+                        <MessageCircle size={18} /> {torneoInscribe ? 'O por WhatsApp' : 'Inscribirme'}
                       </a>
                     )}
                     {/* Gateado con waTorneo, igual que el botón: si en el campo hay
@@ -2711,7 +2713,7 @@ function EventsPage() {
                     <>
                       {/* Con el form online abierto, ese es el camino principal y
                           WhatsApp queda como alternativa. */}
-                      {evt.inscripcionesAbiertas && (
+                      {inscripcionAbierta(evt, hoyMontevideo()) && (
                         <Link
                           to={`/inscripcion/${evt.id}`}
                           className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2.5 font-display text-sm font-bold text-navy-700 transition-colors hover:bg-lime-500"
@@ -2724,12 +2726,12 @@ function EventsPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-display text-sm font-bold transition-colors ${
-                          evt.inscripcionesAbiertas
+                          inscripcionAbierta(evt, hoyMontevideo())
                             ? 'mt-2 border border-gray-200 text-navy-700 hover:bg-gray-50'
                             : 'mt-4 bg-lime-400 text-navy-700 hover:bg-lime-500'
                         }`}
                       >
-                        <MessageCircle size={16} /> {evt.inscripcionesAbiertas ? 'O por WhatsApp' : 'Inscribirme por WhatsApp'}
+                        <MessageCircle size={16} /> {inscripcionAbierta(evt, hoyMontevideo()) ? 'O por WhatsApp' : 'Inscribirme por WhatsApp'}
                       </a>
                     </>
                   )}
@@ -3263,12 +3265,18 @@ function InscripcionPage() {
   // Un torneo que ya se jugó queda cerrado aunque nadie haya apagado el
   // interruptor (el Racket Roll seguía aceptando inscripciones semanas después).
   const eventoTerminado = (evt.endDate || evt.date) < hoyMontevideo();
-  if (!evt.inscripcionesAbiertas || eventoTerminado) {
+  // Fecha de cierre de inscripciones (inclusive): la misma regla corre en inscribir_evento.
+  const cierrePasado = !!evt.inscripcionesCierre && evt.inscripcionesCierre < hoyMontevideo();
+  if (!evt.inscripcionesAbiertas || eventoTerminado || cierrePasado) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
         <h1 className="font-display text-2xl font-bold text-navy-700 mb-2">{evt.name}</h1>
         <p className="text-gray-600 mb-6">
-          {eventoTerminado ? 'Este torneo ya se jugó: las inscripciones están cerradas.' : 'Las inscripciones online de este evento están cerradas.'}
+          {eventoTerminado
+            ? 'Este torneo ya se jugó: las inscripciones están cerradas.'
+            : cierrePasado
+              ? `Las inscripciones online cerraron el ${fechaConDia(evt.inscripcionesCierre || '')}.`
+              : 'Las inscripciones online de este evento están cerradas.'}
         </p>
         {waUruguay(evt.phone) && (
           <a
@@ -3332,6 +3340,11 @@ function InscripcionPage() {
       <p className="text-gray-500 mb-1">
         {rangoLargo(evt.date, evt.endDate)} · {evt.location}{evt.city ? `, ${evt.city}` : ''}
       </p>
+      {evt.inscripcionesCierre && (
+        <p className="mb-1 text-sm font-semibold text-navy-700">
+          Inscripciones hasta el {fechaConDia(evt.inscripcionesCierre)}.
+        </p>
+      )}
       {inscriptos !== null && inscriptos > 0 && (
         <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-lime-50 px-3 py-1 text-sm font-semibold text-lime-800">
           <Users size={14} /> Ya hay {inscriptos} {inscriptos === 1 ? 'inscripto' : 'inscriptos'}

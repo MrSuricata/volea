@@ -2,9 +2,23 @@
 // (con fallback al campo legacy) y armado de secciones "spliteadas" por
 // categoría con duplas por mención mutua, como la planilla de Brian.
 
-import type { Inscripcion, TarifaEvento } from '../types';
+import type { Event, Inscripcion, TarifaEvento } from '../types';
 import { normalizar } from './nombres';
 import { almacenLocal } from './almacen';
+
+/**
+ * ¿Se puede inscribir hoy por la web? Manda el interruptor del admin y además la fecha:
+ * no después del día de cierre (inclusive) ni cuando el evento ya terminó. `hoy` es el
+ * día de Uruguay ("YYYY-MM-DD"). inscribir_evento aplica las mismas reglas en el server.
+ */
+export function inscripcionAbierta(
+  evt: Pick<Event, 'inscripcionesAbiertas' | 'inscripcionesCierre' | 'date' | 'endDate'>,
+  hoy: string,
+): boolean {
+  if (!evt.inscripcionesAbiertas) return false;
+  if (evt.inscripcionesCierre && evt.inscripcionesCierre < hoy) return false;
+  return (evt.endDate || evt.date) >= hoy;
+}
 
 /** Costo de una inscripción: $base incluye N categorías, cada adicional suma $extra. */
 export function costoInscripcion(nCategorias: number, tarifa: TarifaEvento): number {

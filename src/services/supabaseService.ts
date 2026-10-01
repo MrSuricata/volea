@@ -614,6 +614,7 @@ export const SupabaseService = {
       phone: row.phone || '',
       endDate: row.end_date || '',
       inscripcionesAbiertas: row.inscripciones_abiertas === true,
+      inscripcionesCierre: row.inscripciones_cierre || '',
       categorias: row.categorias || '',
       // Topes DUPR por categoría (editables desde la pestaña Inscripciones).
       topes: row.topes && typeof row.topes === 'object' && !Array.isArray(row.topes)
@@ -640,7 +641,7 @@ export const SupabaseService = {
   // UN evento por vez, y devuelve si la nube lo aceptó. Antes se re-subía la lista
   // entera sin mirar errores: una pestaña vieja que editaba OTRO evento volvía a abrir
   // las inscripciones que se habían cerrado desde el celular (ver utils/filas.ts).
-  // topes y tarifa no viajan: los editan la pestaña Inscripciones y el SQL.
+  // topes, tarifa y cierre de inscripciones no viajan: los editan la pestaña Inscripciones y el SQL.
   async upsertEvent(e: Event): Promise<boolean> {
     if (!supabase) return true;
     const { error } = await conTechoEscritura(supabase.from('events').upsert({

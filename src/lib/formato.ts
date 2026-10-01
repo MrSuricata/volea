@@ -14,6 +14,13 @@ export const fechaEventoLarga = (iso: string): string => {
   return d.toLocaleDateString('es-UY', { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ_UY });
 };
 
+/** "jueves 8 de octubre" — día con nombre, para decir hasta cuándo hay tiempo. */
+export const fechaConDia = (iso: string): string => {
+  const d = new Date(`${iso}T12:00:00Z`); // mediodía UTC, como fechaEventoLarga
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-UY', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ_UY }).replace(',', '');
+};
+
 /** "22 al 24 de agosto de 2026" — rango en la ficha de un evento. */
 export const rangoLargo = (desde: string, hasta?: string): string => {
   const ini = fechaEventoLarga(desde);
