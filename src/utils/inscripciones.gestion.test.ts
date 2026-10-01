@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   armarSeccionesCategoria, buscanPareja, costoInscripcion, estadisticasTorneo, faltaInscribirse, generoDe, resumenArmado,
-  MIN_UNIDADES_VIABLE,
+  textoTarifa, MIN_UNIDADES_VIABLE,
 } from './inscripciones';
 import type { Inscripcion } from '../types';
 
@@ -53,6 +53,25 @@ describe('costoInscripcion', () => {
   it('cada categoría adicional suma el extra', () => {
     expect(costoInscripcion(4, tarifa)).toBe(1400);
     expect(costoInscripcion(6, tarifa)).toBe(1800);
+  });
+  it('aniversario de Pickleball City: $900 las 2 primeras y $300 cada adicional', () => {
+    const t = { base: 900, incluye: 2, extra: 300, max: 4 };
+    expect([1, 2, 3, 4].map(n => costoInscripcion(n, t))).toEqual([900, 900, 1200, 1500]);
+  });
+});
+
+describe('textoTarifa', () => {
+  const plata = (n: number) => `$${n}`;
+  it('dice lo que incluye la base, el adicional y el tope', () => {
+    expect(textoTarifa({ base: 900, incluye: 2, extra: 300, max: 4 }, plata))
+      .toBe('$900 las primeras 2 categorías · $300 cada categoría adicional · máximo 4 categorías por participante');
+  });
+  it('una sola categoría incluida va en singular, y sin tope no lo nombra', () => {
+    expect(textoTarifa({ base: 1200, incluye: 1, extra: 200 }, plata))
+      .toBe('$1200 la primera categoría · $200 cada categoría adicional');
+  });
+  it('sin adicional es un precio fijo', () => {
+    expect(textoTarifa({ base: 600, incluye: 1, extra: 0 }, plata)).toBe('$600 la inscripción');
   });
 });
 const insc = (id: string, nombre: string, categorias: string, parejas: Record<string, string> = {}): Inscripcion =>

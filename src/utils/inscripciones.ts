@@ -11,6 +11,21 @@ export function costoInscripcion(nCategorias: number, tarifa: TarifaEvento): num
   return tarifa.base + Math.max(0, nCategorias - tarifa.incluye) * tarifa.extra;
 }
 
+/**
+ * La tarifa dicha para el público: "$ 900 las primeras 2 categorías · $ 300 cada
+ * categoría adicional · máximo 4 categorías por participante". `plata` formatea montos.
+ */
+export function textoTarifa(tarifa: TarifaEvento, plata: (n: number) => string): string {
+  const partes = tarifa.extra > 0
+    ? [
+        `${plata(tarifa.base)} ${tarifa.incluye === 1 ? 'la primera categoría' : `las primeras ${tarifa.incluye} categorías`}`,
+        `${plata(tarifa.extra)} cada categoría adicional`,
+      ]
+    : [`${plata(tarifa.base)} la inscripción`];
+  if (tarifa.max) partes.push(`máximo ${tarifa.max} categorías por participante`);
+  return partes.join(' · ');
+}
+
 // ── Marca de "última visita" del badge de nuevas ──
 // Vive acá (y no en AdminInscripcionesTab) para que AdminPage y BarraAdmin
 // puedan consultar el badge sin arrastrar el chunk lazy de la pestaña.

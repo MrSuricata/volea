@@ -629,7 +629,10 @@ export const SupabaseService = {
       // La tarifa se setea por SQL; el upsert del admin no la incluye y no la pisa.
       tarifa: row.tarifa && typeof row.tarifa === 'object' && typeof row.tarifa.base === 'number'
         && typeof row.tarifa.incluye === 'number' && typeof row.tarifa.extra === 'number'
-        ? { base: row.tarifa.base, incluye: row.tarifa.incluye, extra: row.tarifa.extra }
+        ? {
+            base: row.tarifa.base, incluye: row.tarifa.incluye, extra: row.tarifa.extra,
+            ...(typeof row.tarifa.max === 'number' && row.tarifa.max > 0 ? { max: row.tarifa.max } : {}),
+          }
         : null,
     }));
   },

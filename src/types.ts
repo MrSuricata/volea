@@ -228,6 +228,8 @@ export interface TarifaEvento {
   base: number;
   incluye: number;
   extra: number;
+  /** Tope de categorías por participante; sin tope si falta. inscribir_evento también lo controla. */
+  max?: number;
 }
 
 /**

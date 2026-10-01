@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
-import { marcaVisitaInscripciones } from './utils/inscripciones';
+import { costoInscripcion, marcaVisitaInscripciones, textoTarifa } from './utils/inscripciones';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, Promo } from './types';
 import { hoyMontevideo, precioConPromo, totalesConPromo, ventanaPromo } from './utils/promo';
 import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
@@ -3191,6 +3191,11 @@ function InscripcionPage() {
   }, [eventId, listo]);
 
   const opcionesCategorias = (evt?.categorias || '').split(',').map(c => c.trim()).filter(Boolean);
+  // Tarifa del evento (se carga por SQL): el form dice cuánto sale y respeta el tope de
+  // categorías por participante. inscribir_evento vuelve a controlar el tope en el server.
+  const tarifa = evt?.tarifa ?? null;
+  const maxCats = tarifa?.max ?? null;
+  const topeAlcanzado = maxCats !== null && cats.length >= maxCats;
   const categoriasElegidas = opcionesCategorias.length > 0 ? cats.join(', ') : catLibre.trim();
   // Un campo de pareja por cada categoría de dobles elegida (dobles = contiene "doble").
   const catsDobles = (opcionesCategorias.length > 0 ? cats : [catLibre.trim()])
@@ -3200,6 +3205,8 @@ function InscripcionPage() {
   const toggleCat = (c: string) => {
     // Al destildar una categoría se descarta su pareja (si vuelve, la escribe de nuevo).
     if (cats.includes(c)) setParejas(p => { const { [c]: _, ...resto } = p; return resto; });
+    // Con el tope alcanzado solo se puede destildar (el botón ya sale deshabilitado).
+    else if (topeAlcanzado) return;
     setCats(prev => (prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]));
   };
 
@@ -3291,7 +3298,12 @@ function InscripcionPage() {
             ? 'Ya tenías una inscripción con este celular: la actualizamos con estos datos.'
             : `Te esperamos en el ${evt.name}.`}
         </p>
-        <p className="text-gray-500 mb-8">La organización te va a contactar para coordinar el pago.</p>
+        <p className="text-gray-500 mb-8">
+          {tarifa && cats.length > 0 && (
+            <>Tu inscripción: <strong className="text-navy-700">{formatPrice(costoInscripcion(cats.length, tarifa))}</strong>. </>
+          )}
+          La organización te va a contactar para coordinar el pago.
+        </p>
         {wa && (
           <a
             href={`https://wa.me/${wa}?text=${encodeURIComponent(`Hola! Me inscribí online al ${evt.name} (soy ${form.nombre.trim()}). Quiero coordinar el pago.`)}`}
@@ -3366,7 +3378,8 @@ function InscripcionPage() {
                     type="button"
                     onClick={() => toggleCat(c)}
                     aria-pressed={cats.includes(c)}
-                    className={`rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors ${
+                    disabled={!cats.includes(c) && topeAlcanzado}
+                    className={`rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-200 ${
                       cats.includes(c)
                         ? 'border-navy-700 bg-navy-700 text-white'
                         : 'border-gray-200 text-navy-700 hover:border-navy-700'
@@ -3376,7 +3389,25 @@ function InscripcionPage() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">Tocá todas las categorías en las que jugás.</p>
+              <p className="mt-1.5 text-xs text-gray-400">
+                Tocá todas las categorías en las que jugás{maxCats ? ` (hasta ${maxCats})` : ''}.
+                {topeAlcanzado ? ' Ya elegiste el máximo: destildá una para cambiarla.' : ''}
+              </p>
+              {tarifa && (
+                <div className="mt-3 rounded-lg bg-gray-50 px-4 py-3 text-sm text-navy-700">
+                  <p><span className="font-semibold">Inscripción:</span> {textoTarifa(tarifa, formatPrice)}.</p>
+                  {cats.length > 0 && (
+                    <p className="mt-1">
+                      <span className="font-display font-bold">
+                        Tu inscripción: {formatPrice(costoInscripcion(cats.length, tarifa))}
+                      </span>{' '}
+                      <span className="text-gray-500">
+                        ({cats.length} {cats.length === 1 ? 'categoría' : 'categorías'})
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <input type="text" placeholder="Ej: Doble Masculino B" value={catLibre}
