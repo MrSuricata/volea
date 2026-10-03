@@ -11,6 +11,9 @@ export type PartidoGrupo = {
   bId: string;
   puntosA: number | null;
   puntosB: number | null;
+  // W.O.: el partido no se jugó (alguien no se presentó o se retiró). El resultado cargado vale para
+  // la tabla y la llave, pero se muestra como W.O. y no es un partido jugado (no va a DUPR).
+  wo?: boolean;
 };
 
 export type SlotLlave =
@@ -27,6 +30,7 @@ export type PartidoLlave = {
   puntosA: number | null;
   puntosB: number | null;
   esTercerPuesto: boolean;
+  wo?: boolean; // W.O.: ver PartidoGrupo
 };
 
 export type ConfigLlave = {
@@ -74,6 +78,13 @@ export function resultadoValido(puntosA: number | null, puntosB: number | null):
 export function resultadoDe(p: { puntosA: number | null; puntosB: number | null }): { a: number; b: number } | null {
   if (!resultadoValido(p.puntosA, p.puntosB)) return null;
   return { a: p.puntosA as number, b: p.puntosB as number };
+}
+
+// Marca o desmarca un partido como W.O. Al desmarcar se QUITA la clave (no queda `wo: false`): así el
+// JSON de los torneos ya guardados no cambia y alcanza con preguntar `partido.wo`.
+export function conWo<T extends { wo?: boolean }>(partido: T, wo: boolean): T {
+  const { wo: _wo, ...resto } = partido;
+  return (wo ? { ...resto, wo: true } : resto) as T;
 }
 
 // ----- Ranking / padron -----

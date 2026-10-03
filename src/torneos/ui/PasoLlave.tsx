@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronDown, ListChecks, Medal, RotateCcw, Shuffle, Trophy } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoLlave, Torneo } from '../engine/tipos';
-import { resultadoValido } from '../engine/tipos';
+import { conWo, resultadoValido } from '../engine/tipos';
 import { calcularClasificados, candidatosMejoresExtra, compararMetricas, opcionesClasificacion } from '../engine/clasificacion';
 import type { ConfigLlave, SlotLlave } from '../engine/tipos';
 import { armarLlave, borradosSiCorrijo, cargarResultadoLlave, ganadorPartido, podio, resolverSlot } from '../engine/llave';
@@ -399,6 +399,13 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
     }));
   }
 
+  function marcarWo(partido: PartidoLlave, wo: boolean) {
+    actualizar((t) => ({
+      ...t,
+      partidosLlave: t.partidosLlave ? t.partidosLlave.map((p) => (p.id === partido.id ? conWo(p, wo) : p)) : t.partidosLlave,
+    }));
+  }
+
   async function rearmar() {
     const teniaResultados = partidos.some((p) => resultadoValido(p.puntosA, p.puntosB));
     const ok = await dialogos.confirmar({
@@ -451,6 +458,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
           partido={p}
           partidos={partidos}
           onCargar={cargar}
+          onWo={marcarWo}
           etiquetaCancha={etiquetaCancha}
           procedenciaA={procA}
           procedenciaB={procB}
@@ -532,7 +540,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
       {tercero && (
         <div className="max-w-md">
           <h3 className="mb-2 font-display text-sm font-bold uppercase tracking-wide text-navy-700">3er puesto</h3>
-          <CajaPartido torneo={torneo} partido={tercero} partidos={partidos} onCargar={cargar} />
+          <CajaPartido torneo={torneo} partido={tercero} partidos={partidos} onCargar={cargar} onWo={marcarWo} />
         </div>
       )}
 
@@ -618,12 +626,14 @@ function ResumenClasificacion({ torneo, config, partidosLlave }: {
   );
 }
 
-function CajaPartido({ torneo, partido, partidos, onCargar, etiquetaCancha, procedenciaA, procedenciaB }: {
+function CajaPartido({ torneo, partido, partidos, onCargar, onWo, etiquetaCancha, procedenciaA, procedenciaB }: {
   torneo: Torneo;
   partido: PartidoLlave;
   partidos: PartidoLlave[];
   /** Mismo camino de antes (confirma borradosSiCorrijo antes de actualizar); ahora se llama una vez por resultado. */
   onCargar: (partido: PartidoLlave, a: number | null, b: number | null) => void | Promise<void>;
+  /** Marcar o desmarcar el partido como W.O. (no se jugó). */
+  onWo: (partido: PartidoLlave, wo: boolean) => void;
   etiquetaCancha?: string;
   procedenciaA?: string;
   procedenciaB?: string;
@@ -680,6 +690,22 @@ function CajaPartido({ torneo, partido, partidos, onCargar, etiquetaCancha, proc
           <Boton anchoCompleto icono={<Check size={18} strokeWidth={3} />} onClick={() => void borrador.confirmar()}>
             Guardar resultado
           </Boton>
+        </div>
+      )}
+      {jugable && !borrador.sucio && resultadoValido(partido.puntosA, partido.puntosB) && (
+        <div className="slot">
+          <button
+            type="button"
+            onClick={() => onWo(partido, !partido.wo)}
+            aria-pressed={!!partido.wo}
+            title="W.O.: el partido no se jugó. El resultado vale para la llave, pero no cuenta como partido jugado."
+            className={cn(
+              'rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 transition-colors',
+              partido.wo ? 'bg-amber-500 text-white ring-amber-500' : 'bg-white text-gray-500 ring-gray-300 hover:text-navy-700',
+            )}
+          >
+            W.O.
+          </button>
         </div>
       )}
       {invalido && !borrador.sucio && (

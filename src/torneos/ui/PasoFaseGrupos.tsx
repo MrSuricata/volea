@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoGrupo, Torneo } from '../engine/tipos';
-import { resultadoValido } from '../engine/tipos';
+import { conWo, resultadoValido } from '../engine/tipos';
 import { calcularTabla } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
@@ -18,8 +18,15 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   function cargarResultado(partidoId: string, puntosA: number | null, puntosB: number | null) {
     actualizar((t) => ({
       ...t,
-      partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId ? { ...p, puntosA, puntosB } : p)),
+      // Un W.O. sin resultado no existe: si se borra el puntaje, la marca se va con él.
+      partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId
+        ? conWo({ ...p, puntosA, puntosB }, !!p.wo && puntosA !== null && puntosB !== null)
+        : p)),
     }));
+  }
+
+  function marcarWo(partidoId: string, wo: boolean) {
+    actualizar((t) => ({ ...t, partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId ? conWo(p, wo) : p)) }));
   }
 
   const total = torneo.partidosGrupo.length;
@@ -121,6 +128,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
                           torneo={torneo}
                           partido={partidoPorId.get(turno.partidoId)!}
                           onCargar={cargarResultado}
+                          onWo={marcarWo}
                           conGrupo
                           cancha={turno.cancha}
                         />
@@ -142,7 +150,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
               {torneo.partidosGrupo
                 .filter((p) => p.grupoId === g.id)
                 .map((p) => (
-                  <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} />
+                  <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} onWo={marcarWo} />
                 ))}
             </div>
           </div>
@@ -164,10 +172,11 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   );
 }
 
-function FilaPartido({ torneo, partido, onCargar, conGrupo, cancha }: {
+function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
   torneo: Torneo;
   partido: PartidoGrupo;
   onCargar: (id: string, a: number | null, b: number | null) => void;
+  onWo: (id: string, wo: boolean) => void;
   conGrupo?: boolean;
   cancha?: number;
 }) {
@@ -175,10 +184,25 @@ function FilaPartido({ torneo, partido, onCargar, conGrupo, cancha }: {
   const valido = resultadoValido(partido.puntosA, partido.puntosB);
   const ganaA = valido && (partido.puntosA as number) > (partido.puntosB as number);
   const invalido = partido.puntosA !== null && partido.puntosB !== null && !valido;
-  const encabezado = (cancha !== undefined || (conGrupo && grupo)) ? (
+  // W.O.: se ofrece cuando ya hay resultado. El partido cuenta para la tabla, pero no se jugó.
+  const botonWo = valido ? (
+    <button
+      type="button"
+      onClick={() => onWo(partido.id, !partido.wo)}
+      aria-pressed={!!partido.wo}
+      title="W.O.: el partido no se jugó. El resultado vale para la tabla, pero no cuenta como partido jugado."
+      className={`ml-auto rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 transition-colors ${
+        partido.wo ? 'bg-amber-500 text-white ring-amber-500' : 'bg-white text-gray-500 ring-gray-300 hover:text-navy-700'
+      }`}
+    >
+      W.O.
+    </button>
+  ) : null;
+  const encabezado = (cancha !== undefined || (conGrupo && grupo) || botonWo) ? (
     <>
       {cancha !== undefined && <Insignia tono="navy" className="bg-navy-700 text-white ring-0">Cancha {cancha}</Insignia>}
       {conGrupo && grupo && <Insignia>Grupo {grupo.nombre}</Insignia>}
+      {botonWo}
     </>
   ) : undefined;
   return (

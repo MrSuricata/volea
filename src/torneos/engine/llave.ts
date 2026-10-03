@@ -1,5 +1,5 @@
 import type { PartidoLlave, SlotLlave } from './tipos';
-import { nuevoId, resultadoDe } from './tipos';
+import { conWo, nuevoId, resultadoDe } from './tipos';
 
 export type SeedInfo = { parejaId: string; grupoId: string };
 
@@ -155,8 +155,9 @@ export function cargarResultadoLlave(
     ? new Set(dependientesConResultado(partidoId, partidos).map((p) => p.id))
     : new Set<string>();
   const nuevos = partidos.map((p) => {
-    if (p.id === partidoId) return { ...p, puntosA, puntosB };
-    if (aBorrar.has(p.id)) return { ...p, puntosA: null, puntosB: null };
+    // Un W.O. sin resultado no existe: si el puntaje se borra, la marca se va con él.
+    if (p.id === partidoId) return conWo({ ...p, puntosA, puntosB }, !!p.wo && puntosA !== null && puntosB !== null);
+    if (aBorrar.has(p.id)) return conWo({ ...p, puntosA: null, puntosB: null }, false);
     return p;
   });
   return { partidos: nuevos, borrados: aBorrar.size };

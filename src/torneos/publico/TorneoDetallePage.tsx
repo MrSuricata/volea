@@ -210,7 +210,9 @@ function FilaResultado({ torneo, partido }: { torneo: Torneo; partido: PartidoGr
   return (
     <div className="fila-partido">
       <span className={`lado ${ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.aId)}</span>
-      <span className="chip">{valido ? `${partido.puntosA} – ${partido.puntosB}` : 'sin jugar'}</span>
+      <span className="chip" title={valido && partido.wo ? 'W.O.: el partido no se jugó' : undefined}>
+        {valido ? `${partido.wo ? 'W.O. · ' : ''}${partido.puntosA} – ${partido.puntosB}` : 'sin jugar'}
+      </span>
       <span className={`lado der ${valido && !ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.bId)}</span>
     </div>
   );
@@ -317,6 +319,9 @@ function CajaPartidoPublica({ torneo, partido, partidos, procedenciaA, procedenc
         </span>
         {idB !== null && partido.puntosB !== null && <span className="puntaje-llave">{partido.puntosB}</span>}
       </div>
+      {partido.wo && partido.puntosA !== null && partido.puntosB !== null && (
+        <div className="slot"><span className="chip" title="W.O.: el partido no se jugó">W.O.</span></div>
+      )}
     </div>
   );
 }
