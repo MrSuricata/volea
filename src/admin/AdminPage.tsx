@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo, Suspense, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound } from 'lucide-react';
+import { Activity, Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Product, SocioName, VentaCajaInput, GastoPendienteInput } from '../types';
 import { SupabaseService } from '../services/supabaseService';
@@ -42,6 +42,7 @@ const AdminCajaTab = lazyConRecarga(() =>
 );
 const AdminInscripcionesTab = lazyConRecarga(() => import('../components/AdminInscripcionesTab'));
 const AdminJugadoresTab = lazyConRecarga(() => import('../components/AdminJugadoresTab'));
+const DuprTab = lazyConRecarga(() => import('../dupr/DuprTab'));
 const AdminPedidosTab = lazyConRecarga(() => import('../components/AdminPedidosTab'));
 const AdminTareasTab = lazyConRecarga(() => import('../components/AdminTareasTab'));
 const AdminTanteadorTab = lazyConRecarga(() => import('../components/AdminTanteadorTab'));
@@ -385,6 +386,7 @@ export default function AdminPage() {
         { id: 'tanteador', label: 'Tanteador', icon: <Swords size={16} /> },
         { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
         { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
+        { id: 'dupr', label: 'DUPR', icon: <Activity size={16} /> },
         { id: 'events', label: 'Eventos', icon: <CalendarDays size={16} /> },
         { id: 'standings', label: 'Clasificación', icon: <BarChart3 size={16} /> },
       ],
@@ -610,6 +612,11 @@ export default function AdminPage() {
             {activeTab === 'jugadores' && (
               <Suspense fallback={<CargandoFilas />}>
                 <AdminJugadoresTab loadLedgerFull={loadLedgerFull} />
+              </Suspense>
+            )}
+            {activeTab === 'dupr' && (
+              <Suspense fallback={<CargandoFilas />}>
+                <DuprTab />
               </Suspense>
             )}
             {activeTab === 'caja' && (

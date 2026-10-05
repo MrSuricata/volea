@@ -676,7 +676,7 @@ export const SupabaseService = {
    * Sin isSupabaseConnected(): misma regla que las escrituras del admin — se
    * intenta siempre que haya cliente, el probe frío da falsos negativos.
    */
-  async inscribirEvento(i: InscripcionInput): Promise<{ ok: boolean; actualizada?: boolean; error?: string }> {
+  async inscribirEvento(i: InscripcionInput): Promise<{ ok: boolean; id?: string; actualizada?: boolean; error?: string }> {
     if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
     const { data, error } = await conTechoEscritura(supabase.rpc('inscribir_evento', {
       p_event_id: i.eventId,
@@ -695,6 +695,7 @@ export const SupabaseService = {
     }
     return {
       ok: data?.ok === true,
+      id: typeof data?.id === 'string' ? data.id : undefined,
       actualizada: data?.actualizada === true,
       error: typeof data?.error === 'string' ? data.error : undefined,
     };

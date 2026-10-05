@@ -11,6 +11,9 @@ import {
 import { Toaster, toast } from 'sonner';
 import { waUruguay } from './utils/telefono';
 import { costoInscripcion, inscripcionAbierta, marcaVisitaInscripciones, textoTarifa } from './utils/inscripciones';
+import ConectarDupr from './dupr/ConectarDupr';
+import { asociarInscripcion, configDupr } from './dupr/dupr';
+import type { ConexionDupr, ConfigDuprWeb } from './dupr/dupr';
 import type { Product, CartItem, Event, Order, CustomerInfo, Category, ProductColor, Club, Announcement, Post, StandingEntry, Inscripcion, Promo } from './types';
 import { hoyMontevideo, precioConPromo, totalesConPromo, ventanaPromo } from './utils/promo';
 import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/filas';
@@ -3151,6 +3154,15 @@ function InscripcionPage() {
   const evt = events.find(e => e.id === eventId);
 
   const [form, setForm] = useState({ nombre: '', celular: '', email: '', duprId: '', notas: '' });
+  // Con la integración de DUPR activa el DUPR ID no se escribe: sale de "Conectar con DUPR",
+  // comprobado por el servidor. Apagada (sin claves), queda el campo a mano de siempre.
+  const [duprWeb, setDuprWeb] = useState<ConfigDuprWeb>({ habilitado: false });
+  const [dupr, setDupr] = useState<ConexionDupr | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void configDupr().then((c) => { if (vivo) setDuprWeb(c); });
+    return () => { vivo = false; };
+  }, []);
   const [cats, setCats] = useState<string[]>([]);
   const [catLibre, setCatLibre] = useState('');
   // Pareja POR categoría de dobles: {"Doble Mixto A": "Nombre"}. Quien juega
@@ -3228,12 +3240,17 @@ function InscripcionPage() {
             .filter(([c, v]) => catsDobles.includes(c) && v.trim() !== '')
             .map(([c, v]) => [c, v.trim()]),
         ),
-        duprId: form.duprId.trim(),
+        duprId: duprWeb.habilitado ? (dupr?.duprId ?? '') : form.duprId.trim(),
         notas: form.notas.trim(),
       });
       if (!r.ok) {
         toast.error(r.error || 'No pudimos enviar tu inscripción. Probá de nuevo.');
         return;
+      }
+      // La inscripción ya quedó: si conectó DUPR, se le asocia esa cuenta. Un fallo acá no la deshace.
+      if (dupr && r.id) {
+        const asociada = await asociarInscripcion(r.id, dupr.ticket);
+        if (!asociada.ok) toast.warning(asociada.error || 'Tu inscripción quedó, pero no pudimos asociarle tu cuenta DUPR.');
       }
       setListo({ actualizada: r.actualizada === true });
     } catch (err) {
@@ -3450,16 +3467,28 @@ function InscripcionPage() {
             <input id="insc-email" type="email" value={form.email}
               onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} />
           </div>
-          <div>
-            <label htmlFor="insc-dupr" className={labelCls}>Tu DUPR ID <span className="font-normal text-gray-400">(opcional)</span></label>
-            <input id="insc-dupr" type="text" placeholder="Ej: 7XZ4V2" value={form.duprId}
-              onChange={e => setForm({ ...form, duprId: e.target.value })} className={inputCls} />
-            <p className="mt-1 text-xs text-gray-400">
-              ¿No tenés? Creá tu cuenta gratis en{' '}
-              <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
-              y tus partidos contarán para tu rating mundial.
-            </p>
-          </div>
+          {duprWeb.habilitado ? (
+            <div>
+              <span className={labelCls}>Tu DUPR <span className="font-normal text-gray-400">(opcional)</span></span>
+              <ConectarDupr login={duprWeb.login} conexion={dupr} alConectar={setDupr} />
+              <p className="mt-1 text-xs text-gray-400">
+                Iniciás sesión en DUPR y traemos tu rating. ¿No tenés cuenta? Creala gratis en{' '}
+                <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
+                y tus partidos contarán para tu rating mundial.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label htmlFor="insc-dupr" className={labelCls}>Tu DUPR ID <span className="font-normal text-gray-400">(opcional)</span></label>
+              <input id="insc-dupr" type="text" placeholder="Ej: 7XZ4V2" value={form.duprId}
+                onChange={e => setForm({ ...form, duprId: e.target.value })} className={inputCls} />
+              <p className="mt-1 text-xs text-gray-400">
+                ¿No tenés? Creá tu cuenta gratis en{' '}
+                <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
+                y tus partidos contarán para tu rating mundial.
+              </p>
+            </div>
+          )}
         </div>
 
         <div>

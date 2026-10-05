@@ -178,8 +178,11 @@ $$;
 
 -- Asocia una inscripción recién hecha con la cuenta DUPR que la persona conectó. La llama el
 -- formulario público con el id que devolvió inscribir_evento y el ticket que devolvió el
--- servidor al conectar. En producción, si en el padrón hay UNA sola persona con ese nombre y
--- sin DUPR ID (o con el mismo), también se lo anota.
+-- servidor al conectar. En producción también anota el DUPR ID en el padrón, pero solo si:
+--   · el nombre de pila de la cuenta DUPR coincide con el de la inscripción (que alguien se
+--     anote con el nombre de otro y conecte SU cuenta no le cambia el DUPR a ese otro), y
+--   · en el padrón hay UNA sola persona con ese nombre, sin DUPR ID o con el mismo.
+-- No le cuenta al que llama qué encontró en el padrón.
 create or replace function public.inscripcion_conectar_dupr(p_inscripcion_id uuid, p_ticket uuid)
 returns jsonb
 language plpgsql
@@ -193,7 +196,6 @@ declare
   v_coinciden integer;
   v_jugador text;
   v_dupr_actual text;
-  v_padron text := 'sin cambios';
 begin
   select * into t from public.dupr_tickets where ticket = p_ticket for update;
   if not found or t.vence_at < pg_catalog.now() then
@@ -217,34 +219,30 @@ begin
 
   if t.entorno = 'prod' then
     select * into c from public.dupr_conexiones where entorno = t.entorno and dupr_id = t.dupr_id;
-    select pg_catalog.count(*), pg_catalog.min(j.id), pg_catalog.min(j.dupr_id)
-      into v_coinciden, v_jugador, v_dupr_actual
-      from public.rk_jugadores j
-     where public.dupr_nombre_comparable(j.nombre) = public.dupr_nombre_comparable(v_nombre)
-        or exists (
-          select 1 from pg_catalog.jsonb_array_elements_text(
-            case when pg_catalog.jsonb_typeof(j.alias) = 'array' then j.alias else '[]'::jsonb end) a(alias)
-          where public.dupr_nombre_comparable(a.alias) = public.dupr_nombre_comparable(v_nombre));
-    if v_coinciden = 1 and (coalesce(v_dupr_actual, '') = '' or v_dupr_actual = t.dupr_id) then
-      update public.rk_jugadores set
-        dupr_id = t.dupr_id,
-        dupr_rating = case when c.rating_dobles between 1 and 8 then c.rating_dobles else dupr_rating end,
-        dupr_rating_singles = case when c.rating_singles between 1 and 8 then c.rating_singles else dupr_rating_singles end,
-        dupr_rating_at = case when c.rating_dobles between 1 and 8 or c.rating_singles between 1 and 8
-          then (pg_catalog.now() at time zone 'America/Montevideo')::date else dupr_rating_at end,
-        updated_at = pg_catalog.now()
-      where id = v_jugador;
-      v_padron := 'anotado';
-    elsif v_coinciden = 1 then
-      v_padron := 'el padrón tiene otro DUPR ID';
-    elsif v_coinciden = 0 then
-      v_padron := 'no está en el padrón';
-    else
-      v_padron := 'hay más de una persona con ese nombre';
+    if c.nombre is not null
+       and pg_catalog.split_part(public.dupr_nombre_comparable(c.nombre), ' ', 1) = pg_catalog.split_part(public.dupr_nombre_comparable(v_nombre), ' ', 1) then
+      select pg_catalog.count(*), pg_catalog.min(j.id), pg_catalog.min(j.dupr_id)
+        into v_coinciden, v_jugador, v_dupr_actual
+        from public.rk_jugadores j
+       where public.dupr_nombre_comparable(j.nombre) = public.dupr_nombre_comparable(v_nombre)
+          or exists (
+            select 1 from pg_catalog.jsonb_array_elements_text(
+              case when pg_catalog.jsonb_typeof(j.alias) = 'array' then j.alias else '[]'::jsonb end) a(alias)
+            where public.dupr_nombre_comparable(a.alias) = public.dupr_nombre_comparable(v_nombre));
+      if v_coinciden = 1 and (coalesce(v_dupr_actual, '') = '' or v_dupr_actual = t.dupr_id) then
+        update public.rk_jugadores set
+          dupr_id = t.dupr_id,
+          dupr_rating = case when c.rating_dobles between 1 and 8 then c.rating_dobles else dupr_rating end,
+          dupr_rating_singles = case when c.rating_singles between 1 and 8 then c.rating_singles else dupr_rating_singles end,
+          dupr_rating_at = case when c.rating_dobles between 1 and 8 or c.rating_singles between 1 and 8
+            then (pg_catalog.now() at time zone 'America/Montevideo')::date else dupr_rating_at end,
+          updated_at = pg_catalog.now()
+        where id = v_jugador;
+      end if;
     end if;
   end if;
 
-  return pg_catalog.jsonb_build_object('ok', true, 'dupr_id', t.dupr_id, 'padron', v_padron);
+  return pg_catalog.jsonb_build_object('ok', true, 'dupr_id', t.dupr_id);
 end;
 $$;
 
