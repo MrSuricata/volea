@@ -68,9 +68,10 @@
 .rk .paso.hecho { color: var(--lima); border-color: var(--lima); }
 .rk button.paso.hecho { cursor: pointer; }
 .rk button.paso.hecho:hover { background: var(--lima-suave); }
-.rk input[type='text'], .rk input[type='number'], .rk select, .rk textarea { font-size: 1rem; padding: 9px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--navy-1); color: var(--texto); font-family: inherit; }
-.rk input[type='text']:focus, .rk input[type='number']:focus, .rk select:focus, .rk textarea:focus { border-color: var(--lima); box-shadow: 0 0 0 3px var(--lima-suave); outline: none; }
+.rk input[type='text'], .rk input[type='number'], .rk input[type='time'], .rk select, .rk textarea { font-size: 1rem; padding: 9px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--navy-1); color: var(--texto); font-family: inherit; }
+.rk input[type='text']:focus, .rk input[type='number']:focus, .rk input[type='time']:focus, .rk select:focus, .rk textarea:focus { border-color: var(--lima); box-shadow: 0 0 0 3px var(--lima-suave); outline: none; }
 .rk :focus-visible { outline: 2px solid var(--lima); outline-offset: 2px; }
+.rk input[type='time'] { color-scheme: dark; padding: 6px 8px; font-size: 0.9rem; }
 .rk input[type='number'].puntos { width: 72px; text-align: center; font-size: 1.25rem; font-weight: 800; }
 .rk table { width: 100%; border-collapse: collapse; background: var(--navy-3); border-radius: 12px; overflow: hidden; }
 .rk th, .rk td { padding: 10px 12px; text-align: center; border-bottom: 1px solid var(--borde); }
