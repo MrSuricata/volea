@@ -4,11 +4,12 @@ import type { Grupo, PartidoGrupo } from './tipos';
 import { nuevoId } from './tipos';
 import { mezclar } from './rng';
 
-// Cantidades de grupos válidas: ningún grupo con menos de 3;
-// 1 solo grupo únicamente cuando hay 3-5 parejas (torneo chico sin llave o con final directa)
+// Cantidades de grupos válidas: al repartir en varios grupos, ninguno con menos de 3;
+// 1 solo grupo únicamente con 2-5 parejas (torneo chico sin llave o con final directa).
+// Con 2 parejas el grupo es un único partido: una categoría chica que igual se juega.
 export function opcionesCantidadGrupos(cantParejas: number): number[] {
   const opciones: number[] = [];
-  if (cantParejas >= 3 && cantParejas <= 5) opciones.push(1);
+  if (cantParejas >= 2 && cantParejas <= 5) opciones.push(1);
   for (let g = 2; g <= Math.floor(cantParejas / 3); g++) opciones.push(g);
   return opciones;
 }

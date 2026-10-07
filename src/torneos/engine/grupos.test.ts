@@ -16,9 +16,17 @@ describe('opcionesCantidadGrupos', () => {
     expect(opcionesCantidadGrupos(10)).toEqual([2, 3]);
   });
 
-  it('con 3 a 5 parejas la única opción es 1 grupo', () => {
+  it('con 2 a 5 parejas la única opción es 1 grupo', () => {
+    expect(opcionesCantidadGrupos(2)).toEqual([1]); // final directa
     expect(opcionesCantidadGrupos(3)).toEqual([1]);
     expect(opcionesCantidadGrupos(5)).toEqual([1]);
+  });
+
+  it('con menos de 2 parejas no hay torneo', () => {
+    expect(opcionesCantidadGrupos(1)).toEqual([]);
+    expect(opcionesCantidadGrupos(0)).toEqual([]);
+    expect(sugerirCantidadGrupos(2)).toBe(1);
+    expect(sugerirCantidadGrupos(1)).toBe(0);
   });
 });
 

@@ -100,7 +100,8 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
   }
 
   const unidad = individual ? 'jugador' : 'pareja';
-  const minimo = individual ? 2 : 3;
+  // 2 parejas alcanzan: un grupo de 2 es una final directa (categorías chicas).
+  const minimo = 2;
   const lineasPegadas = sueltos.split('\n').map((s) => s.trim()).filter(Boolean).length;
 
   return (
@@ -146,7 +147,7 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
         >
           <ClipboardPaste size={18} className="shrink-0 text-navy-700" aria-hidden />
           <span className="min-w-0 flex-1 font-display text-sm font-bold text-navy-700">
-            {individual ? 'Pegar lista de jugadores' : '¿Tenés jugadores sueltos? Armar parejas'}
+            {individual ? 'Pegar lista de jugadores' : 'Pegar una lista de jugadores (armar parejas o singles)'}
           </span>
           <ChevronDown size={18} aria-hidden className={cn('shrink-0 text-gray-500 transition-transform', modoSueltos && 'rotate-180')} />
         </button>
@@ -155,7 +156,7 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
             <p className="text-sm text-gray-600">
               {individual
                 ? 'Un jugador por línea. Se agregan todos a la lista.'
-                : 'Un jugador por línea. "Emparejar en orden" arma 1º con 2º, 3º con 4º…; el sorteo los mezcla al azar.'}
+                : 'Un jugador por línea. "Emparejar en orden" arma 1º con 2º, 3º con 4º…; el sorteo los mezcla al azar. Para un cuadro de singles, "Uno por uno".'}
             </p>
             <AreaTexto
               rows={8}
@@ -172,6 +173,9 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
                 <Boton onClick={() => armarParejasDesdeLista(true)} disabled={lineasPegadas < 2}>Emparejar en orden</Boton>
                 <Boton variante="secundario" icono={<Shuffle size={18} />} onClick={() => armarParejasDesdeLista(false)} disabled={lineasPegadas < 2}>
                   Sortear al azar
+                </Boton>
+                <Boton variante="secundario" icono={<Plus size={18} />} onClick={agregarSueltos} disabled={lineasPegadas === 0}>
+                  Uno por uno (singles)
                 </Boton>
               </div>
             )}
@@ -191,12 +195,12 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
           </Boton>
         ) : (
           <Boton
-            disabled={torneo.parejas.length < 3}
+            disabled={torneo.parejas.length < minimo}
             onClick={() => actualizar((t) => ({ ...t, fase: 'grupos' }))}
-            icono={torneo.parejas.length < 3 ? undefined : <ArrowRight size={18} />}
+            icono={torneo.parejas.length < minimo ? undefined : <ArrowRight size={18} />}
             className="flex-row-reverse"
           >
-            {torneo.parejas.length < 3 ? `Seguir (mínimo ${minimo} ${unidad}s)` : 'Seguir: Grupos'}
+            {torneo.parejas.length < minimo ? `Seguir (mínimo ${minimo} ${unidad}s)` : 'Seguir: Grupos'}
           </Boton>
         )}
       />

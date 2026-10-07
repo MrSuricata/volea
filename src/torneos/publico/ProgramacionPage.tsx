@@ -117,8 +117,10 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
   }
   t.partidosLlave = llave;
   t.configLlave = { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false };
+  // el cuadro pasa a la llave (el gestor abre directo ahí) y la columna fase acompaña al documento
+  t.fase = 'llave';
   const { data: upd, error: e2 } = await sb.from('rk_torneos')
-    .update({ data: t, updated_at: new Date().toISOString() })
+    .update({ data: t, fase: 'llave', updated_at: new Date().toISOString() })
     .eq('id', torneoId)
     .eq('updated_at', fila.updated_at as string)
     .select('id');

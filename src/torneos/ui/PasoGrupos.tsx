@@ -106,7 +106,9 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
 
   const asignados = new Set(torneo.grupos.flatMap((g) => g.parejaIds));
   const sinAsignar = torneo.parejas.filter((p) => !asignados.has(p.id));
-  const grupoChico = torneo.grupos.find((g) => g.parejaIds.length > 0 && g.parejaIds.length < 3);
+  // Con un solo grupo alcanzan 2 parejas (final directa); repartidas en varios, 3 por grupo.
+  const minimoPorGrupo = torneo.grupos.length === 1 ? 2 : 3;
+  const grupoChico = torneo.grupos.find((g) => g.parejaIds.length > 0 && g.parejaIds.length < minimoPorGrupo);
   const grupoVacio = torneo.grupos.some((g) => g.parejaIds.length === 0);
   const listo = torneo.grupos.length > 0 && sinAsignar.length === 0 && !grupoChico && !grupoVacio;
 
@@ -153,7 +155,7 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
           />
         </div>
         <div className="mt-2 space-y-2 empty:hidden">
-          {opciones.length === 0 && <Nota tono="alerta">Con {cantParejas} parejas no se puede armar ningún grupo válido (mínimo 3).</Nota>}
+          {opciones.length === 0 && <Nota tono="alerta">Con {cantParejas} parejas no se puede armar ningún grupo válido (mínimo 2).</Nota>}
           {opciones.length > 0 && !opciones.includes(cantidadActual) && (
             <Nota>
               La cantidad de grupos actual ({torneo.grupos.length}) ya no sirve para {cantParejas} parejas: elegí una nueva y volvé a sortear.
@@ -163,7 +165,7 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
             <Nota>Faltan asignar {sinAsignar.length}: usá el selector de cada pareja o el sorteo.</Nota>
           )}
           {grupoChico && sinAsignar.length === 0 && (
-            <Nota>El grupo {grupoChico.nombre} tiene menos de 3 parejas: mové alguna.</Nota>
+            <Nota>El grupo {grupoChico.nombre} tiene menos de {minimoPorGrupo} parejas: mové alguna.</Nota>
           )}
         </div>
       </div>
@@ -178,7 +180,7 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {torneo.grupos.map((g) => (
-          <BloqueGrupo key={g.id} titulo={`Grupo ${g.nombre}`} cantidad={g.parejaIds.length} chico={g.parejaIds.length > 0 && g.parejaIds.length < 3}>
+          <BloqueGrupo key={g.id} titulo={`Grupo ${g.nombre}`} cantidad={g.parejaIds.length} chico={g.parejaIds.length > 0 && g.parejaIds.length < minimoPorGrupo}>
             {g.parejaIds.map((id) => (
               <FilaAsignacion key={id} torneo={torneo} parejaId={id} onAsignar={asignar} onQuitar={quitar} />
             ))}
