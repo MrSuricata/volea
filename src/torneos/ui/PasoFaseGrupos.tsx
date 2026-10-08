@@ -164,7 +164,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
         )}
         derecha={(
           <Boton onClick={() => void irALlave()} icono={<ArrowRight size={18} />} className="flex-row-reverse">
-            {torneo.partidosLlave ? 'Ver llave' : 'Armar llave'}
+            {torneo.partidosLlave ? 'Ver llave' : torneo.sinLlave ? 'Terminar' : 'Armar llave'}
           </Boton>
         )}
       />

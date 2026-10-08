@@ -878,7 +878,7 @@ export default function ProgramacionPage() {
         </div>
 
             {modoCarga && catsDelDia
-              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado)
+              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && !c.sinLlave)
               .map((c) => (
                 <div key={c.torneoId} style={{ ...carta, borderColor: 'var(--lima)', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 800 }}>🏁 {c.corto}: grupos completos</span>

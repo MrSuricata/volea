@@ -102,6 +102,7 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
   // extras elegidos a mano (parejaIds); null = automático por métricas
   const [extrasManuales, setExtrasManuales] = useState<string[] | null>(null);
   const esGrupoUnico = torneo.grupos.length === 1;
+  const americano = !!torneo.sinLlave && esGrupoUnico;
 
   const opcion = opciones[elegida] as (typeof opciones)[number] | undefined;
 
@@ -143,6 +144,26 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
     const ok = await dialogos.confirmar({ titulo: 'Terminar sin llave', mensaje: 'El campeón es el 1º de la tabla del grupo. ¿Terminar el torneo así?', textoConfirmar: 'Terminar' });
     if (!ok) return;
     actualizar((t) => ({ ...t, fase: 'terminado' }));
+  }
+
+  if (americano) {
+    return (
+      <section className="space-y-4">
+        <Tarjeta titulo="Americano: sin llave">
+          <p className="text-sm text-gray-600">
+            Todos contra todos a una vuelta: el campeón es el 1º de la tabla y el subcampeón el 2º.
+          </p>
+        </Tarjeta>
+        <PiePaso
+          izquierda={(
+            <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
+              Fase de grupos
+            </Boton>
+          )}
+          derecha={<Boton icono={<Check size={18} />} onClick={() => void terminarSinLlave()}>Terminar: campeón el 1º</Boton>}
+        />
+      </section>
+    );
   }
 
   return (

@@ -366,3 +366,26 @@ describe('programarEvento', () => {
     });
   });
 });
+
+describe('americano (sin llave)', () => {
+  const gente = ['OMAR', 'CRISTIAN', 'FABIAN', 'MICHAEL'];
+  const cfg = { corto: 'SINGLES MASCULINO +50', dia: 'VIE', orden: null, noAntes: null };
+
+  it('no proyecta final ni ofrece armar la llave', () => {
+    const cat = armarCategoria(conGrupoDe4('SINGLES MASCULINO +50 ANIVERSARIO', gente, {}) as Torneo, cfg);
+    const sin = armarCategoria({ ...conGrupoDe4('SINGLES MASCULINO +50 ANIVERSARIO', gente, {}), sinLlave: true }, cfg);
+    expect(cat.total).toBe(7); // 6 de grupo + la final proyectada
+    expect(sin.total).toBe(6);
+    expect(sin.pendientes.every((p) => p.fase.startsWith('Grupo'))).toBe(true);
+    expect(sin.sinLlave).toBe(true);
+  });
+
+  it('el campeón es el 1° de la tabla cuando se jugó todo', () => {
+    const res = { r1a: [11, 3], r1b: [11, 5], r2a: [11, 4], r2b: [6, 11], r3a: [11, 9], r3b: [11, 7] } as Record<string, [number, number]>;
+    const casi = armarCategoria({ ...conGrupoDe4('X +50', gente, { ...res, r3b: undefined as unknown as [number, number] }), sinLlave: true }, cfg);
+    expect(casi.campeon).toBeNull();
+    const todo = armarCategoria({ ...conGrupoDe4('X +50', gente, res), sinLlave: true }, cfg);
+    expect(todo.campeon).toBe('OMAR');
+  });
+});
+

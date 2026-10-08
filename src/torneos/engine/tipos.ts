@@ -61,6 +61,8 @@ export type Torneo = {
   cuentaParaRanking?: boolean; // undefined => cuenta; false => excluido (torneos de prueba)
   visible?: boolean; // interruptor "lo ve el publico" (default true); la web lo denormaliza a la columna rk_torneos.visible
   evento?: string; // torneos de parejas con el MISMO evento (ej. "26/7"): al jugador le cuenta solo el mejor de ellos
+  // "Americano": todos contra todos y el campeón es el 1° de la tabla (sin semis ni final). Solo con un grupo.
+  sinLlave?: boolean;
 };
 
 export function nuevoId(): string {
