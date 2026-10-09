@@ -744,14 +744,14 @@ export default function ProgramacionPage() {
         sigue: !et && s ? { cat: s.categoria, a: s.a, b: s.b } : null,
       };
     });
-    const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 6);
+    const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 5);
     return (
       <PantallaTv
         titulo={PROGRAMA.titulo}
         colores={PROGRAMA.colores}
         canchas={canchasTv}
         proximos={proximosTv}
-        resultados={cinta.slice(0, 6)}
+        resultados={cinta.slice(0, 5)}
         campeones={campeones.map((c) => ({ corto: c.corto, campeon: c.campeon as string }))}
         termina={(resumen[diaTv] ?? resumenDia).termina}
         ahora={new Date()}

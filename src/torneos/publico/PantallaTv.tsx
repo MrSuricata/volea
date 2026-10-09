@@ -2,7 +2,10 @@
 // de la web ni controles, con letra que escala con el tamaño de la pantalla (vw/vh) para
 // leerse a varios metros. Muestra las canchas, los próximos partidos, los últimos
 // resultados y los campeones. Los datos los calcula ProgramacionPage; acá solo se pintan.
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { SupabaseService } from '../../services/supabaseService';
+import { formatPrice } from '../../lib/formato';
+import type { Product } from '../../types';
 import { aHora } from './programa';
 
 export type CanchaTv = { cancha: string; cat: string | null; a: string | null; b: string | null; minutos: number | null; sigue: { cat: string; a: string; b: string } | null };
@@ -31,15 +34,59 @@ const chip: CSSProperties = {
   fontWeight: 800, fontSize: '0.62em', letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap',
 };
 
+// Publicidad VOLEA: lo que hay en stock de la tienda, destacados primero (se relee cada 10 min).
+function useVidriera(): Product[] {
+  const [lista, setLista] = useState<Product[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    const leer = () => void SupabaseService.getProducts().then((ps) => {
+      if (!vivo || !ps) return;
+      const conStock = ps.filter((p) => p.active !== false && p.images[0] && Object.values(p.stockBySize ?? {}).reduce((s, n) => s + (Number(n) || 0), 0) > 0);
+      setLista([...conStock.filter((p) => p.isFeatured), ...conStock.filter((p) => !p.isFeatured)].slice(0, 16));
+    });
+    leer();
+    const t = window.setInterval(leer, 10 * 60 * 1000);
+    return () => { vivo = false; window.clearInterval(t); };
+  }, []);
+  return lista;
+}
+
+function Vidriera({ productos }: { productos: Product[] }) {
+  if (productos.length === 0) return null;
+  return (
+    <section style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr', alignItems: 'stretch', background: '#fff', borderRadius: '0.6em', overflow: 'hidden', border: `2px solid ${LIMA}` }}>
+      <div style={{ background: LIMA, color: NAVY, padding: '0.35em 0.9em', display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.05 }}>
+        <span style={{ fontWeight: 900, fontSize: '1.15em', letterSpacing: '0.02em' }}>VESTÍ VOLEA</span>
+        <span style={{ fontWeight: 700, fontSize: '0.55em', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Ropa de pickleball · hecha en Uruguay</span>
+        <span style={{ fontWeight: 900, fontSize: '0.7em', marginTop: '0.15em' }}>@volea.uy</span>
+      </div>
+      <div style={{ overflow: 'hidden' }}>
+        <div style={{ display: 'inline-flex', whiteSpace: 'nowrap', animation: `rk-marquee ${Math.max(40, productos.length * 7)}s linear infinite`, willChange: 'transform' }}>
+          {[...productos, ...productos].map((p, i) => (
+            <div key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5em', padding: '0.25em 1em 0.25em 0.4em', color: NAVY }}>
+              <img src={p.images[0]} alt="" loading="eager" style={{ height: '3.4em', width: '3.4em', objectFit: 'contain', borderRadius: '0.3em', background: '#f2f4f7' }} />
+              <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                <span style={{ fontWeight: 800, fontSize: '0.72em', textTransform: 'uppercase' }}>{p.name}</span>
+                <span style={{ fontWeight: 900, fontSize: '0.95em' }}>{formatPrice(p.price)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function PantallaTv({ titulo, colores, canchas, proximos, resultados, campeones, termina, ahora }: Props) {
   const [c1, c2, c3] = colores;
+  const vidriera = useVidriera();
   const hora = ahora.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false });
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999, background: NAVY, color: '#fff', overflow: 'hidden', cursor: 'none',
       // Letra base: 1,5% del ancho, sin pasar el 2,7% del alto. En 1920×1080 ≈ 29px.
       fontSize: 'min(1.5vw, 2.7vh)', fontFamily: 'Lexend, Montserrat, system-ui, sans-serif',
-      display: 'grid', gridTemplateRows: 'auto auto 1fr', gap: '0.7em', padding: '0.9em 1.2em 1em',
+      display: 'grid', gridTemplateRows: 'auto auto 1fr auto', gap: '0.7em', padding: '0.9em 1.2em 1em',
     }}>
       <div aria-hidden style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -159,6 +206,8 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
           </div>
         </div>
       </section>
+
+      <Vidriera productos={vidriera} />
     </div>
   );
 }
