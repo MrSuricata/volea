@@ -17,6 +17,7 @@ import {
 } from './programa';
 import type { AjustesPrograma, CatProg, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
 import '../torneos.css';
+import PantallaTv from './PantallaTv';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
 // Dos vistas en una: los partidos PENDIENTES con hora y cancha estimadas (el reparto
@@ -729,6 +730,34 @@ export default function ProgramacionPage() {
     if (f) sugerencias.set(cancha, f);
   }
   const [color1, color2, color3] = PROGRAMA.colores;
+
+  // Modo TV (/programacion?tv): pantalla completa para la tele del club, sin controles.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('tv')) {
+    const diaTv = momento.dia ?? dia;
+    const canchasTv = activas.map((nombre) => {
+      const e = enCancha.find((x) => x.cancha === nombre);
+      const et = e ? etiquetaEnCancha(torneos, e) : null;
+      const s = sugerencias.get(nombre);
+      return {
+        cancha: nombre, cat: et?.cat ?? null, a: et?.a ?? null, b: et?.b ?? null,
+        minutos: et && e?.desde ? Math.max(0, Math.floor((Date.now() - new Date(e.desde).getTime()) / 60000)) : null,
+        sigue: !et && s ? { cat: s.categoria, a: s.a, b: s.b } : null,
+      };
+    });
+    const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 6);
+    return (
+      <PantallaTv
+        titulo={PROGRAMA.titulo}
+        colores={PROGRAMA.colores}
+        canchas={canchasTv}
+        proximos={proximosTv}
+        resultados={cinta.slice(0, 6)}
+        campeones={campeones.map((c) => ({ corto: c.corto, campeon: c.campeon as string }))}
+        termina={(resumen[diaTv] ?? resumenDia).termina}
+        ahora={new Date()}
+      />
+    );
+  }
 
   return (
     <div className="rk" style={{ position: 'relative' }}>
