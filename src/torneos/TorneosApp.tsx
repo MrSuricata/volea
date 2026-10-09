@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
-  ArrowLeft, Check, ChevronDown, Download, EyeOff, FileUp, Plus, SlidersHorizontal, Trash2, Trophy, Users,
+  ArrowLeft, Check, ChevronDown, Download, EyeOff, FileUp, Plus, Radio, Search, SlidersHorizontal, Trash2, Trophy, Users,
 } from 'lucide-react';
 import type { ConfigPuntos as TConfigPuntos, Jugador, Torneo } from './engine/tipos';
 import { CONFIG_PUNTOS_DEFAULT, nuevoId } from './engine/tipos';
 import { DialogosProvider, useDialogos } from './ui/dialogos';
 import { reconciliarTorneo } from './ui/reconciliar';
+import { agruparParaGestor, avanceDe } from './ui/listaGestor';
 import PasoParejas from './ui/PasoParejas';
 import PasoGrupos from './ui/PasoGrupos';
 import PasoFaseGrupos from './ui/PasoFaseGrupos';
@@ -52,6 +53,8 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
   const dialogos = useDialogos();
   const [torneoActivoId, setTorneoActivoId] = useState<string | null>(null);
   const [vista, setVista] = useState<'home' | 'ranking' | 'jugadores' | 'config'>('home');
+  const [busqueda, setBusqueda] = useState('');
+  const [verTerminados, setVerTerminados] = useState(false);
   const config = estado.configPuntos ?? CONFIG_PUNTOS_DEFAULT;
 
   const torneo = estado.torneos.find((t) => t.id === torneoActivoId) ?? null;
@@ -216,6 +219,20 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
             <input type="file" accept="application/json,.json" onChange={importar} className="sr-only" />
           </label>
         </nav>
+        {estado.torneos.length > 0 && (
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="relative flex-1">
+              <Search size={16} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Entrada
+                type="search" value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar torneo o evento…" aria-label="Buscar torneo o evento" className="pl-9"
+              />
+            </label>
+            <a href="/programacion" target="_blank" rel="noreferrer" className={cn(clasesAtajo, 'sm:w-auto sm:px-4')}>
+              <Radio size={18} aria-hidden /> Ver en vivo
+            </a>
+          </div>
+        )}
         {estado.torneos.length === 0 ? (
           <Vacio
             icono={<Trophy size={22} />}
@@ -224,20 +241,27 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
             accion={<Boton icono={<Plus size={18} />} onClick={crearTorneo}>Nuevo torneo</Boton>}
           />
         ) : (
-          <ul className="grid gap-2">
-            {estado.torneos.map((t) => {
+          (() => {
+            const grupos = agruparParaGestor(estado.torneos, busqueda);
+            const terminados = grupos.filter((g) => !g.enJuego);
+            const visibles = grupos.filter((g) => g.enJuego || verTerminados || busqueda.trim() !== '');
+            const filaTorneo = (t: Torneo) => {
               const individual = (t.formato ?? 'grupos') === 'individual';
               const sumaOculto = t.fase === 'terminado' && t.cuentaParaRanking !== false && t.visible === false;
+              const avance = avanceDe(t);
+              const completo = avance.total > 0 && avance.jugados === avance.total;
               return (
                 <li key={t.id} className="flex items-stretch rounded-xl border border-gray-200 bg-white transition-colors hover:border-navy-700">
                   <button type="button" className="min-w-0 flex-1 rounded-l-xl px-4 py-3 text-left" onClick={() => setTorneoActivoId(t.id)}>
                     <span className="block break-words font-display text-base font-bold leading-snug text-navy-700">{t.nombre}</span>
                     <span className="mt-2 flex flex-wrap gap-1.5">
                       <Insignia tono={TONO_FASE[t.fase]}>{ETIQUETA_FASE[t.fase]}</Insignia>
+                      {avance.total > 0 && t.fase !== 'terminado' && (
+                        <Insignia tono={completo ? 'bien' : 'neutro'}>{avance.jugados}/{avance.total} partidos</Insignia>
+                      )}
                       {t.categoria
                         ? <Insignia tono="navy">Cat {t.categoria}</Insignia>
                         : <Insignia tono="atencion">Sin categoría</Insignia>}
-                      {t.evento && !individual && <Insignia>Evento {t.evento}</Insignia>}
                       {t.visible === false && (
                         <Insignia><EyeOff size={12} aria-hidden /> Oculto</Insignia>
                       )}
@@ -255,8 +279,40 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
                   </div>
                 </li>
               );
-            })}
-          </ul>
+            };
+            return (
+              <div className="grid gap-6">
+                {visibles.length === 0 && (
+                  <p className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
+                    Ningún torneo coincide con “{busqueda}”.
+                  </p>
+                )}
+                {visibles.map((g) => (
+                  <section key={g.evento || '__sin_evento'} aria-label={g.titulo}>
+                    <h2 className="mb-2 flex flex-wrap items-center gap-2 font-display text-sm font-bold uppercase tracking-wider text-gray-500">
+                      {g.titulo}
+                      {g.enJuego
+                        ? <Insignia tono="navy" punto>En juego</Insignia>
+                        : <Insignia tono="bien">Terminado</Insignia>}
+                      <span className="font-body text-xs font-normal normal-case tracking-normal">{g.torneos.length} {g.torneos.length === 1 ? 'cuadro' : 'cuadros'}</span>
+                    </h2>
+                    <ul className="grid gap-2">{g.torneos.map(filaTorneo)}</ul>
+                  </section>
+                ))}
+                {terminados.length > 0 && busqueda.trim() === '' && (
+                  <button
+                    type="button"
+                    className="justify-self-start text-sm font-bold text-navy-700 underline-offset-4 hover:underline"
+                    onClick={() => setVerTerminados((v) => !v)}
+                  >
+                    {verTerminados
+                      ? 'Ocultar los eventos terminados'
+                      : `Ver ${terminados.length} ${terminados.length === 1 ? 'evento terminado' : 'eventos terminados'}`}
+                  </button>
+                )}
+              </div>
+            );
+          })()
         )}
       </main>
     );
