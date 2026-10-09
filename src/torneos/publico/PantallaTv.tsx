@@ -61,9 +61,9 @@ function Vidriera({ productos }: { productos: Product[] }) {
         <span style={{ fontWeight: 900, fontSize: '0.7em', marginTop: '0.15em' }}>@volea.uy</span>
       </div>
       <div style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'inline-flex', whiteSpace: 'nowrap', animation: `rk-marquee ${Math.max(40, productos.length * 7)}s linear infinite`, willChange: 'transform' }}>
+        <div style={{ display: 'flex', width: 'max-content', whiteSpace: 'nowrap', animation: `rk-marquee ${Math.max(40, productos.length * 7)}s linear infinite`, willChange: 'transform' }}>
           {[...productos, ...productos].map((p, i) => (
-            <div key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5em', padding: '0.25em 1em 0.25em 0.4em', color: NAVY }}>
+            <div key={i} style={{ display: 'flex', flexShrink: 0, alignItems: 'center', gap: '0.5em', padding: '0.25em 1.2em 0.25em 0.4em', color: NAVY }}>
               <img src={p.images[0]} alt="" loading="eager" style={{ height: '3.4em', width: '3.4em', objectFit: 'contain', borderRadius: '0.3em', background: '#f2f4f7' }} />
               <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
                 <span style={{ fontWeight: 800, fontSize: '0.72em', textTransform: 'uppercase' }}>{p.name}</span>
