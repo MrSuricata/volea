@@ -40,7 +40,9 @@ export function stockTotal(stockBySize: Record<string, number> | undefined): num
 // de bot_ledger (2026-08-09: powerade/empanadas/alfajor los más vendidos) con el
 // último precio conocido de cada uno. El precio es solo el default del botón:
 // en el modal queda editable. Para agregar o cambiar precios, editar acá.
-export interface VentaRapida { emoji: string; nombre: string; precio: number; }
+// promo: "2 por $30" → { cantidad: 2, precio: 30 } (los que sobran van a precio suelto).
+export interface PromoCantidad { cantidad: number; precio: number }
+export interface VentaRapida { emoji: string; nombre: string; precio: number; promo?: PromoCantidad }
 export const VENTAS_RAPIDAS: VentaRapida[] = [
   { emoji: '🥟', nombre: 'Empanada', precio: 100 },
   { emoji: '🥤', nombre: 'Powerade', precio: 80 },
@@ -54,15 +56,26 @@ export const VENTAS_RAPIDAS: VentaRapida[] = [
   { emoji: '🍫', nombre: 'Barrita', precio: 100 },
   { emoji: '🥧', nombre: 'Pastafrola', precio: 80 },
   { emoji: '🍕', nombre: 'Pizza', precio: 100 },
+  { emoji: '⚡', nombre: 'Electrolitos', precio: 70 },
+  { emoji: '🍭', nombre: 'Pico dulce', precio: 20, promo: { cantidad: 2, precio: 30 } },
+  { emoji: '🍬', nombre: 'Gomitas Finni', precio: 20, promo: { cantidad: 2, precio: 30 } },
+  { emoji: '🌿', nombre: 'Mentitas', precio: 30 },
 ];
 
-export interface ItemCarrito { nombre: string; precio: number; veces: number }
+export interface ItemCarrito { nombre: string; precio: number; veces: number; promo?: PromoCantidad }
+
+/** Total de un ítem aplicando la promo por cantidad: 3 picos a "$20 / 2 por $30" = $50. */
+export function montoItem(i: ItemCarrito): number {
+  const p = i.promo;
+  if (!p || p.cantidad < 2) return i.precio * i.veces;
+  return Math.floor(i.veces / p.cantidad) * p.precio + (i.veces % p.cantidad) * i.precio;
+}
 
 // Carrito de sueltos: varios ítems distintos suman en UNA venta (pedido de
 // Brian 15/8 — antes tocar otro botón pisaba el anterior). Arma el detalle
 // ("Empanada + 2× Coca + Cookie") y el total. Puro para poder testearlo.
 export function resumenCarrito(items: ItemCarrito[]): { nombre: string; monto: number } {
   const partes = items.map(i => (i.veces === 1 ? i.nombre : `${i.veces}× ${i.nombre}`));
-  const monto = items.reduce((s, i) => s + i.precio * i.veces, 0);
+  const monto = items.reduce((s, i) => s + montoItem(i), 0);
   return { nombre: partes.join(' + '), monto };
 }

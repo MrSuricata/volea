@@ -68,3 +68,18 @@ describe('resumenCarrito', () => {
     expect(resumenCarrito([])).toEqual({ nombre: '', monto: 0 });
   });
 });
+
+describe('promo por cantidad', () => {
+  const pico = { nombre: 'Pico dulce', precio: 20, promo: { cantidad: 2, precio: 30 } };
+  it('1 a precio suelto, 2 a precio promo, 3 = promo + suelto', () => {
+    expect(resumenCarrito([{ ...pico, veces: 1 }]).monto).toBe(20);
+    expect(resumenCarrito([{ ...pico, veces: 2 }]).monto).toBe(30);
+    expect(resumenCarrito([{ ...pico, veces: 3 }]).monto).toBe(50);
+    expect(resumenCarrito([{ ...pico, veces: 4 }]).monto).toBe(60);
+  });
+  it('se suma con otros ítems', () => {
+    expect(resumenCarrito([{ ...pico, veces: 2 }, { nombre: 'Electrolitos', precio: 70, veces: 1 }]))
+      .toEqual({ nombre: '2× Pico dulce + Electrolitos', monto: 100 });
+  });
+});
+

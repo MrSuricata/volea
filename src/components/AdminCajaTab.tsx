@@ -1050,7 +1050,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
     const idx = carrito.findIndex(i => i.nombre === v.nombre);
     const nuevo = idx >= 0
       ? carrito.map((i, j) => (j === idx ? { ...i, veces: i.veces + 1 } : i))
-      : [...carrito, { nombre: v.nombre, precio: v.precio, veces: 1 }];
+      : [...carrito, { nombre: v.nombre, precio: v.precio, veces: 1, promo: v.promo }];
     setCarrito(nuevo);
     const r = resumenCarrito(nuevo);
     setNombreSuelto(r.nombre);
@@ -1436,7 +1436,9 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
                       )}
                       <span aria-hidden className="block text-xl leading-none">{v.emoji}</span>
                       <span className="mt-1 block truncate text-xs font-bold text-navy-700">{v.nombre}</span>
-                      <span className="block text-[11px] tabular-nums text-gray-500">{formatoPlata(v.precio)}</span>
+                      <span className="block text-[11px] tabular-nums text-gray-500">
+                        {formatoPlata(v.precio)}{v.promo ? ` · ${v.promo.cantidad}×${formatoPlata(v.promo.precio)}` : ''}
+                      </span>
                     </button>
                   );
                 })}
