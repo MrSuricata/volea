@@ -335,7 +335,11 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
         esIndividual={esIndividual}
         actualizar={(cambio) => actualizarTorneo(torneo.id, cambio)}
       />
-      <Wizard torneo={torneo} actualizar={(cambio) => actualizarTorneo(torneo.id, cambio)} />
+      <Wizard
+        torneo={torneo}
+        actualizar={(cambio) => actualizarTorneo(torneo.id, cambio)}
+        agregarTorneos={(nuevos) => setEstado((e) => ({ ...e, torneos: [...nuevos, ...e.torneos] }))}
+      />
     </main>
   );
 }
@@ -425,7 +429,12 @@ function AjustesTorneo({ torneo, eventosUsados, esIndividual, actualizar }: {
 
 // Contrato de los pasos del wizard: `cambio` corre dentro del state updater de React,
 // así que debe ser PURO (nada de alerts/confirms adentro; esos van antes de llamar a actualizar).
-export type PropsPaso = { torneo: Torneo; actualizar: (cambio: (t: Torneo) => Torneo) => void };
+export type PropsPaso = {
+  torneo: Torneo;
+  actualizar: (cambio: (t: Torneo) => Torneo) => void;
+  /** Crea torneos nuevos (las copas de oro y plata salen de acá). */
+  agregarTorneos?: (nuevos: Torneo[]) => void;
+};
 
 const PASOS_GRUPOS: { fase: Exclude<Torneo['fase'], 'terminado'>; titulo: string }[] = [
   { fase: 'parejas', titulo: 'Parejas' },
@@ -438,7 +447,7 @@ const PASOS_INDIVIDUAL: { fase: Exclude<Torneo['fase'], 'terminado'>; titulo: st
   { fase: 'llave', titulo: 'Llave' },
 ];
 
-function Wizard({ torneo, actualizar }: PropsPaso) {
+function Wizard({ torneo, actualizar, agregarTorneos }: PropsPaso) {
   const dialogos = useDialogos();
   const individual = (torneo.formato ?? 'grupos') === 'individual';
   const PASOS = individual ? PASOS_INDIVIDUAL : PASOS_GRUPOS;
@@ -533,7 +542,7 @@ function Wizard({ torneo, actualizar }: PropsPaso) {
         {faseVisible === 'parejas' && <PasoParejas torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'grupos' && <PasoGrupos torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'faseGrupos' && <PasoFaseGrupos torneo={torneo} actualizar={actualizar} />}
-        {faseVisible === 'llave' && <PasoLlave torneo={torneo} actualizar={actualizar} />}
+        {faseVisible === 'llave' && <PasoLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />}
       </section>
     </>
   );

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { resolverSlot } from '../engine/llave';
+import { armarCopas } from '../engine/copas';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
@@ -126,6 +127,48 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
     .select('id');
   if (e2) return 'No se pudo guardar (¿sesión vencida?)';
   if (!upd || upd.length === 0) return 'Se editó desde otro lado: probá de nuevo';
+  return null;
+}
+
+// Copas de Oro y Plata: crea los dos cuadros, cierra el de grupos y hereda su lugar en el
+// programa (día, orden, "no antes") para que En vivo los ponga a continuación.
+async function armarCopasEnServidor(torneoId: string): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  const { data: fila, error } = await sb.from('rk_torneos').select('data, updated_at, evento').eq('id', torneoId).maybeSingle();
+  if (error || !fila) return 'No se pudo leer el torneo';
+  const t = fila.data as Torneo;
+  if (!t.copas) return 'Este cuadro no lleva copas';
+  const { data: ya } = await sb.from('rk_torneos').select('id').eq('id', `${torneoId}oro`).maybeSingle();
+  if (ya) return null; // ya estaban armadas
+  let copas: ReturnType<typeof armarCopas>;
+  try {
+    copas = armarCopas(t, { ids: { oro: `${torneoId}oro`, plata: `${torneoId}pla` } });
+  } catch (e) {
+    return e instanceof Error ? e.message : 'No se pudieron armar las copas';
+  }
+  const evento = (fila.evento as string | null) ?? t.evento ?? null;
+  const filaDe = (c: Torneo) => ({
+    id: c.id, nombre: c.nombre, fase: 'llave', categoria: c.categoria ?? null, visible: c.visible !== false,
+    cuenta_ranking: c.cuentaParaRanking !== false, data: c, creado_el: c.creadoEl, updated_at: c.creadoEl, evento,
+  });
+  const { error: e1 } = await sb.from('rk_torneos').insert([filaDe(copas.oro), filaDe(copas.plata)]);
+  if (e1) return 'No se pudieron crear las copas (¿sesión vencida?)';
+  const cerrado = { ...t, fase: 'terminado' as const };
+  const { data: upd, error: e2 } = await sb.from('rk_torneos')
+    .update({ data: cerrado, fase: 'terminado', updated_at: new Date().toISOString() })
+    .eq('id', torneoId)
+    .eq('updated_at', fila.updated_at as string)
+    .select('id');
+  if (e2 || !upd || upd.length === 0) return 'Las copas se crearon pero el cuadro de grupos no se pudo cerrar: cerralo desde el gestor';
+  // Lugar en el programa: el mismo que tenía el cuadro de grupos.
+  const { data: prog } = await sb.from('rk_programa').select('config').eq('clave', PROGRAMA.clave).maybeSingle();
+  const config = (prog?.config as AjustesPrograma | null) ?? {};
+  const propio = config.categorias?.[torneoId];
+  if (propio) {
+    const categorias = { ...config.categorias, [copas.oro.id]: { ...propio }, [copas.plata.id]: { ...propio } };
+    await sb.from('rk_programa').upsert({ clave: PROGRAMA.clave, config: { ...config, categorias }, updated_at: new Date().toISOString() });
+  }
   return null;
 }
 
@@ -878,7 +921,22 @@ export default function ProgramacionPage() {
         </div>
 
             {modoCarga && catsDelDia
-              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && !c.sinLlave)
+              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && c.copas)
+              .map((c) => (
+                <div key={`${c.torneoId}-copas`} style={{ ...carta, borderColor: 'var(--lima)', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 800 }}>🏁 {c.corto}: grupos completos</span>
+                  <button className="boton" onClick={async () => {
+                    if (!window.confirm(`Armar la Copa de Oro y la Copa de Plata de ${c.corto} con la tabla general. ¿Seguir?`)) return;
+                    const problema = await armarCopasEnServidor(c.torneoId);
+                    if (problema) window.alert(problema);
+                    void cargar(false);
+                  }}>
+                    Armar COPA DE ORO + COPA DE PLATA
+                  </button>
+                </div>
+              ))}
+            {modoCarga && catsDelDia
+              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && !c.sinLlave && !c.copas)
               .map((c) => (
                 <div key={c.torneoId} style={{ ...carta, borderColor: 'var(--lima)', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 800 }}>🏁 {c.corto}: grupos completos</span>

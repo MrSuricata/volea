@@ -9,6 +9,7 @@ import { armarLlave, borradosSiCorrijo, cargarResultadoLlave, ganadorPartido, po
 import { armarLlaveRolling } from '../engine/llaveIndividual';
 import { crearRng, mezclar } from '../engine/rng';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
+import { armarCopas, gruposCompletos, tablaGeneral } from '../engine/copas';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
@@ -16,16 +17,35 @@ import { Boton, Insignia, Interruptor, Segmentado, Tarjeta } from '../../admin/u
 import { cn } from '../../lib/cn';
 import { CajaPuntos, Nota, PiePaso, useBorradorMarcador } from './piezas';
 
-export default function PasoLlave({ torneo, actualizar }: PropsPaso) {
+export default function PasoLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
   const individual = (torneo.formato ?? 'grupos') === 'individual';
   if (individual) {
     if (!torneo.partidosLlave) return <ConfigurarLlaveIndividual torneo={torneo} actualizar={actualizar} />;
     return <VerLlave torneo={torneo} actualizar={actualizar} />;
   }
   if (torneo.fase === 'terminado' && !torneo.partidosLlave) {
+    if (torneo.copas && torneo.grupos.length > 1) {
+      return (
+        <section className="space-y-4">
+          <Tarjeta titulo="Copas armadas">
+            <p className="text-sm text-gray-600">
+              Este cuadro cerró con la fase de grupos. La Copa de Oro y la Copa de Plata son dos cuadros aparte en la lista de torneos:
+              ahí se cargan sus resultados y salen las campeonas.
+            </p>
+          </Tarjeta>
+          <PiePaso
+            izquierda={(
+              <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
+                Fase de grupos
+              </Boton>
+            )}
+          />
+        </section>
+      );
+    }
     return <CampeonDeGrupoUnico torneo={torneo} actualizar={actualizar} />;
   }
-  if (!torneo.partidosLlave) return <ConfigurarLlave torneo={torneo} actualizar={actualizar} />;
+  if (!torneo.partidosLlave) return <ConfigurarLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />;
   return <VerLlave torneo={torneo} actualizar={actualizar} />;
 }
 
@@ -94,7 +114,7 @@ function ConfigurarLlaveIndividual({ torneo, actualizar }: PropsPaso) {
   );
 }
 
-function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
+function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
   const dialogos = useDialogos();
   const opciones = opcionesClasificacion(torneo.grupos).slice(0, 4);
   const [elegida, setElegida] = useState(0);
@@ -144,6 +164,10 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
     const ok = await dialogos.confirmar({ titulo: 'Terminar sin llave', mensaje: 'El campeón es el 1º de la tabla del grupo. ¿Terminar el torneo así?', textoConfirmar: 'Terminar' });
     if (!ok) return;
     actualizar((t) => ({ ...t, fase: 'terminado' }));
+  }
+
+  if (torneo.copas && !esGrupoUnico) {
+    return <ConfigurarCopas torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />;
   }
 
   if (americano) {
@@ -760,6 +784,55 @@ function Campeon({ nombre, subcampeon, tercero, accion }: {
       )}
       {accion && <div className="mt-5">{accion}</div>}
     </div>
+  );
+}
+
+function ConfigurarCopas({ torneo, actualizar, agregarTorneos }: PropsPaso) {
+  const dialogos = useDialogos();
+  const completos = gruposCompletos(torneo);
+  const general = tablaGeneral(torneo);
+  const oro = torneo.copas?.oro ?? 0;
+  async function armar() {
+    if (!agregarTorneos) return;
+    const ok = await dialogos.confirmar({
+      titulo: 'Armar las copas',
+      mensaje: `Se crean dos cuadros nuevos: Copa de Oro con las ${oro} mejores de la tabla general y Copa de Plata con las ${torneo.parejas.length - oro} restantes. Este cuadro queda terminado.`,
+      textoConfirmar: 'Armar copas',
+    });
+    if (!ok) return;
+    const copas = armarCopas(torneo, { ids: { oro: `${torneo.id}oro`, plata: `${torneo.id}pla` } });
+    agregarTorneos([copas.oro, copas.plata]);
+    actualizar((t) => ({ ...t, fase: 'terminado' }));
+  }
+  return (
+    <section className="space-y-4">
+      <Tarjeta titulo="Copas de Oro y Plata">
+        <p className="text-sm text-gray-600">
+          Tabla general de todos los grupos: las {oro} mejores van a la Copa de Oro y las {torneo.parejas.length - oro} restantes a la Copa de Plata,
+          cada una con su llave (bye para las mejores). Entre primeras y segundas no cuenta el partido contra la última de los grupos más grandes;
+          de terceras para abajo se compara por promedio.
+        </p>
+        <ol className="mt-3 divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {general.map((f, i) => (
+            <li key={f.parejaId} className={cn('flex items-center gap-3 px-3 py-2 text-[15px]', i === oro && 'border-t-2 border-t-navy-700')}>
+              <span className="w-6 shrink-0 text-right text-[13px] font-semibold tabular-nums text-gray-500">{i + 1}</span>
+              <span className="min-w-0 flex-1 text-navy-700">{nombreDe(torneo, f.parejaId)}</span>
+              <span className="text-[12px] text-gray-500">{f.posicion}º {f.grupo} · PG {f.pg}/{f.pj} · dif {f.dif >= 0 ? '+' : ''}{f.dif}</span>
+              <Insignia tono={i < oro ? 'navy' : 'neutro'}>{i < oro ? 'Oro' : 'Plata'}</Insignia>
+            </li>
+          ))}
+        </ol>
+        {!completos && <Nota tono="alerta">Faltan partidos de grupo: la tabla es provisoria.</Nota>}
+      </Tarjeta>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
+            Fase de grupos
+          </Boton>
+        )}
+        derecha={<Boton icono={<Trophy size={18} />} disabled={!completos || !agregarTorneos} onClick={() => void armar()}>Armar COPA DE ORO + PLATA</Boton>}
+      />
+    </section>
   );
 }
 

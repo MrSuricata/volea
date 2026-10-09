@@ -2,6 +2,7 @@ import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { generarFixture } from '../engine/fixture';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
+import { rondasDeLlave } from '../engine/copas';
 import { ganadorPartido, resolverSlot } from '../engine/llave';
 import { repartirEnCanchas } from '../engine/programacion';
 import type { PartidoAProgramar } from '../engine/programacion';
@@ -192,6 +193,8 @@ export type CatProg = {
   llaveArmada: boolean;
   /** Americano: el campeón sale de la tabla, no hay llave que armar ni proyectar. */
   sinLlave: boolean;
+  /** Copas de Oro y Plata: al cerrar los grupos se arman dos cuadros aparte. */
+  copas: boolean;
 };
 
 /** Clave de un partido real dentro del evento. */
@@ -353,6 +356,28 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
         torneoId: t.id, partidoId: p.id, tipo: 'llave',
       });
     }
+  } else if (t.fase !== 'terminado' && total > 0 && t.copas) {
+    // Copas proyectadas: oro y plata avanzan en paralelo, ronda a ronda.
+    const oro = rondasDeLlave(t.copas.oro);
+    const plata = rondasDeLlave(t.parejas.length - t.copas.oro);
+    const etapas = Math.max(oro.length, plata.length);
+    etapasDeLlave = etapas;
+    let previos = deGrupo.map((p) => p.clave);
+    for (let w = 0; w < etapas; w++) {
+      const claves: string[] = [];
+      const etiqueta = (rondas: number[], i: number) => (i === rondas.length - 1 ? 'FINAL' : i === rondas.length - 2 ? 'SEMIS' : '4TOS');
+      for (const [copa, rondas] of [['ORO', oro], ['PLATA', plata]] as const) {
+        const i = w - (etapas - rondas.length);
+        if (i < 0) continue;
+        for (let k = 0; k < rondas[i]; k++) {
+          total += 1;
+          const clave = `${t.id}:${copa}:${w}:${k}`;
+          claves.push(clave);
+          deLlave.push({ clave, a: `Copa de ${copa === 'ORO' ? 'Oro' : 'Plata'}`, b: 'según tabla general', fase: `${copa} ${etiqueta(rondas, i)}`, jugadores: [], despuesDe: previos, nivel: etapas - w, listo: false });
+        }
+      }
+      previos = claves;
+    }
   } else if (t.fase !== 'terminado' && total > 0 && !t.sinLlave && !t.americanoIndividual) {
     const olas = llaveProyectada(nGrupos);
     etapasDeLlave = olas.length;
@@ -397,6 +422,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
     gruposCompletos: t.partidosGrupo.length > 0 && t.partidosGrupo.every((p) => resultadoDe(p) !== null),
     llaveArmada: llave.length > 0,
     sinLlave: !!t.sinLlave || !!t.americanoIndividual,
+    copas: !!t.copas,
   };
 }
 

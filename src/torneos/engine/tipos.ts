@@ -66,6 +66,11 @@ export type Torneo = {
   // Americano individual: dobles con compañero rotativo. Las "parejas" son las duplas de cada
   // partido y la tabla (y el campeón) se calculan por jugador (jugadorIds). Implica sinLlave.
   americanoIndividual?: boolean;
+  // Copas: al terminar los grupos, la tabla general manda las mejores `oro` parejas a una
+  // Copa de Oro y el resto a una Copa de Plata (dos torneos de llave sola, ver engine/copas).
+  copas?: { oro: number };
+  // En una copa: id del torneo del que salió.
+  copaDe?: string;
 };
 
 export function nuevoId(): string {
