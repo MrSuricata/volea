@@ -21,17 +21,18 @@ describe('nombresDePareja', () => {
 });
 
 describe('calcularTablaIndividual', () => {
-  it('suma a cada jugador lo de todas sus duplas y ordena por PG, dif, PF', () => {
+  it('suma a cada jugador lo de todas sus duplas y ordena por puntos a favor, dif, PG', () => {
     const tabla = calcularTablaIndividual(parejas, [
       partido('m1', 'p12', 'p34', 11, 5),
-      partido('m2', 'p13', 'p24', 11, 9),
+      partido('m2', 'p13', 'p24', 9, 11),
       partido('m3', 'p12', 'p34', null, null),
     ]);
-    expect(tabla.map((f) => [f.posicion, f.nombre, f.pj, f.pg, f.dif])).toEqual([
-      [1, 'ANA', 2, 2, 8],
-      [2, 'BEA', 2, 1, 4],
-      [3, 'CARO', 2, 1, -4],
-      [4, 'DANI', 2, 0, -8],
+    // BEA 11+11=22 (2 ganados) · ANA 11+9=20 · DANI 5+11=16 · CARO 5+9=14
+    expect(tabla.map((f) => [f.posicion, f.nombre, f.pj, f.pg, f.pf, f.dif])).toEqual([
+      [1, 'BEA', 2, 2, 22, 8],
+      [2, 'ANA', 2, 1, 20, 4],
+      [3, 'DANI', 2, 1, 16, -4],
+      [4, 'CARO', 2, 0, 14, -8],
     ]);
   });
   it('sin partidos lista a todos en cero', () => {

@@ -160,7 +160,8 @@ export function nombresDePareja(pareja: Pareja): Map<string, string> {
 
 /**
  * Tabla por jugador de un americano individual: cada partido suma a las dos personas de cada
- * dupla. Orden: partidos ganados, diferencia de puntos, puntos a favor, nombre.
+ * dupla. Se posicionan por PUNTOS A FAVOR (regla del americano); desempate por diferencia,
+ * partidos ganados y nombre.
  */
 export function calcularTablaIndividual(parejas: Pareja[], partidos: PartidoGrupo[]): FilaIndividual[] {
   const porPareja = new Map(parejas.map((p) => [p.id, p]));
@@ -184,7 +185,7 @@ export function calcularTablaIndividual(parejas: Pareja[], partidos: PartidoGrup
       }
     }
   }
-  const orden = [...filas.values()].sort((x, y) => y.pg - x.pg || y.dif - x.dif || y.pf - x.pf || x.nombre.localeCompare(y.nombre, 'es'));
+  const orden = [...filas.values()].sort((x, y) => y.pf - x.pf || y.dif - x.dif || y.pg - x.pg || x.nombre.localeCompare(y.nombre, 'es'));
   orden.forEach((f, i) => { f.posicion = i + 1; });
   return orden;
 }

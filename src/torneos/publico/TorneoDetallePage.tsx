@@ -179,7 +179,7 @@ function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
     return (
       <div className="carta" style={{ marginTop: 12 }}>
         <div className="grupo-titulo"><h3>Americano · tabla individual</h3></div>
-        <p className="vacio" style={{ padding: '0 0 10px' }}>Compañero rotativo: cada partido suma a los dos de la dupla. Campeón el 1º.</p>
+        <p className="vacio" style={{ padding: '0 0 10px' }}>Compañero rotativo: cada partido suma puntos a los dos de la dupla. Se posicionan por puntos a favor; campeón el 1º y subcampeón el 2º. Sin semis ni final.</p>
         <div className="tabla-scroll" style={{ marginBottom: 14 }}>
           <table>
             <thead>
