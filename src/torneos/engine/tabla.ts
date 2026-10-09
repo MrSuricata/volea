@@ -1,4 +1,4 @@
-import type { PartidoGrupo } from './tipos';
+import type { Pareja, PartidoGrupo } from './tipos';
 import { resultadoDe } from './tipos';
 
 export type FilaTabla = {
@@ -136,3 +136,56 @@ export function calcularTabla(parejaIds: string[], partidos: PartidoGrupo[]): Fi
   }
   return filas;
 }
+
+export type FilaIndividual = {
+  jugadorId: string;
+  nombre: string;
+  pj: number;
+  pg: number;
+  pp: number;
+  pf: number;
+  pc: number;
+  dif: number;
+  posicion: number;
+};
+
+/** Nombre de cada integrante de una dupla "A y B" según el orden de jugadorIds. */
+export function nombresDePareja(pareja: Pareja): Map<string, string> {
+  const ids = pareja.jugadorIds ?? [];
+  const partes = pareja.nombre.split(/\s+y\s+/i).map((s) => s.trim()).filter(Boolean);
+  const m = new Map<string, string>();
+  ids.forEach((id, i) => m.set(id, partes.length === ids.length ? partes[i] : pareja.nombre));
+  return m;
+}
+
+/**
+ * Tabla por jugador de un americano individual: cada partido suma a las dos personas de cada
+ * dupla. Orden: partidos ganados, diferencia de puntos, puntos a favor, nombre.
+ */
+export function calcularTablaIndividual(parejas: Pareja[], partidos: PartidoGrupo[]): FilaIndividual[] {
+  const porPareja = new Map(parejas.map((p) => [p.id, p]));
+  const filas = new Map<string, FilaIndividual>();
+  const fila = (id: string, nombre: string) => {
+    let f = filas.get(id);
+    if (!f) { f = { jugadorId: id, nombre, pj: 0, pg: 0, pp: 0, pf: 0, pc: 0, dif: 0, posicion: 0 }; filas.set(id, f); }
+    return f;
+  };
+  for (const p of parejas) for (const [id, nombre] of nombresDePareja(p)) fila(id, nombre);
+  for (const p of partidos) {
+    const r = resultadoDe(p);
+    const a = porPareja.get(p.aId);
+    const b = porPareja.get(p.bId);
+    if (!r || !a || !b) continue;
+    for (const [lado, propios, rivales] of [[a, r.a, r.b], [b, r.b, r.a]] as const) {
+      for (const [id, nombre] of nombresDePareja(lado)) {
+        const f = fila(id, nombre);
+        f.pj += 1; f.pf += propios; f.pc += rivales; f.dif = f.pf - f.pc;
+        if (propios > rivales) f.pg += 1; else f.pp += 1;
+      }
+    }
+  }
+  const orden = [...filas.values()].sort((x, y) => y.pg - x.pg || y.dif - x.dif || y.pf - x.pf || x.nombre.localeCompare(y.nombre, 'es'));
+  orden.forEach((f, i) => { f.posicion = i + 1; });
+  return orden;
+}
+

@@ -8,7 +8,7 @@ import type { ConfigLlave, SlotLlave } from '../engine/tipos';
 import { armarLlave, borradosSiCorrijo, cargarResultadoLlave, ganadorPartido, podio, resolverSlot } from '../engine/llave';
 import { armarLlaveRolling } from '../engine/llaveIndividual';
 import { crearRng, mezclar } from '../engine/rng';
-import { calcularTabla } from '../engine/tabla';
+import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
@@ -102,7 +102,7 @@ function ConfigurarLlave({ torneo, actualizar }: PropsPaso) {
   // extras elegidos a mano (parejaIds); null = automático por métricas
   const [extrasManuales, setExtrasManuales] = useState<string[] | null>(null);
   const esGrupoUnico = torneo.grupos.length === 1;
-  const americano = !!torneo.sinLlave && esGrupoUnico;
+  const americano = (!!torneo.sinLlave || !!torneo.americanoIndividual) && esGrupoUnico;
 
   const opcion = opciones[elegida] as (typeof opciones)[number] | undefined;
 
@@ -765,13 +765,15 @@ function Campeon({ nombre, subcampeon, tercero, accion }: {
 
 function CampeonDeGrupoUnico({ torneo, actualizar }: PropsPaso) {
   const grupo = torneo.grupos[0];
-  const filas = grupo ? calcularTabla(grupo.parejaIds, torneo.partidosGrupo) : [];
+  const podio: string[] = torneo.americanoIndividual
+    ? calcularTablaIndividual(torneo.parejas, torneo.partidosGrupo).map((f) => f.nombre)
+    : (grupo ? calcularTabla(grupo.parejaIds, torneo.partidosGrupo) : []).map((f) => nombreDe(torneo, f.parejaId));
   return (
     <section>
       <Campeon
-        nombre={filas[0] ? nombreDe(torneo, filas[0].parejaId) : '—'}
-        subcampeon={filas[1] ? nombreDe(torneo, filas[1].parejaId) : null}
-        tercero={filas[2] ? nombreDe(torneo, filas[2].parejaId) : null}
+        nombre={podio[0] ?? '—'}
+        subcampeon={podio[1] ?? null}
+        tercero={podio[2] ?? null}
         accion={(
           <button
             type="button"

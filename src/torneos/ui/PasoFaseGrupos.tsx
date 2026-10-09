@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoGrupo, Torneo } from '../engine/tipos';
 import { conWo, resultadoValido } from '../engine/tipos';
-import { calcularTabla } from '../engine/tabla';
+import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
@@ -164,7 +164,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
         )}
         derecha={(
           <Boton onClick={() => void irALlave()} icono={<ArrowRight size={18} />} className="flex-row-reverse">
-            {torneo.partidosLlave ? 'Ver llave' : torneo.sinLlave ? 'Terminar' : 'Armar llave'}
+            {torneo.partidosLlave ? 'Ver llave' : torneo.sinLlave || torneo.americanoIndividual ? 'Terminar' : 'Armar llave'}
           </Boton>
         )}
       />
@@ -223,6 +223,30 @@ function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
 function TablaGrupo({ torneo, grupoId }: { torneo: Torneo; grupoId: string }) {
   const grupo = torneo.grupos.find((g) => g.id === grupoId);
   if (!grupo) return null;
+  if (torneo.americanoIndividual) {
+    const jugadores = calcularTablaIndividual(torneo.parejas, torneo.partidosGrupo.filter((p) => p.grupoId === grupoId));
+    return (
+      <div className="tabla-scroll" style={{ marginBottom: 14 }}>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th className="nombre">Jugador</th><th>PJ</th><th>PG</th><th>PP</th><th>PF</th><th>PC</th><th>Dif</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jugadores.map((f) => (
+            <tr key={f.jugadorId}>
+              <td>{f.posicion}</td>
+              <td className="nombre">{f.nombre}</td>
+              <td>{f.pj}</td><td>{f.pg}</td><td>{f.pp}</td><td>{f.pf}</td><td>{f.pc}</td>
+              <td>{f.dif > 0 ? `+${f.dif}` : f.dif}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      </div>
+    );
+  }
   const filas = calcularTabla(grupo.parejaIds, torneo.partidosGrupo.filter((p) => p.grupoId === grupoId));
   return (
     <div className="tabla-scroll" style={{ marginBottom: 14 }}>

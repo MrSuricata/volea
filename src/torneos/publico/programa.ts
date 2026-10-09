@@ -1,7 +1,7 @@
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { generarFixture } from '../engine/fixture';
-import { calcularTabla } from '../engine/tabla';
+import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { ganadorPartido, resolverSlot } from '../engine/llave';
 import { repartirEnCanchas } from '../engine/programacion';
 import type { PartidoAProgramar } from '../engine/programacion';
@@ -234,10 +234,11 @@ const esJugable = (p: PartidoLlave) => p.a !== null && p.b !== null;
  *  americano (o un grupo único que se dio por terminado), el 1° de la tabla con todo jugado. */
 function campeonDe(t: Torneo): string | null {
   const llave = t.partidosLlave ?? [];
-  const porTabla = (t.sinLlave || t.fase === 'terminado') && llave.length === 0 && t.grupos.length === 1;
+  const porTabla = (t.sinLlave || t.americanoIndividual || t.fase === 'terminado') && llave.length === 0 && t.grupos.length === 1;
   if (porTabla) {
     const completos = t.partidosGrupo.length > 0 && t.partidosGrupo.every((p) => resultadoDe(p) !== null);
     if (!completos) return null;
+    if (t.americanoIndividual) return calcularTablaIndividual(t.parejas, t.partidosGrupo)[0]?.nombre ?? null;
     const primero = calcularTabla(t.grupos[0].parejaIds, t.partidosGrupo)[0];
     return primero ? nombreDe(t, primero.parejaId) : null;
   }
@@ -352,7 +353,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
         torneoId: t.id, partidoId: p.id, tipo: 'llave',
       });
     }
-  } else if (t.fase !== 'terminado' && total > 0 && !t.sinLlave) {
+  } else if (t.fase !== 'terminado' && total > 0 && !t.sinLlave && !t.americanoIndividual) {
     const olas = llaveProyectada(nGrupos);
     etapasDeLlave = olas.length;
     let previos = deGrupo.map((p) => p.clave);
@@ -395,7 +396,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
     nGrupos: t.grupos.length,
     gruposCompletos: t.partidosGrupo.length > 0 && t.partidosGrupo.every((p) => resultadoDe(p) !== null),
     llaveArmada: llave.length > 0,
-    sinLlave: !!t.sinLlave,
+    sinLlave: !!t.sinLlave || !!t.americanoIndividual,
   };
 }
 

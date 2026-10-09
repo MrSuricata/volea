@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { Grupo, PartidoGrupo, PartidoLlave, Torneo } from '../engine/tipos';
 import { resultadoValido } from '../engine/tipos';
-import { calcularTabla } from '../engine/tabla';
+import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { ganadorPartido, resolverSlot } from '../engine/llave';
 import { nombreDe } from '../ui/util';
 import { podioDeTorneo } from './resultado';
@@ -174,6 +174,33 @@ function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
   // Default defensivo: un documento sin partidosGrupo muestra el grupo "sin partidos"
   // en vez de tirar la página.
   const partidos = (torneo.partidosGrupo ?? []).filter((p) => p.grupoId === grupo.id);
+  if (torneo.americanoIndividual) {
+    const jugadores = calcularTablaIndividual(torneo.parejas, partidos);
+    return (
+      <div className="carta" style={{ marginTop: 12 }}>
+        <div className="grupo-titulo"><h3>Americano · tabla individual</h3></div>
+        <p className="vacio" style={{ padding: '0 0 10px' }}>Compañero rotativo: cada partido suma a los dos de la dupla. Campeón el 1º.</p>
+        <div className="tabla-scroll" style={{ marginBottom: 14 }}>
+          <table>
+            <thead>
+              <tr><th>#</th><th className="nombre">Jugador</th><th>PJ</th><th>PG</th><th>PP</th><th>PF</th><th>PC</th><th>Dif</th></tr>
+            </thead>
+            <tbody>
+              {jugadores.map((f) => (
+                <tr key={f.jugadorId}>
+                  <td>{f.posicion}</td>
+                  <td className="nombre">{f.nombre}</td>
+                  <td>{f.pj}</td><td>{f.pg}</td><td>{f.pp}</td><td>{f.pf}</td><td>{f.pc}</td>
+                  <td>{f.dif > 0 ? `+${f.dif}` : f.dif}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {partidos.map((p) => <FilaResultado key={p.id} torneo={torneo} partido={p} />)}
+      </div>
+    );
+  }
   const filas = calcularTabla(grupo.parejaIds, partidos);
   return (
     <div className="carta" style={{ marginTop: 12 }}>

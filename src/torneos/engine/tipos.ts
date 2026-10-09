@@ -63,6 +63,9 @@ export type Torneo = {
   evento?: string; // torneos de parejas con el MISMO evento (ej. "26/7"): al jugador le cuenta solo el mejor de ellos
   // "Americano": todos contra todos y el campeón es el 1° de la tabla (sin semis ni final). Solo con un grupo.
   sinLlave?: boolean;
+  // Americano individual: dobles con compañero rotativo. Las "parejas" son las duplas de cada
+  // partido y la tabla (y el campeón) se calculan por jugador (jugadorIds). Implica sinLlave.
+  americanoIndividual?: boolean;
 };
 
 export function nuevoId(): string {
