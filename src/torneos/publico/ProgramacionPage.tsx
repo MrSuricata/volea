@@ -615,9 +615,9 @@ export default function ProgramacionPage() {
     const sb = supabase;
     if (!sb) return 'Sin conexión con el servidor';
     const { error } = await sb.from('rk_programa')
-      .upsert({ clave: PROGRAMA.clave, config: nuevos, updated_at: new Date().toISOString() });
+      .upsert({ clave: PROGRAMA.clave, config: { ...(ajustes ?? {}), ...nuevos }, updated_at: new Date().toISOString() });
     if (error) return 'No se pudo guardar (¿sesión vencida?)';
-    setAjustes(nuevos);
+    setAjustes({ ...(ajustes ?? {}), ...nuevos });
     return null;
   }
 
@@ -755,6 +755,7 @@ export default function ProgramacionPage() {
         campeones={campeones.map((c) => ({ corto: c.corto, campeon: c.campeon as string }))}
         termina={(resumen[diaTv] ?? resumenDia).termina}
         ahora={new Date()}
+        tv={ajustes?.tv}
       />
     );
   }

@@ -7,6 +7,7 @@ import { SupabaseService } from '../../services/supabaseService';
 import { formatPrice } from '../../lib/formato';
 import type { Product } from '../../types';
 import { aHora } from './programa';
+import type { AnuncioTv, ConfigTv, SponsorTv } from './programa';
 
 export type CanchaTv = { cancha: string; cat: string | null; a: string | null; b: string | null; minutos: number | null; sigue: { cat: string; a: string; b: string } | null };
 export type ProximoTv = { ini: number; cancha: string; categoria: string; fase: string; a: string; b: string; bloque?: boolean };
@@ -21,6 +22,7 @@ type Props = {
   campeones: { corto: string; campeon: string }[];
   termina: number | null;
   ahora: Date;
+  tv?: ConfigTv;
 };
 
 const LIMA = '#CCFF00';
@@ -77,9 +79,83 @@ function Vidriera({ productos }: { productos: Product[] }) {
   );
 }
 
-export default function PantallaTv({ titulo, colores, canchas, proximos, resultados, campeones, termina, ahora }: Props) {
+function TiraSponsors({ sponsors }: { sponsors: SponsorTv[] }) {
+  return (
+    <section style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr', alignItems: 'stretch', background: '#fff', borderRadius: '0.6em', overflow: 'hidden', border: `2px solid ${LIMA}`, minHeight: '4.1em' }}>
+      <div style={{ background: NAVY, color: LIMA, padding: '0.35em 0.9em', display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.05 }}>
+        <span style={{ fontWeight: 900, fontSize: '1.15em' }}>GRACIAS</span>
+        <span style={{ fontWeight: 700, fontSize: '0.55em', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#fff' }}>a los que hacen posible este torneo</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-evenly', gap: '1em', padding: '0.3em 1em', flexWrap: 'wrap', color: NAVY }}>
+        {sponsors.map((s) => (s.logo
+          ? <img key={s.nombre} src={s.logo} alt={s.nombre} style={{ height: '2.6em', maxWidth: '7em', objectFit: 'contain' }} />
+          : <span key={s.nombre} style={{ fontWeight: 900, fontSize: '0.95em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{s.nombre}</span>))}
+      </div>
+    </section>
+  );
+}
+
+// Elige qué cartel toca: cada `cada` minutos se muestra uno (rotando) durante `segundos`.
+function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerrar: () => void } {
+  const cada = Math.max(0, tv?.cada ?? 8);
+  const anuncios: AnuncioTv[] = tv?.anuncios && tv.anuncios.length > 0 ? tv.anuncios : [{ tipo: 'gracias' }];
+  // ?tv&cartel arranca mostrando el primer cartel (para probar cómo se ve).
+  const [actual, setActual] = useState<AnuncioTv | null>(() => (new URLSearchParams(window.location.search).has('cartel') ? anuncios[0] : null));
+  const clave = JSON.stringify(anuncios) + cada;
+  useEffect(() => {
+    if (cada === 0) return;
+    let i = 0;
+    const t = window.setInterval(() => { setActual(anuncios[i % anuncios.length]); i += 1; }, cada * 60 * 1000);
+    return () => window.clearInterval(t);
+  }, [clave]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!actual) return;
+    const seg = actual.tipo === 'gracias' ? (tv?.segundos ?? 15) : (actual.segundos ?? (actual.tipo === 'video' ? 60 : tv?.segundos ?? 15));
+    const t = window.setTimeout(() => setActual(null), seg * 1000);
+    return () => window.clearTimeout(t);
+  }, [actual, tv?.segundos]);
+  return { anuncio: actual, cerrar: () => setActual(null) };
+}
+
+function Cartel({ anuncio, sponsors, colores, cerrar }: { anuncio: AnuncioTv; sponsors: SponsorTv[]; colores: string[]; cerrar: () => void }) {
+  const [c1, c2, c3] = colores;
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: NAVY, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {anuncio.tipo === 'imagen' && <img src={anuncio.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+      {anuncio.tipo === 'video' && (
+        <video src={anuncio.src} autoPlay muted playsInline onEnded={cerrar} onError={cerrar} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
+      )}
+      {anuncio.tipo === 'gracias' && (
+        <div style={{ textAlign: 'center', padding: '1em 2em', width: '100%' }}>
+          <div aria-hidden style={{ height: '0.25em', width: '40%', margin: '0 auto 1em', borderRadius: 999, background: `linear-gradient(90deg, ${c1}, ${c2} 55%, ${c3})` }} />
+          <div style={{ color: LIMA, fontWeight: 900, fontSize: '4.2em', lineHeight: 1, letterSpacing: '0.02em' }}>{anuncio.titulo ?? 'GRACIAS'}</div>
+          <div style={{ color: '#fff', fontWeight: 700, fontSize: '1.2em', marginTop: '0.4em', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {anuncio.texto ?? 'a los sponsors que hacen posible este aniversario'}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.8em 1.6em', marginTop: '1.4em' }}>
+            {sponsors.map((s) => (s.logo
+              ? <span key={s.nombre} style={{ background: '#fff', borderRadius: '0.5em', padding: '0.5em 0.9em', display: 'inline-flex' }}><img src={s.logo} alt={s.nombre} style={{ height: '3em', maxWidth: '9em', objectFit: 'contain' }} /></span>
+              : <span key={s.nombre} style={{ color: '#fff', fontWeight: 900, fontSize: '1.6em', textTransform: 'uppercase', border: `2px solid ${LIMA}55`, borderRadius: '0.4em', padding: '0.2em 0.6em' }}>{s.nombre}</span>))}
+          </div>
+          <img src="/logo-white.png" alt="" style={{ display: 'block', height: '2.2em', margin: '1.6em auto 0', opacity: 0.9 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function PantallaTv({ titulo, colores, canchas, proximos, resultados, campeones, termina, ahora, tv }: Props) {
   const [c1, c2, c3] = colores;
   const vidriera = useVidriera();
+  const sponsors = tv?.sponsors ?? [];
+  const { anuncio, cerrar } = useCartel(tv);
+  // La tira de abajo alterna cada 30 s entre la ropa VOLEA y los sponsors.
+  const [tiraSponsors, setTiraSponsors] = useState(false);
+  useEffect(() => {
+    if (sponsors.length === 0) return;
+    const t = window.setInterval(() => setTiraSponsors((v) => !v), 30 * 1000);
+    return () => window.clearInterval(t);
+  }, [sponsors.length]);
   const hora = ahora.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false });
   return (
     <div style={{
@@ -207,7 +283,8 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
         </div>
       </section>
 
-      <Vidriera productos={vidriera} />
+      {tiraSponsors && sponsors.length > 0 ? <TiraSponsors sponsors={sponsors} /> : <Vidriera productos={vidriera} />}
+      {anuncio && <Cartel anuncio={anuncio} sponsors={sponsors} colores={colores} cerrar={cerrar} />}
     </div>
   );
 }

@@ -75,6 +75,23 @@ export type AjustesPrograma = {
   categorias?: Record<string, { dia?: string; orden?: number; noAntes?: number }>;
   /** undefined = el del programa · null = sin bloque. */
   bloque?: BloquePrograma | null;
+  /** Pantalla de TV: sponsors y publicidad (se edita en rk_programa.config.tv). */
+  tv?: ConfigTv;
+};
+
+export type SponsorTv = { nombre: string; logo?: string };
+/** Un cartel a pantalla completa: "gracias" (lista de sponsors), una imagen o un video. */
+export type AnuncioTv =
+  | { tipo: 'gracias'; titulo?: string; texto?: string }
+  | { tipo: 'imagen'; src: string; segundos?: number }
+  | { tipo: 'video'; src: string; segundos?: number };
+export type ConfigTv = {
+  /** Cada cuántos minutos aparece un cartel (0 = nunca). Default 8. */
+  cada?: number;
+  /** Cuántos segundos dura un cartel (los videos, hasta que terminan, con tope). Default 15. */
+  segundos?: number;
+  sponsors?: SponsorTv[];
+  anuncios?: AnuncioTv[];
 };
 
 export type ProgramaVigente = {
