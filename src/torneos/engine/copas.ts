@@ -87,6 +87,22 @@ export function armarCopas(t: Torneo, opts: { ahora?: string; ids?: { oro: strin
   if (!gruposCompletos(t)) throw new Error('Copas: quedan partidos de grupo sin resultado');
   const general = tablaGeneral(t);
   const ahora = opts.ahora ?? new Date().toISOString();
+  // Regla del Aniversario (3 grupos, Oro de 6, Plata de 5): el 7º es el mejor tercero de los
+  // grupos más grandes; 8º y 9º los otros terceros; 10º y 11º los últimos.
+  const tresGrupos = t.grupos.length === 3 && cuantas === 6;
+  const maxTam = Math.max(...t.grupos.map((g) => g.parejaIds.length));
+  const tam = (f: FilaGeneral) => t.grupos.find((g) => g.id === f.grupoId)!.parejaIds.length;
+  let restantes = general.slice(cuantas);
+  if (tresGrupos && restantes.length === 5) {
+    const terceros = restantes.filter((f) => f.posicion === 3);
+    const septimo = terceros.find((f) => tam(f) === maxTam) ?? terceros[0];
+    restantes = [septimo, ...restantes.filter((f) => f !== septimo)];
+  }
+  const llaveDe = (filas: FilaGeneral[], esOro: boolean): PartidoLlave[] => {
+    if (tresGrupos && esOro) return armarLlaveSeis(t);
+    if (tresGrupos && !esOro && filas.length === 5) return llavePlataCinco(filas.map((f) => f.parejaId));
+    return armarLlave(filas.map((f) => ({ parejaId: f.parejaId, grupoId: f.grupoId })), false);
+  };
   const copa = (id: string, titulo: string, filas: FilaGeneral[], cuenta: boolean): Torneo => ({
     id,
     nombre: `${t.nombre} · ${titulo}`,
@@ -96,7 +112,7 @@ export function armarCopas(t: Torneo, opts: { ahora?: string; ids?: { oro: strin
     grupos: [],
     partidosGrupo: [],
     configLlave: null,
-    partidosLlave: armarLlave(filas.map((f) => ({ parejaId: f.parejaId, grupoId: f.grupoId })), false),
+    partidosLlave: llaveDe(filas, cuenta),
     canchas: t.canchas,
     categoria: t.categoria,
     cuentaParaRanking: cuenta ? t.cuentaParaRanking : false,
@@ -107,7 +123,7 @@ export function armarCopas(t: Torneo, opts: { ahora?: string; ids?: { oro: strin
   return {
     general,
     oro: copa(opts.ids?.oro ?? nuevoId(), 'COPA DE ORO', general.slice(0, cuantas), true),
-    plata: copa(opts.ids?.plata ?? nuevoId(), 'COPA DE PLATA', general.slice(cuantas), false),
+    plata: copa(opts.ids?.plata ?? nuevoId(), 'COPA DE PLATA', restantes, false),
   };
 }
 
@@ -135,5 +151,18 @@ export function armarLlaveSeis(t: Torneo): PartidoLlave[] {
   const sf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 1, a: seed(p2), b: gan(qf1.id) };
   const fin: PartidoLlave = { ...base, id: nuevoId(), ronda: 3, posicion: 0, a: gan(sf1.id), b: gan(sf2.id) };
   return [qf2, qf1, sf1, sf2, fin];
+}
+
+/** Plata de 5 (7º..11º): semi 1 = 8º vs 9º; 4tos = 10º vs 11º; semi 2 = 7º vs ganador de 4tos. */
+export function llavePlataCinco(ids: string[]): PartidoLlave[] {
+  const [s7, s8, s9, s10, s11] = ids;
+  const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
+  const gan = (partidoId: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId });
+  const base = { puntosA: null, puntosB: null, esTercerPuesto: false };
+  const qf: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 1, a: seed(s10), b: seed(s11) };
+  const sf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 0, a: seed(s8), b: seed(s9) };
+  const sf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 1, a: seed(s7), b: gan(qf.id) };
+  const fin: PartidoLlave = { ...base, id: nuevoId(), ronda: 3, posicion: 0, a: gan(sf1.id), b: gan(sf2.id) };
+  return [qf, sf1, sf2, fin];
 }
 

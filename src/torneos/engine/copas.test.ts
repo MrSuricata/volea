@@ -102,3 +102,30 @@ describe('armarLlaveSeis', () => {
     expect(l.filter((p) => p.ronda === 3)).toHaveLength(1);
   });
 });
+
+describe('copas del Aniversario (3 grupos, Oro 6, Plata 5)', () => {
+  // A y B de 4, C de 3; gana siempre la de número menor; a1 le gana 15-0 a a4.
+  function fem(): Torneo {
+    let k = 0;
+    const pg = (g: string, aId: string, bId: string, pa: number, pb: number): PartidoGrupo => ({ id: `p${k++}`, grupoId: g, ronda: 1, aId, bId, puntosA: pa, puntosB: pb });
+    const grupo = (g: string, ids: string[], margen: number) => ids.flatMap((x, i) => ids.slice(i + 1).map((y) => pg(g, x, y, 15, x === 'a1' && y === 'a4' ? 0 : 15 - margen)));
+    return {
+      id: 'fem', nombre: 'FEM', creadoEl: '', fase: 'faseGrupos', copas: { oro: 6 },
+      parejas: ['a1', 'a2', 'a3', 'a4', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2', 'c3'].map((id) => ({ id, nombre: id })),
+      grupos: [{ id: 'A', nombre: 'A', parejaIds: ['a1', 'a2', 'a3', 'a4'] }, { id: 'B', nombre: 'B', parejaIds: ['b1', 'b2', 'b3', 'b4'] }, { id: 'C', nombre: 'C', parejaIds: ['c1', 'c2', 'c3'] }],
+      partidosGrupo: [...grupo('A', ['a1', 'a2', 'a3', 'a4'], 3), ...grupo('B', ['b1', 'b2', 'b3', 'b4'], 5), ...grupo('C', ['c1', 'c2', 'c3'], 1)],
+      configLlave: null, partidosLlave: null,
+    };
+  }
+  it('Oro: llave de 6; Plata: 7º mejor tercero de grupos de 4, 8º vs 9º semi, 10º vs 11º cuartos', () => {
+    const { oro, plata } = armarCopas(fem(), { ids: { oro: 'o', plata: 'p' } });
+    expect(oro.partidosLlave).toHaveLength(5);
+    const lp = plata.partidosLlave!;
+    const pos = (p: (typeof lp)[number]) => [resolverSlot(p.a, lp), p.b?.tipo === 'seed' ? p.b.parejaId : 'gan'];
+    // terceros: b3 (grupo de 4, PG 1 de 3, dif mejor que a3) es 7º; a3 y c3 8º/9º; a4, b4 10º/11º
+    expect(lp.find((p) => p.ronda === 1)!.a).toEqual({ tipo: 'seed', parejaId: plata.parejas[3].id });
+    expect(lp.filter((p) => p.ronda === 2).map(pos)[1][0]).toBe(plata.parejas[0].id);
+    expect(['a3', 'b3']).toContain(plata.parejas[0].id);
+    expect(plata.parejas.slice(3).map((p) => p.id).sort()).toEqual(['a4', 'b4']);
+  });
+});
