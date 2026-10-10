@@ -546,7 +546,15 @@ export function programarEvento(args: {
     }
 
     const delBloque = bloque && bloque.dia === dia.clave && !(esHoy && ahora.minuto >= bloque.hasta) ? bloque : null;
-    const opciones = { duracion, enJuego, bloqueos: delBloque ? [{ desde: delBloque.desde, hasta: delBloque.hasta }] : [] };
+    // Lo que ya jugó cada persona en las categorías de este día (para repartir parejo).
+    const jugados: Record<string, number> = {};
+    for (const { cat } of delDia) {
+      for (const r of cat.resultados) {
+        if (r.wo) continue;
+        for (const j of [...personasDe(r.a), ...personasDe(r.b)]) jugados[j] = (jugados[j] ?? 0) + 1;
+      }
+    }
+    const opciones = { duracion, enJuego, jugados, bloqueos: delBloque ? [{ desde: delBloque.desde, hasta: delBloque.hasta }] : [] };
     const reparto = repartirEnCanchas(partidos, disponibles, opciones);
     const turnos = [...reparto.turnos];
     if (reparto.sinLugar.length > 0) {

@@ -43,6 +43,8 @@ export type OpcionesReparto = {
   enJuego?: { id: string; jugadores: string[]; termina: number }[];
   /** Ventanas en las que no se usa ninguna cancha (por ejemplo el One Point Challenge). */
   bloqueos?: { desde: number; hasta: number }[];
+  /** Partidos que cada persona ya jugó hoy: dentro de una categoría juega primero quien lleva menos. */
+  jugados?: Record<string, number>;
 };
 
 export type TurnoProgramado = { id: string; cancha: string; inicio: number; fin: number };
@@ -71,6 +73,11 @@ export function repartirEnCanchas(
     termina.set(e.id, e.termina);
     for (const j of e.jugadores) jugadorLibre.set(j, Math.max(jugadorLibre.get(j) ?? -Infinity, e.termina));
   }
+
+  // Partidos que lleva cada persona (jugados + en juego + los que se le van asignando acá).
+  const cuenta = new Map<string, number>(Object.entries(opciones.jugados ?? {}));
+  for (const e of opciones.enJuego ?? []) for (const j of e.jugadores) cuenta.set(j, (cuenta.get(j) ?? 0) + 1);
+  const carga = (p: PartidoAProgramar) => Math.max(0, ...p.jugadores.map((j) => cuenta.get(j) ?? 0));
 
   const pendientes = partidos.map((p, orden) => ({ ...p, orden }));
   const faltan = new Set(pendientes.map((p) => p.id));
@@ -117,6 +124,8 @@ export function repartirEnCanchas(
       Number(!!y.urgente) - Number(!!x.urgente)
       || Number(descansado(y)) - Number(descansado(x))
       || x.prioridad - y.prioridad
+      // nadie juega su 2º partido mientras otro de su categoría no jugó el 1º
+      || carga(x) - carga(y)
       || y.nivel - x.nivel
       || x.orden - y.orden);
     const elegido = listos[0];
@@ -126,7 +135,7 @@ export function repartirEnCanchas(
     turnos.push({ id: elegido.id, cancha: canchas[cancha].nombre, inicio: t, fin });
     libre[cancha] = fin;
     termina.set(elegido.id, fin);
-    for (const j of elegido.jugadores) jugadorLibre.set(j, fin);
+    for (const j of elegido.jugadores) { jugadorLibre.set(j, fin); cuenta.set(j, (cuenta.get(j) ?? 0) + 1); }
     faltan.delete(elegido.id);
     pendientes.splice(pendientes.indexOf(elegido), 1);
   }

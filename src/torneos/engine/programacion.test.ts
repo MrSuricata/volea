@@ -262,3 +262,16 @@ describe('repartirEnCanchas', () => {
     }
   });
 });
+
+describe('reparto parejo dentro de una categoría', () => {
+  it('quien todavía no jugó entra antes que quien ya jugó, aunque la ronda del fixture diga otra cosa', () => {
+    const p = (id: string, jugadores: string[], nivel: number) => ({ id, jugadores, despuesDe: [], noAntes: 0, prioridad: 0, nivel });
+    // A y B ya jugaron (resultado cargado); C y D no. Una sola cancha.
+    const r = repartirEnCanchas(
+      [p('AvsC', ['a', 'c'], 3), p('CvsD', ['c', 'd'], 2)],
+      [{ nombre: 'C1', libreDesde: 0 }],
+      { duracion: 12, jugados: { a: 1, b: 1 } },
+    );
+    expect(r.turnos.map((t) => t.id)).toEqual(['CvsD', 'AvsC']);
+  });
+});
