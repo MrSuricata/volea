@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PartidoGrupo, Torneo } from './tipos';
-import { armarCopas, rondasDeLlave, tablaGeneral } from './copas';
+import { armarCopas, armarLlaveSeis, rondasDeLlave, tablaGeneral } from './copas';
 import { resolverSlot } from './llave';
 
 // Grupo A de 4 (a1..a4), grupo B de 3 (b1..b3). Resultados: en A gana la de menor número
@@ -71,5 +71,33 @@ describe('armarCopas', () => {
     const t = torneo();
     t.partidosGrupo[0].puntosA = null;
     expect(() => armarCopas(t)).toThrow(/sin resultado/);
+  });
+});
+
+describe('armarLlaveSeis', () => {
+  // A de 4 (a1 gana todo, 11-0 a la última), B y C de 3. Primeros: a1, b1, c1.
+  function tres(): Torneo {
+    const pg = (id: string, g: string, aId: string, bId: string, pa: number, pb: number): PartidoGrupo => ({ id, grupoId: g, ronda: 1, aId, bId, puntosA: pa, puntosB: pb });
+    return {
+      id: 'ma', nombre: 'MASC A', creadoEl: '', fase: 'faseGrupos', llave6: true,
+      parejas: ['a1', 'a2', 'a3', 'a4', 'b1', 'b2', 'b3', 'c1', 'c2', 'c3'].map((id) => ({ id, nombre: id })),
+      grupos: [{ id: 'A', nombre: 'A', parejaIds: ['a1', 'a2', 'a3', 'a4'] }, { id: 'B', nombre: 'B', parejaIds: ['b1', 'b2', 'b3'] }, { id: 'C', nombre: 'C', parejaIds: ['c1', 'c2', 'c3'] }],
+      partidosGrupo: [
+        pg('1', 'A', 'a1', 'a2', 15, 13), pg('2', 'A', 'a1', 'a3', 15, 14), pg('3', 'A', 'a1', 'a4', 15, 0),
+        pg('4', 'A', 'a2', 'a3', 15, 10), pg('5', 'A', 'a2', 'a4', 15, 10), pg('6', 'A', 'a3', 'a4', 15, 10),
+        pg('7', 'B', 'b1', 'b2', 15, 5), pg('8', 'B', 'b1', 'b3', 15, 5), pg('9', 'B', 'b2', 'b3', 15, 12),
+        pg('10', 'C', 'c1', 'c2', 15, 10), pg('11', 'C', 'c1', 'c3', 15, 10), pg('12', 'C', 'c2', 'c3', 15, 14),
+      ],
+      configLlave: null, partidosLlave: null,
+    };
+  }
+  it('2 mejores primeros a semis, 3er primero vs peor segundo, los otros segundos entre sí', () => {
+    const l = armarLlaveSeis(tres());
+    const r = (p: (typeof l)[number]) => [resolverSlot(p.a, l), p.b?.tipo === 'seed' ? p.b.parejaId : 'gan'];
+    // primeros ajustados: b1 +20, c1 +10, a1 +3 (sin el 15-0 a a4) ⇒ b1, c1 a semis; a1 juega 4tos
+    // segundos ajustados: a2 (sin el partido vs a4) +1 (13-15, 15-10 → -2+5=+3)… c2 +1, b2 -7
+    expect(l.filter((p) => p.ronda === 1).map(r)).toEqual([['a1', 'b2'], ['a2', 'c2']]);
+    expect(l.filter((p) => p.ronda === 2).map((p) => resolverSlot(p.a, l))).toEqual(['b1', 'c1']);
+    expect(l.filter((p) => p.ronda === 3)).toHaveLength(1);
   });
 });

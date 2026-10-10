@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { resolverSlot } from '../engine/llave';
-import { armarCopas } from '../engine/copas';
+import { armarCopas, armarLlaveSeis } from '../engine/copas';
 import { calcularTabla } from '../engine/tabla';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
@@ -77,6 +77,8 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
       puntosA: null, puntosB: null,
     };
     llave = [sf1, sf2, final];
+  } else if (t.llave6 && t.grupos.length === 3) {
+    try { llave = armarLlaveSeis(t); } catch (e) { return e instanceof Error ? e.message : 'No se pudo armar la llave'; }
   } else {
     return 'Esta categoría lleva mejores terceros: armá la llave desde el gestor';
   }
@@ -952,7 +954,7 @@ export default function ProgramacionPage() {
                     if (problema) window.alert(problema);
                     void cargar(false);
                   }}>
-                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : 'Ver cómo armar'}
+                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : c.llave6 && c.nGrupos === 3 ? 'Armar CUARTOS + SEMIS + FINAL' : 'Ver cómo armar'}
                   </button>
                 </div>
               ))}

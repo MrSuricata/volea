@@ -2,7 +2,7 @@
 // parejas y las mejores `oro` van a una llave (Copa de Oro) y el resto a otra (Copa de Plata).
 // Cada copa es un torneo aparte (solo llave), así En vivo, el gestor y la página pública lo
 // tratan como cualquier cuadro.
-import type { PartidoGrupo, Torneo } from './tipos';
+import type { PartidoGrupo, PartidoLlave, SlotLlave, Torneo } from './tipos';
 import { nuevoId, resultadoDe } from './tipos';
 import { calcularTabla } from './tabla';
 import { armarLlave } from './llave';
@@ -110,3 +110,29 @@ export function armarCopas(t: Torneo, opts: { ahora?: string; ids?: { oro: strin
     plata: copa(opts.ids?.plata ?? nuevoId(), 'COPA DE PLATA', general.slice(cuantas), false),
   };
 }
+
+/**
+ * Llave de 6 para 3 grupos (regla del Aniversario): clasifican 1º y 2º de cada grupo, ordenados
+ * por la tabla general (entre primeros y segundos sin el partido contra el último de los grupos
+ * grandes). Los dos mejores primeros esperan en semis; 4tos: 3er primero vs peor segundo y
+ * mejor segundo vs segundo segundo. Semis: mejor primero vs ganador de los segundos, segundo
+ * mejor primero vs ganador del otro cuarto.
+ */
+export function armarLlaveSeis(t: Torneo): PartidoLlave[] {
+  if (t.grupos.length !== 3) throw new Error('La llave de 6 es para 3 grupos');
+  if (!gruposCompletos(t)) throw new Error('Quedan partidos de grupo sin resultado');
+  const g = tablaGeneral(t);
+  const [p1, p2, p3] = g.filter((f) => f.posicion === 1).map((f) => f.parejaId);
+  const [s1, s2, s3] = g.filter((f) => f.posicion === 2).map((f) => f.parejaId);
+  if (!p3 || !s3) throw new Error('Faltan primeros o segundos de grupo');
+  const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
+  const gan = (partidoId: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId });
+  const base = { puntosA: null, puntosB: null, esTercerPuesto: false };
+  const qf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 0, a: seed(p3), b: seed(s3) };
+  const qf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 1, a: seed(s1), b: seed(s2) };
+  const sf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 0, a: seed(p1), b: gan(qf2.id) };
+  const sf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 1, a: seed(p2), b: gan(qf1.id) };
+  const fin: PartidoLlave = { ...base, id: nuevoId(), ronda: 3, posicion: 0, a: gan(sf1.id), b: gan(sf2.id) };
+  return [qf1, qf2, sf1, sf2, fin];
+}
+

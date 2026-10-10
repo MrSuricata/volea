@@ -214,6 +214,8 @@ export type CatProg = {
   sinLlave: boolean;
   /** Copas de Oro y Plata: al cerrar los grupos se arman dos cuadros aparte. */
   copas: boolean;
+  /** Llave de 6 (3 grupos, 2 mejores primeros a semis). */
+  llave6: boolean;
 };
 
 /** Clave de un partido real dentro del evento. */
@@ -398,7 +400,13 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
       previos = claves;
     }
   } else if (t.fase !== 'terminado' && total > 0 && !t.sinLlave && !t.americanoIndividual) {
-    const olas = llaveProyectada(nGrupos);
+    const olas = t.llave6 && nGrupos === 3
+      ? [
+        [{ a: '3er mejor 1°', b: 'peor 2°', fase: '4TOS' }, { a: 'mejor 2°', b: '2° mejor 2°', fase: '4TOS' }],
+        [{ a: 'mejor 1°', b: 'ganador 4tos', fase: 'SEMIS' }, { a: '2° mejor 1°', b: 'ganador 4tos', fase: 'SEMIS' }],
+        [{ a: 'Ganador SF1', b: 'Ganador SF2', fase: 'FINAL' }],
+      ]
+      : llaveProyectada(nGrupos);
     etapasDeLlave = olas.length;
     let previos = deGrupo.map((p) => p.clave);
     olas.forEach((ola, w) => {
@@ -442,6 +450,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
     llaveArmada: llave.length > 0,
     sinLlave: !!t.sinLlave || !!t.americanoIndividual,
     copas: !!t.copas,
+    llave6: !!t.llave6,
   };
 }
 
