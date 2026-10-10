@@ -128,11 +128,12 @@ export function armarLlaveSeis(t: Torneo): PartidoLlave[] {
   const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
   const gan = (partidoId: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId });
   const base = { puntosA: null, puntosB: null, esTercerPuesto: false };
-  const qf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 0, a: seed(p3), b: seed(s3) };
-  const qf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 1, a: seed(s1), b: seed(s2) };
+  // posiciones: el cuarto que alimenta a la semi 1 va arriba, así el dibujo de la llave coincide
+  const qf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 1, a: seed(p3), b: seed(s3) };
+  const qf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 1, posicion: 0, a: seed(s1), b: seed(s2) };
   const sf1: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 0, a: seed(p1), b: gan(qf2.id) };
   const sf2: PartidoLlave = { ...base, id: nuevoId(), ronda: 2, posicion: 1, a: seed(p2), b: gan(qf1.id) };
   const fin: PartidoLlave = { ...base, id: nuevoId(), ronda: 3, posicion: 0, a: gan(sf1.id), b: gan(sf2.id) };
-  return [qf1, qf2, sf1, sf2, fin];
+  return [qf2, qf1, sf1, sf2, fin];
 }
 

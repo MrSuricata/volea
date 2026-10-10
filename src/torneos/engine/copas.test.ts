@@ -96,7 +96,8 @@ describe('armarLlaveSeis', () => {
     const r = (p: (typeof l)[number]) => [resolverSlot(p.a, l), p.b?.tipo === 'seed' ? p.b.parejaId : 'gan'];
     // primeros ajustados: b1 +20, c1 +10, a1 +3 (sin el 15-0 a a4) ⇒ b1, c1 a semis; a1 juega 4tos
     // segundos ajustados: a2 (sin el partido vs a4) +1 (13-15, 15-10 → -2+5=+3)… c2 +1, b2 -7
-    expect(l.filter((p) => p.ronda === 1).map(r)).toEqual([['a1', 'b2'], ['a2', 'c2']]);
+    expect(l.filter((p) => p.ronda === 1).map(r)).toEqual([['a2', 'c2'], ['a1', 'b2']]);
+    expect(l.filter((p) => p.ronda === 1).map((p) => p.posicion)).toEqual([0, 1]);
     expect(l.filter((p) => p.ronda === 2).map((p) => resolverSlot(p.a, l))).toEqual(['b1', 'c1']);
     expect(l.filter((p) => p.ronda === 3)).toHaveLength(1);
   });
