@@ -44,6 +44,7 @@ export function mergeTorneos(args: {
   const vistos = new Set<string>();
 
   for (const local of locales) {
+    if (vistos.has(local.id)) continue; // copia repetida en la lista local: se queda la primera
     vistos.add(local.id);
     const rem = remotoPorId.get(local.id);
     const esSucio = sucios.has(local.id);

@@ -17,13 +17,13 @@ import { Boton, Insignia, Interruptor, Segmentado, Tarjeta } from '../../admin/u
 import { cn } from '../../lib/cn';
 import { CajaPuntos, Nota, PiePaso, useBorradorMarcador } from './piezas';
 
-export default function PasoLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
+export default function PasoLlave({ torneo, actualizar, agregarTorneos, copasArmadas }: PropsPaso) {
   const individual = (torneo.formato ?? 'grupos') === 'individual';
   if (individual) {
     if (!torneo.partidosLlave) return <ConfigurarLlaveIndividual torneo={torneo} actualizar={actualizar} />;
     return <VerLlave torneo={torneo} actualizar={actualizar} />;
   }
-  if (torneo.fase === 'terminado' && !torneo.partidosLlave) {
+  if ((torneo.fase === 'terminado' || copasArmadas) && !torneo.partidosLlave) {
     if (torneo.copas && torneo.grupos.length > 1) {
       return (
         <section className="space-y-4">

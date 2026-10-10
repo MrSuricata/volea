@@ -338,7 +338,11 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
       <Wizard
         torneo={torneo}
         actualizar={(cambio) => actualizarTorneo(torneo.id, cambio)}
-        agregarTorneos={(nuevos) => setEstado((e) => ({ ...e, torneos: [...nuevos, ...e.torneos] }))}
+        agregarTorneos={(nuevos) => setEstado((e) => {
+          const ids = new Set(nuevos.map((n) => n.id));
+          return { ...e, torneos: [...nuevos, ...e.torneos.filter((x) => !ids.has(x.id))] };
+        })}
+        copasArmadas={estado.torneos.some((x) => x.copaDe === torneo.id)}
       />
     </main>
   );
@@ -434,6 +438,8 @@ export type PropsPaso = {
   actualizar: (cambio: (t: Torneo) => Torneo) => void;
   /** Crea torneos nuevos (las copas de oro y plata salen de acá). */
   agregarTorneos?: (nuevos: Torneo[]) => void;
+  /** Ya existen las copas de este torneo: no se vuelven a armar. */
+  copasArmadas?: boolean;
 };
 
 const PASOS_GRUPOS: { fase: Exclude<Torneo['fase'], 'terminado'>; titulo: string }[] = [
@@ -447,7 +453,7 @@ const PASOS_INDIVIDUAL: { fase: Exclude<Torneo['fase'], 'terminado'>; titulo: st
   { fase: 'llave', titulo: 'Llave' },
 ];
 
-function Wizard({ torneo, actualizar, agregarTorneos }: PropsPaso) {
+function Wizard({ torneo, actualizar, agregarTorneos, copasArmadas }: PropsPaso) {
   const dialogos = useDialogos();
   const individual = (torneo.formato ?? 'grupos') === 'individual';
   const PASOS = individual ? PASOS_INDIVIDUAL : PASOS_GRUPOS;
@@ -542,7 +548,7 @@ function Wizard({ torneo, actualizar, agregarTorneos }: PropsPaso) {
         {faseVisible === 'parejas' && <PasoParejas torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'grupos' && <PasoGrupos torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'faseGrupos' && <PasoFaseGrupos torneo={torneo} actualizar={actualizar} />}
-        {faseVisible === 'llave' && <PasoLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />}
+        {faseVisible === 'llave' && <PasoLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} copasArmadas={copasArmadas} />}
       </section>
     </>
   );

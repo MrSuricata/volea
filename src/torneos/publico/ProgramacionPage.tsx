@@ -939,7 +939,7 @@ export default function ProgramacionPage() {
         </div>
 
             {modoCarga && catsDelDia
-              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && c.copas)
+              .filter((c) => c.gruposCompletos && !c.llaveArmada && !c.terminado && c.copas && !torneos.some((x) => x.copaDe === c.torneoId))
               .map((c) => (
                 <div key={`${c.torneoId}-copas`} style={{ ...carta, borderColor: 'var(--lima)', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 800 }}>🏁 {c.corto}: grupos completos</span>

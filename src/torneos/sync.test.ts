@@ -160,3 +160,16 @@ describe('mergeTorneos', () => {
     expect(r2.torneos[0].nombre).toBe('Editado local sin base');
   });
 });
+
+describe('mergeTorneos con copias repetidas', () => {
+  it('dos torneos locales con el mismo id quedan en uno (el primero)', () => {
+    const r = mergeTorneos({
+      locales: [t('oro', 'nueva'), t('oro', 'vieja')],
+      remotos: [{ torneo: t('oro', 'server'), updatedAt: '2026-10-10T22:00:00.000Z' }],
+      sucios: new Set(),
+      borrados: new Set(),
+      base: {},
+    });
+    expect(r.torneos.filter((x) => x.id === 'oro')).toHaveLength(1);
+  });
+});
