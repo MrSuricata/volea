@@ -2,7 +2,7 @@
 // de la web ni controles, con letra que escala con el tamaño de la pantalla (vw/vh) para
 // leerse a varios metros. Muestra las canchas, los próximos partidos, los últimos
 // resultados y los campeones. Los datos los calcula ProgramacionPage; acá solo se pintan.
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { SupabaseService } from '../../services/supabaseService';
 import { formatPrice } from '../../lib/formato';
 import type { Product } from '../../types';
@@ -108,6 +108,14 @@ function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerra
     const t = window.setInterval(() => { setActual(anuncios[i % anuncios.length]); i += 1; }, cada * 60 * 1000);
     return () => window.clearInterval(t);
   }, [clave]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Botón "Correr publicidad" de En vivo: cada vez que cambia `lanzar` (y es reciente) arranca ya.
+  const ultimoLanzar = useRef(tv?.lanzar);
+  useEffect(() => {
+    const l = tv?.lanzar;
+    if (!l || l === ultimoLanzar.current) return;
+    ultimoLanzar.current = l;
+    if (Date.now() - l < 2 * 60 * 1000) setActual(anuncios[0]);
+  }, [tv?.lanzar]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!actual) return;
     const seg = actual.tipo === 'gracias' ? (tv?.segundos ?? 15) : (actual.segundos ?? (actual.tipo === 'video' ? 60 : tv?.segundos ?? 15));
@@ -120,10 +128,16 @@ function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerra
 function Cartel({ anuncio, sponsors, colores, cerrar }: { anuncio: AnuncioTv; sponsors: SponsorTv[]; colores: string[]; cerrar: () => void }) {
   const [c1, c2, c3] = colores;
   return (
-    <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: NAVY, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-      {anuncio.tipo === 'imagen' && <img src={anuncio.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+    <div
+      onClick={cerrar}
+      style={{ position: 'fixed', inset: 0, zIndex: 10000, background: anuncio.tipo === 'gracias' ? NAVY : '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: 'pointer', fontSize: 'min(1.5vw, 2.7vh)' }}
+    >
+      {anuncio.tipo === 'imagen' && <img src={anuncio.src} alt="" style={{ position: 'absolute', inset: 0, width: '100vw', height: '100vh', objectFit: 'cover' }} />}
       {anuncio.tipo === 'video' && (
-        <video src={anuncio.src} autoPlay muted playsInline onEnded={cerrar} onError={cerrar} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
+        <video
+          src={anuncio.src} autoPlay muted playsInline preload="auto" onEnded={cerrar} onError={cerrar}
+          style={{ position: 'absolute', inset: 0, width: '100vw', height: '100vh', objectFit: 'cover', background: '#000' }}
+        />
       )}
       {anuncio.tipo === 'gracias' && (
         <div style={{ textAlign: 'center', padding: '1em 2em', width: '100%' }}>
@@ -285,6 +299,9 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
 
       {tiraSponsors && sponsors.length > 0 ? <TiraSponsors sponsors={sponsors} /> : <Vidriera productos={vidriera} />}
       {anuncio && <Cartel anuncio={anuncio} sponsors={sponsors} colores={colores} cerrar={cerrar} />}
+      {(tv?.anuncios ?? []).filter((a) => a.tipo === 'video').map((a) => (
+        <link key={a.tipo === 'video' ? a.src : ''} rel="preload" as="video" href={a.tipo === 'video' ? a.src : ''} />
+      ))}
     </div>
   );
 }

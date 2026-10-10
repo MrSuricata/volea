@@ -611,6 +611,15 @@ export default function ProgramacionPage() {
     void cargar(false);
   }
 
+  async function correrPublicidad() {
+    const sb = supabase;
+    if (!sb) return;
+    const config = { ...(ajustes ?? {}), tv: { ...(ajustes?.tv ?? {}), lanzar: Date.now() } };
+    const { error } = await sb.from('rk_programa').upsert({ clave: PROGRAMA.clave, config, updated_at: new Date().toISOString() });
+    if (error) window.alert('No se pudo (¿sesión vencida?)');
+    else setAjustes(config);
+  }
+
   async function guardarAjustes(nuevos: AjustesPrograma): Promise<string | null> {
     const sb = supabase;
     if (!sb) return 'Sin conexión con el servidor';
@@ -820,6 +829,11 @@ export default function ProgramacionPage() {
             {esAdmin && (
               <button className={`boton ${modoCarga ? '' : 'secundario'}`} onClick={() => setModoCarga(!modoCarga)}>
                 {modoCarga ? '✓ Cargando resultados' : 'Cargar resultados'}
+              </button>
+            )}
+            {modoCarga && (ajustes?.tv?.anuncios?.length ?? 0) > 0 && (
+              <button className="boton" onClick={() => void correrPublicidad()} title="Pasa ya el video de sponsors en la TV">
+                ▶ Correr publicidad
               </button>
             )}
           </div>

@@ -92,6 +92,8 @@ export type ConfigTv = {
   segundos?: number;
   sponsors?: SponsorTv[];
   anuncios?: AnuncioTv[];
+  /** Marca de tiempo (ms) del botón "Correr publicidad": la TV arranca el cartel al verla cambiar. */
+  lanzar?: number;
 };
 
 export type ProgramaVigente = {
