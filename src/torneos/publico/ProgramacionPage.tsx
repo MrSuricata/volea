@@ -4,6 +4,7 @@ import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { resolverSlot } from '../engine/llave';
 import { armarCopas } from '../engine/copas';
+import { calcularTabla } from '../engine/tabla';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
@@ -37,49 +38,11 @@ function nombresPila(nombre: string): string {
   return nombre.split(/\s+y\s+/i).map(pila).join(' y ');
 }
 
-// Posiciones de un grupo: victorias, y los empates se resuelven por DUELO DIRECTO
-// entre las empatadas (mini-liga: victorias y luego diferencia entre ellas) antes
-// que por diferencia global — la regla de la casa (caso Fem C del 22/08).
+// Posiciones de un grupo: las mismas de la tabla que ve el público (engine/tabla), así la llave
+// que se arma acá nunca contradice lo que muestra la tabla del cuadro y la TV.
 function posicionesDeGrupo(t: Torneo, parejaIds: string[]): string[] {
-  const stats = new Map(parejaIds.map((id) => [id, { w: 0, dif: 0 }]));
-  const jugadosEntre = (ids: Set<string>) =>
-    t.partidosGrupo.filter((p) => ids.has(p.aId) && ids.has(p.bId) && resultadoDe(p) !== null);
-  for (const p of jugadosEntre(new Set(parejaIds))) {
-    const r = resultadoDe(p)!;
-    const sa = stats.get(p.aId)!;
-    const sb = stats.get(p.bId)!;
-    sa.dif += r.a - r.b;
-    sb.dif += r.b - r.a;
-    (r.a > r.b ? sa : sb).w += 1;
-  }
-  const orden = [...parejaIds].sort((x, y) => stats.get(y)!.w - stats.get(x)!.w);
-  // desempate por bloques de igual cantidad de victorias
-  const resultado: string[] = [];
-  let i = 0;
-  while (i < orden.length) {
-    let j = i;
-    while (j < orden.length && stats.get(orden[j])!.w === stats.get(orden[i])!.w) j++;
-    const bloque = orden.slice(i, j);
-    if (bloque.length > 1) {
-      const ids = new Set(bloque);
-      const mini = new Map(bloque.map((id) => [id, { w: 0, dif: 0 }]));
-      for (const p of jugadosEntre(ids)) {
-        const r = resultadoDe(p)!;
-        const sa = mini.get(p.aId)!;
-        const sb = mini.get(p.bId)!;
-        sa.dif += r.a - r.b;
-        sb.dif += r.b - r.a;
-        (r.a > r.b ? sa : sb).w += 1;
-      }
-      bloque.sort((x, y) =>
-        mini.get(y)!.w - mini.get(x)!.w
-        || mini.get(y)!.dif - mini.get(x)!.dif
-        || stats.get(y)!.dif - stats.get(x)!.dif);
-    }
-    resultado.push(...bloque);
-    i = j;
-  }
-  return resultado;
+  const ids = new Set(parejaIds);
+  return calcularTabla(parejaIds, t.partidosGrupo.filter((p) => ids.has(p.aId) && ids.has(p.bId))).map((f) => f.parejaId);
 }
 
 const idCorto = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
