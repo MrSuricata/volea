@@ -77,6 +77,15 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
       puntosA: null, puntosB: null,
     };
     llave = [sf1, sf2, final];
+  } else if (t.grupos.length === 4) {
+    // 4 grupos, pasan 1° y 2°: cuartos cruzados (1A-2B, 1C-2D | 1B-2A, 1D-2C); 1A y 1B en mitades distintas.
+    const [pa, pb, pc, pd] = t.grupos.map((g) => posicionesDeGrupo(t, g.parejaIds));
+    const q = (pos: number, a: string, b: string): PartidoLlave => ({ id: idCorto(), ronda: 1, posicion: pos, esTercerPuesto: false, a: seed(a), b: seed(b), puntosA: null, puntosB: null });
+    const qs = [q(0, pa[0], pb[1]), q(1, pc[0], pd[1]), q(2, pb[0], pa[1]), q(3, pd[0], pc[1])];
+    const g = (id: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId: id });
+    const s1: PartidoLlave = { id: idCorto(), ronda: 2, posicion: 0, esTercerPuesto: false, a: g(qs[0].id), b: g(qs[1].id), puntosA: null, puntosB: null };
+    const s2: PartidoLlave = { id: idCorto(), ronda: 2, posicion: 1, esTercerPuesto: false, a: g(qs[2].id), b: g(qs[3].id), puntosA: null, puntosB: null };
+    llave = [...qs, s1, s2, { id: idCorto(), ronda: 3, posicion: 0, esTercerPuesto: false, a: g(s1.id), b: g(s2.id), puntosA: null, puntosB: null }];
   } else if (t.llave6 && t.grupos.length === 3) {
     try { llave = armarLlaveSeis(t); } catch (e) { return e instanceof Error ? e.message : 'No se pudo armar la llave'; }
   } else {
@@ -954,7 +963,7 @@ export default function ProgramacionPage() {
                     if (problema) window.alert(problema);
                     void cargar(false);
                   }}>
-                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : c.llave6 && c.nGrupos === 3 ? 'Armar CUARTOS + SEMIS + FINAL' : 'Ver cómo armar'}
+                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : (c.llave6 && c.nGrupos === 3) || c.nGrupos === 4 ? 'Armar CUARTOS + SEMIS + FINAL' : 'Ver cómo armar'}
                   </button>
                 </div>
               ))}
