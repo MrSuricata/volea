@@ -62,6 +62,26 @@ export const VENTAS_RAPIDAS: VentaRapida[] = [
   { emoji: '🌿', nombre: 'Mentitas', precio: 30 },
 ];
 
+/** Limpia la lista guardada en la base (lo que venga raro se descarta). Vacía ⇒ null (usar la de fábrica). */
+export function normalizarVentasRapidas(x: unknown): VentaRapida[] | null {
+  if (!Array.isArray(x)) return null;
+  const lista: VentaRapida[] = [];
+  for (const v of x) {
+    if (!v || typeof v !== 'object') continue;
+    const o = v as Record<string, unknown>;
+    const nombre = typeof o.nombre === 'string' ? o.nombre.trim() : '';
+    const precio = Number(o.precio);
+    if (!nombre || !Number.isFinite(precio) || precio < 0) continue;
+    const item: VentaRapida = { emoji: typeof o.emoji === 'string' && o.emoji.trim() ? o.emoji.trim() : '🛒', nombre, precio: Math.round(precio) };
+    const p = o.promo as Record<string, unknown> | undefined;
+    const cant = Number(p?.cantidad);
+    const pp = Number(p?.precio);
+    if (p && Number.isInteger(cant) && cant >= 2 && Number.isFinite(pp) && pp >= 0) item.promo = { cantidad: cant, precio: Math.round(pp) };
+    if (!lista.some((y) => y.nombre.toLowerCase() === nombre.toLowerCase())) lista.push(item);
+  }
+  return lista.length > 0 ? lista : null;
+}
+
 export interface ItemCarrito { nombre: string; precio: number; veces: number; promo?: PromoCantidad }
 
 /** Total de un ítem aplicando la promo por cantidad: 3 picos a "$20 / 2 por $30" = $50. */

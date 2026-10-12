@@ -19,6 +19,7 @@ import {
 import type { AjustesPrograma, CatProg, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
 import '../torneos.css';
 import PantallaTv from './PantallaTv';
+import PanelTv from './PanelTv';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
 // Dos vistas en una: los partidos PENDIENTES con hora y cancha estimadas (el reparto
@@ -785,6 +786,13 @@ export default function ProgramacionPage() {
             // cambiarles el orden) tiene que seguir abierto y mostrando la confirmación
             key={cats.map((c) => c.torneoId).sort().join(',')}
             vigente={vigente} cats={cats} onGuardar={guardarAjustes}
+          />
+        )}
+        {modoCarga && (
+          <PanelTv
+            key={ajustes ? 'cargado' : 'vacio'}
+            tv={ajustes?.tv}
+            onGuardar={(tv) => guardarAjustes({ ...(ajustes ?? {}), tv })}
           />
         )}
 

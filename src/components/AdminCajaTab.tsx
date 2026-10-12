@@ -6,7 +6,8 @@ import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput, GastoP
 import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
-import { formatVariant, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
+import { formatVariant, normalizarVentasRapidas, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
+import EditorVentasRapidas from './EditorVentasRapidas';
 import type { ItemCarrito, VentaRapida } from '../utils/caja';
 import { normalizar, sugerirDeudores } from '../utils/nombres';
 import { SupabaseService } from '../services/supabaseService';
@@ -1046,6 +1047,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
   // los anteriores (mismo botón otra vez = más cantidad). Editar los campos a
   // mano corta la acumulación (el carrito se vacía en los onChange).
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
+  // Botones de "Lo de siempre": los guardados en la base; si no hay, los de fábrica.
+  const [ventasRapidas, setVentasRapidas] = useState<VentaRapida[]>(VENTAS_RAPIDAS);
+  const [editandoBotones, setEditandoBotones] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    void SupabaseService.getVentasRapidas().then((x) => { const l = normalizarVentasRapidas(x); if (vivo && l) setVentasRapidas(l); });
+    return () => { vivo = false; };
+  }, []);
   const tocarRapida = (v: VentaRapida) => {
     const idx = carrito.findIndex(i => i.nombre === v.nombre);
     const nuevo = idx >= 0
@@ -1407,7 +1416,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
                 Funciona como carrito: cada botón suma su ítem sin pisar los otros. */}
             <div>
               <div className="mb-1.5 flex min-h-[28px] items-center justify-between">
-                <span className="text-[13px] font-semibold text-navy-700">Lo de siempre</span>
+                <span className="text-[13px] font-semibold text-navy-700">
+                  Lo de siempre
+                  {!editandoBotones && (
+                    <button type="button" onClick={() => setEditandoBotones(true)} className="ml-2 text-xs font-bold text-gray-500 underline-offset-2 hover:text-navy-700 hover:underline">
+                      Editar botones
+                    </button>
+                  )}
+                </span>
                 {carrito.length > 0 && (
                   <button type="button" onClick={vaciarCarrito}
                     className="inline-flex min-h-[32px] items-center rounded-md px-2 text-xs font-bold text-gray-500 hover:bg-red-50 hover:text-red-600">
@@ -1415,8 +1431,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {VENTAS_RAPIDAS.map(v => {
+              {editandoBotones && (
+                <EditorVentasRapidas
+                  actuales={ventasRapidas}
+                  onListo={(nuevas) => { if (nuevas) setVentasRapidas(nuevas); setEditandoBotones(false); }}
+                />
+              )}
+              <div className={cn('grid grid-cols-3 gap-2 sm:grid-cols-4', editandoBotones && 'hidden')}>
+                {ventasRapidas.map(v => {
                   const enCarrito = carrito.find(i => i.nombre === v.nombre);
                   return (
                     <button

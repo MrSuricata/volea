@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatVariant, resumenCarrito, stockTotal, variantesConStock } from './caja';
+import { formatVariant, normalizarVentasRapidas, resumenCarrito, stockTotal, variantesConStock } from './caja';
 
 describe('formatVariant', () => {
   it('separa talle y color con " · "', () => {
@@ -80,6 +80,22 @@ describe('promo por cantidad', () => {
   it('se suma con otros ítems', () => {
     expect(resumenCarrito([{ ...pico, veces: 2 }, { nombre: 'Electrolitos', precio: 70, veces: 1 }]))
       .toEqual({ nombre: '2× Pico dulce + Electrolitos', monto: 100 });
+  });
+});
+
+describe('normalizarVentasRapidas', () => {
+  it('limpia lo guardado y descarta lo inválido', () => {
+    expect(normalizarVentasRapidas([
+      { emoji: '🍭', nombre: ' Pico ', precio: '20', promo: { cantidad: 2, precio: 30 } },
+      { nombre: 'Sin precio' },
+      { nombre: 'pico', precio: 25 },
+      { nombre: 'Agua', precio: 80, promo: { cantidad: 1, precio: 50 } },
+    ])).toEqual([
+      { emoji: '🍭', nombre: 'Pico', precio: 20, promo: { cantidad: 2, precio: 30 } },
+      { emoji: '🛒', nombre: 'Agua', precio: 80 },
+    ]);
+    expect(normalizarVentasRapidas([])).toBeNull();
+    expect(normalizarVentasRapidas('x')).toBeNull();
   });
 });
 

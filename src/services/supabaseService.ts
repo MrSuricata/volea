@@ -593,6 +593,36 @@ export const SupabaseService = {
     return data.publicUrl;
   },
 
+  // Botonera de venta rápida del kiosco: se guarda como una fila de rk_programa
+  // (clave 'kiosco-ventas-rapidas', escribe el equipo) para no sumar otra tabla.
+  async getVentasRapidas(): Promise<unknown | null> {
+    if (!supabase || !isSupabaseConnected()) return null;
+    const { data, error } = await conTechoLectura(supabase.from('rk_programa').select('config').eq('clave', 'kiosco-ventas-rapidas').maybeSingle());
+    if (error || !data) return null;
+    return (data.config as { items?: unknown } | null)?.items ?? null;
+  },
+  async saveVentasRapidas(items: unknown[]): Promise<boolean> {
+    if (!supabase) return false;
+    const { error } = await conTechoEscritura(supabase.from('rk_programa').upsert({ clave: 'kiosco-ventas-rapidas', config: { items }, updated_at: new Date().toISOString() }));
+    if (error) { console.error('Error guardando venta rápida:', error); return false; }
+    return true;
+  },
+
+  // Videos y archivos sin comprimir (publicidad de la TV). Mismo bucket; techo más largo
+  // porque un video de 20 MB por wifi de club puede tardar.
+  async uploadArchivo(file: File, folder = 'uploads'): Promise<string | null> {
+    if (!supabase) return null;
+    const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const resultado = await conLimite<{ error: { message: string } | null }>(
+      supabase.storage.from('product-images').upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type || undefined }),
+      180000,
+      { error: new Error('La subida tardó demasiado (conexión trabada)') },
+    );
+    if (resultado.error) { console.error('Error uploading file:', resultado.error); return null; }
+    return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+  },
+
   // ── Events ──
   async getEvents(): Promise<Event[]> {
     if (!supabase || !isSupabaseConnected()) return [];
