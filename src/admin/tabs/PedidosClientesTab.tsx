@@ -1,6 +1,6 @@
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, MessageCircle, Phone, Plus, ShoppingBag } from 'lucide-react';
+import { Banknote, ChevronDown, MessageCircle, Phone, Plus, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Order } from '../../types';
 import { useStore } from '../../tienda/store';
@@ -10,8 +10,10 @@ import { FALLBACK_IMG, errorFoto } from '../../lib/fotos';
 import { urlImagen } from '../../utils/imagenes';
 import { waUruguay } from '../../utils/telefono';
 import { sesionAdminVencida } from '../../services/authService';
+import { SupabaseService } from '../../services/supabaseService';
+import { estadoCobro, faltaCobrar, TEXTO_METODO, type CobroPedido, type EstadoCobro } from '../../utils/cobroPedido';
 import { cn } from '../../lib/cn';
-import { BarraFiltros, Boton, Chip, Confirmar, EncabezadoPagina, Plata, Segmentado, Vacio } from '../ui';
+import { BarraFiltros, Boton, Chip, Confirmar, EncabezadoPagina, Insignia, Plata, Segmentado, Vacio } from '../ui';
 import { ESTADOS_PEDIDO, InsigniaPagoMP, InsigniaPedido, ORDEN_PEDIDO } from '../estados';
 
 const AdminOrderModal = lazyConRecarga(() =>
@@ -22,14 +24,23 @@ const AdminOrderModal = lazyConRecarga(() =>
 // "Revisar pago" escondido en el celular, un select de 24px que cambiaba el estado al
 // toque (sin confirmar ni avisar) y un "pedido creado" que salía aunque fallara.
 
-type FiltroEstado = 'todos' | Order['status'] | 'revisar';
+type FiltroEstado = 'todos' | Order['status'] | 'revisar' | 'cobrar';
 
 const fecha = (iso: string) =>
   new Date(iso).toLocaleDateString('es-UY', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: TZ_UY });
 
 const normalizar = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-export function PedidosClientesTab() {
+function InsigniaCobro({ estado }: { estado: EstadoCobro }) {
+  if (estado.tipo === 'cobrado') return <Insignia tono="bien">Cobrado · {TEXTO_METODO[estado.metodo]}</Insignia>;
+  if (estado.tipo === 'debe') return <Insignia tono="atencion" punto>Debe</Insignia>;
+  if (estado.tipo === 'pagado-mp') return null; // ya lo dice la insignia de MP
+  return <Insignia tono="neutro">Sin cobrar</Insignia>;
+}
+
+const METODOS_COBRO: CobroPedido['metodo'][] = ['efectivo', 'transferencia', 'mp', 'debe'];
+
+export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
   const { orders, products, updateOrderStatus, addOrder } = useStore();
   const [params, setParams] = useSearchParams();
   const [abierto, setAbierto] = useState<string | null>(() => params.get('pedido'));
@@ -37,19 +48,35 @@ export function PedidosClientesTab() {
   const [busqueda, setBusqueda] = useState('');
   const [modalNuevo, setModalNuevo] = useState(false);
   const [cambio, setCambio] = useState<{ pedido: Order; a: Order['status'] } | null>(null);
+  // Cobros = ventas de Caja atadas a cada pedido. null = no se pudieron leer.
+  const [cobros, setCobros] = useState<Map<string, CobroPedido> | null>(null);
+  const [cobrando, setCobrando] = useState<string | null>(null);
+  const [anular, setAnular] = useState<{ pedido: Order; cobro: CobroPedido } | null>(null);
+
+  const cargarCobros = useCallback(async () => {
+    const lista = await SupabaseService.getCobrosPedidos();
+    setCobros(lista ? new Map(lista.map((c) => [c.orderId, c])) : null);
+  }, []);
+  useEffect(() => { void cargarCobros(); }, [cargarCobros]);
+  const cobroDe = (o: Order) => cobros?.get(o.id);
 
   const ordenados = useMemo(() => [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [orders]);
   const cuenta = (f: FiltroEstado) =>
-    f === 'todos' ? orders.length : f === 'revisar' ? orders.filter((o) => o.requiereRevision).length : orders.filter((o) => o.status === f).length;
+    f === 'todos' ? orders.length
+      : f === 'revisar' ? orders.filter((o) => o.requiereRevision).length
+      : f === 'cobrar' ? orders.filter((o) => faltaCobrar(o, cobroDe(o))).length
+      : orders.filter((o) => o.status === f).length;
 
   const lista = useMemo(() => {
     const q = normalizar(busqueda.trim());
     return ordenados.filter((o) => {
-      if (filtro === 'revisar' ? !o.requiereRevision : filtro !== 'todos' && o.status !== filtro) return false;
+      if (filtro === 'revisar' ? !o.requiereRevision
+        : filtro === 'cobrar' ? !faltaCobrar(o, cobros?.get(o.id))
+        : filtro !== 'todos' && o.status !== filtro) return false;
       if (!q) return true;
       return normalizar(`${o.id} ${o.customer.name} ${o.customer.phone} ${o.customer.email}`).includes(q);
     });
-  }, [ordenados, filtro, busqueda]);
+  }, [ordenados, filtro, busqueda, cobros]);
 
   const alternar = (id: string) => {
     const nuevo = abierto === id ? null : id;
@@ -76,6 +103,38 @@ export function PedidosClientesTab() {
 
   const hayRevisar = cuenta('revisar') > 0;
 
+  async function cobrar(pedido: Order, metodo: CobroPedido['metodo']) {
+    if (await sesionAdminVencida()) {
+      toast.error('Tu sesión de admin venció — cerrá sesión y volvé a entrar. No se anotó nada.');
+      return;
+    }
+    setCobrando(pedido.id);
+    const r = await SupabaseService.cobrarPedido(pedido.id, metodo, reportedBy);
+    await cargarCobros();
+    setCobrando(null);
+    if (!r.ok) { toast.error(`No se pudo anotar: ${r.error ?? 'probá de nuevo'}`); return; }
+    toast.success(metodo === 'debe'
+      ? `Anotado en Caja como deuda de ${pedido.customer.name || 'el cliente'}`
+      : `Pedido ${pedido.id} cobrado (${TEXTO_METODO[metodo].toLowerCase()}) y anotado en Caja`);
+  }
+
+  async function confirmarAnular() {
+    if (!anular) return;
+    const { pedido, cobro } = anular;
+    setAnular(null);
+    const r = await SupabaseService.revertLedgerEntry(cobro.ledgerId);
+    await cargarCobros();
+    if (!r.ok) { toast.error(`No se pudo anular: ${r.error ?? 'probá de nuevo'}`); return; }
+    toast.success(`Cobro del pedido ${pedido.id} anulado: vuelve a «Sin cobrar»`);
+  }
+
+  const irACaja = () => setParams((prev) => {
+    const n = new URLSearchParams(prev);
+    n.set('tab', 'caja');
+    n.delete('pedido');
+    return n;
+  });
+
   return (
     <div>
       <EncabezadoPagina
@@ -92,6 +151,9 @@ export function PedidosClientesTab() {
         chips={(
           <>
             <Chip activo={filtro === 'todos'} onClick={() => setFiltro('todos')} cantidad={cuenta('todos')}>Todos</Chip>
+            {cobros && (
+              <Chip activo={filtro === 'cobrar'} onClick={() => setFiltro('cobrar')} cantidad={cuenta('cobrar')}>Falta cobrar</Chip>
+            )}
             {hayRevisar && (
               <Chip activo={filtro === 'revisar'} onClick={() => setFiltro('revisar')} cantidad={cuenta('revisar')}>Pago a revisar</Chip>
             )}
@@ -112,6 +174,7 @@ export function PedidosClientesTab() {
           {lista.map((o) => {
             const expandido = abierto === o.id;
             const wa = waUruguay(o.customer.phone);
+            const ec = estadoCobro(o, cobroDe(o));
             return (
               <li key={o.id} className={cn('overflow-hidden rounded-xl border bg-white', o.requiereRevision ? 'border-red-300' : 'border-gray-200')}>
                 <button
@@ -131,6 +194,7 @@ export function PedidosClientesTab() {
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <InsigniaPedido estado={o.status} />
                       <InsigniaPagoMP order={o} />
+                      {cobros && <InsigniaCobro estado={ec} />}
                     </div>
                   </div>
                   <ChevronDown size={18} className={cn('mt-0.5 shrink-0 text-gray-400 transition-transform', expandido && 'rotate-180')} />
@@ -147,6 +211,42 @@ export function PedidosClientesTab() {
                         opciones={ORDEN_PEDIDO.map((e) => ({ valor: e, texto: ESTADOS_PEDIDO[e].texto }))}
                         className="w-full sm:w-auto"
                       />
+                    </div>
+
+                    <div>
+                      <p className="mb-2 font-display text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">Cobro</p>
+                      {!cobros ? (
+                        <p className="text-sm text-gray-500">No se pudo leer si está cobrado. Recargá la página; si sigue, falta la actualización de la base (v31).</p>
+                      ) : ec.tipo === 'sin-cobrar' ? (
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-600">¿Cómo te pagó? Se anota en la Caja por <Plata monto={o.total} className="font-semibold" />.</p>
+                          <div className="flex flex-wrap gap-2">
+                            {METODOS_COBRO.map((m) => (
+                              <Boton
+                                key={m}
+                                chico
+                                variante={m === 'debe' ? 'secundario' : 'primario'}
+                                icono={m === 'debe' ? undefined : <Banknote size={15} />}
+                                cargando={cobrando === o.id}
+                                onClick={() => void cobrar(o, m)}
+                              >
+                                {m === 'debe' ? 'Todavía me debe' : TEXTO_METODO[m]}
+                              </Boton>
+                            ))}
+                          </div>
+                        </div>
+                      ) : ec.tipo === 'pagado-mp' ? (
+                        <p className="text-sm text-gray-600">Pagado online con Mercado Pago.</p>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                          <InsigniaCobro estado={ec} />
+                          {ec.tipo === 'debe' && (
+                            <span>A nombre de <strong>{(o.customer.name || '').toUpperCase()}</strong>. Cuando te pague, cobralo desde la Caja.</span>
+                          )}
+                          {ec.tipo === 'debe' && <Boton chico variante="secundario" onClick={irACaja}>Ir a la Caja</Boton>}
+                          <Boton chico variante="fantasma" onClick={() => setAnular({ pedido: o, cobro: ec.cobro })}>Anular</Boton>
+                        </div>
+                      )}
                     </div>
 
                     {o.requiereRevision && (
@@ -252,6 +352,17 @@ export function PedidosClientesTab() {
           />
         </Suspense>
       )}
+
+      <Confirmar
+        abierto={anular !== null}
+        titulo="¿Anular el cobro?"
+        mensaje={anular && (
+          <>Se borra de la Caja la venta del pedido <strong>{anular.pedido.id}</strong> y el pedido vuelve a «Sin cobrar». Usalo si lo anotaste mal.</>
+        )}
+        textoConfirmar="Anular cobro"
+        alConfirmar={() => void confirmarAnular()}
+        alCerrar={() => setAnular(null)}
+      />
 
       <Confirmar
         abierto={cambio !== null}

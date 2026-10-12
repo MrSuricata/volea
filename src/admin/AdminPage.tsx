@@ -596,7 +596,7 @@ export default function AdminPage() {
             )}
             {activeTab === 'stock' && <StockDashboard products={products} onEdit={editarProducto} />}
             {activeTab === 'products' && <ProductosTab editar={editarProducto} />}
-            {activeTab === 'orders' && <PedidosClientesTab />}
+            {activeTab === 'orders' && <PedidosClientesTab reportedBy={cajaReportedBy} />}
             {activeTab === 'categories' && <CategoriasTab />}
             {activeTab === 'events' && <EventosTab verInscriptos={(id) => { setInscEventoAtajo(id); irA('inscripciones'); }} />}
             {activeTab === 'clubs' && <ClubesTab />}

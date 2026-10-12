@@ -5,6 +5,7 @@ import { faltantesEnPadron } from '../utils/nombres';
 import { motivoBorradoFallido, type ResultadoBorrado } from '../utils/filas';
 import { planLineasCompra, type LineaEnBase } from '../utils/compras';
 import type { JugadorPadron } from '../utils/dupr';
+import type { CobroPedido } from '../utils/cobroPedido';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -1065,6 +1066,41 @@ export const SupabaseService = {
     const { error } = await conTechoEscritura(supabase.from('orders').update({ status }).eq('id', id));
     if (error) { console.error('Error updating order status:', error); return false; }
     return true;
+  },
+
+  /**
+   * Ventas de Caja atadas a un pedido (v31: bot_ledger.order_id), sin las anuladas.
+   * null = no se pudo leer (sin sesión, red, o la migración v31 todavía no está).
+   */
+  async getCobrosPedidos(): Promise<CobroPedido[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.from('bot_ledger')
+      .select('id, order_id, payment_method, settled_at, settled_method')
+      .not('order_id', 'is', null)
+      .eq('reverted', false));
+    if (error) { console.error('Error fetching cobros de pedidos:', error); return null; }
+    return (data || []).map(row => ({
+      ledgerId: row.id,
+      orderId: row.order_id,
+      metodo: row.payment_method ?? 'efectivo',
+      saldadoEl: row.settled_at ?? null,
+      saldadoCon: row.settled_method ?? null,
+    }));
+  },
+
+  /** Anota el cobro (o la deuda) de un pedido en la Caja. Sin stock: el pedido lo maneja aparte. */
+  async cobrarPedido(orderId: string, metodo: CobroPedido['metodo'], reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_cobrar_pedido', {
+      p_order_id: orderId,
+      p_payment: metodo,
+      p_reported_by: reportedBy,
+    }));
+    if (error) {
+      console.error('Error cobrando pedido:', error);
+      return { ok: false, error: error.message };
+    }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 
   // ── Clubs ──
