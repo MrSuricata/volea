@@ -6,6 +6,7 @@ import { motivoBorradoFallido, type ResultadoBorrado } from '../utils/filas';
 import { planLineasCompra, type LineaEnBase } from '../utils/compras';
 import type { JugadorPadron } from '../utils/dupr';
 import type { CobroPedido } from '../utils/cobroPedido';
+import type { Cambio, CambioInput } from '../utils/cambios';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -1100,6 +1101,64 @@ export const SupabaseService = {
       console.error('Error cobrando pedido:', error);
       return { ok: false, error: error.message };
     }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  // ── Cambios de prendas (v32) ──
+  /** null = no se pudo leer (sin sesión, red, o la migración v32 todavía no está). */
+  async getCambios(): Promise<Cambio[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.from('cambios').select('*')
+      .eq('reverted', false).order('created_at', { ascending: false }).limit(300));
+    if (error) { console.error('Error fetching cambios:', error); return null; }
+    return (data || []).map(row => ({
+      id: row.id,
+      createdAt: row.created_at,
+      cliente: row.cliente,
+      orderId: row.order_id ?? null,
+      devuelveNombre: row.devuelve_nombre,
+      devuelveVariant: row.devuelve_variant ?? null,
+      devuelvePrecio: Number(row.devuelve_precio) || 0,
+      llevaNombre: row.lleva_nombre,
+      llevaVariant: row.lleva_variant ?? null,
+      llevaPrecio: Number(row.lleva_precio) || 0,
+      monto: Number(row.monto) || 0,
+      metodo: row.metodo,
+      nota: row.nota ?? null,
+      reportedBy: row.reported_by || '',
+      saldoUsadoEl: row.saldo_usado_el ?? null,
+    }));
+  },
+
+  async registrarCambio(c: CambioInput, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_registrar_cambio', {
+      p_cliente: c.cliente,
+      p_order_id: c.orderId,
+      p_dev_product: c.devuelveProductId,
+      p_dev_variant: c.devuelveVariant,
+      p_lleva_product: c.llevaProductId,
+      p_lleva_variant: c.llevaVariant,
+      p_monto: c.monto,
+      p_metodo: c.metodo,
+      p_nota: c.nota,
+      p_reported_by: reportedBy,
+    }));
+    if (error) { console.error('Error registrando cambio:', error); return { ok: false, error: error.message }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  async anularCambio(id: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_anular_cambio', { p_id: id }));
+    if (error) { console.error('Error anulando cambio:', error); return { ok: false, error: error.message }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  async saldoCambioUsado(id: string, usado: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_saldo_cambio_usado', { p_id: id, p_usado: usado }));
+    if (error) { console.error('Error marcando saldo:', error); return { ok: false, error: error.message }; }
     return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 

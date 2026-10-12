@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, ChevronDown, MessageCircle, Phone, Plus, ShoppingBag } from 'lucide-react';
+import { Banknote, ChevronDown, MessageCircle, Phone, Plus, Repeat, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Order } from '../../types';
 import { useStore } from '../../tienda/store';
@@ -11,6 +11,7 @@ import { urlImagen } from '../../utils/imagenes';
 import { waUruguay } from '../../utils/telefono';
 import { sesionAdminVencida } from '../../services/authService';
 import { SupabaseService } from '../../services/supabaseService';
+import { CambioModal, cambioDesdePedido } from './CambiosTab';
 import { estadoCobro, faltaCobrar, TEXTO_METODO, type CobroPedido, type EstadoCobro } from '../../utils/cobroPedido';
 import { cn } from '../../lib/cn';
 import { BarraFiltros, Boton, Chip, Confirmar, EncabezadoPagina, Insignia, Plata, Segmentado, Vacio } from '../ui';
@@ -41,7 +42,8 @@ function InsigniaCobro({ estado }: { estado: EstadoCobro }) {
 const METODOS_COBRO: CobroPedido['metodo'][] = ['efectivo', 'transferencia', 'mp', 'debe'];
 
 export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
-  const { orders, products, updateOrderStatus, addOrder } = useStore();
+  const { orders, products, updateOrderStatus, addOrder, refreshProducts } = useStore();
+  const [cambioDe, setCambioDe] = useState<Order | null>(null);
   const [params, setParams] = useSearchParams();
   const [abierto, setAbierto] = useState<string | null>(() => params.get('pedido'));
   const [filtro, setFiltro] = useState<FiltroEstado>('todos');
@@ -312,6 +314,11 @@ export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
                       </div>
                     </div>
 
+                    <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4">
+                      <Boton chico variante="secundario" icono={<Repeat size={15} />} onClick={() => setCambioDe(o)}>Hacer un cambio</Boton>
+                      <span className="text-[13px] text-gray-500">Si viene a cambiar talle o prenda. Queda en Tienda › Cambios.</span>
+                    </div>
+
                     {o.paymentStatus && (
                       <div>
                         <p className="mb-2 font-display text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">Pago online</p>
@@ -351,6 +358,16 @@ export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
             }}
           />
         </Suspense>
+      )}
+
+      {cambioDe && (
+        <CambioModal
+          products={products}
+          reportedBy={reportedBy}
+          desde={cambioDesdePedido(cambioDe)}
+          onClose={() => setCambioDe(null)}
+          onDone={() => { setCambioDe(null); void refreshProducts(); }}
+        />
       )}
 
       <Confirmar
