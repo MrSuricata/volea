@@ -74,6 +74,8 @@ export type Torneo = {
   // Llave de 6 con 3 grupos: los 2 mejores primeros a semis; 3er primero vs peor segundo y los
   // otros dos segundos en cuartos (ver engine/copas armarLlaveSeis).
   llave6?: boolean;
+  // Formato de llave elegido desde la web (los de banderas viejas: copas, llave6, sinLlave).
+  formatoLlave?: 'final' | 'semis' | 'cruces';
 };
 
 export function nuevoId(): string {

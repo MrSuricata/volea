@@ -3,6 +3,7 @@ import { resultadoDe } from '../engine/tipos';
 import { generarFixture } from '../engine/fixture';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { rondasDeLlave } from '../engine/copas';
+import { formatoEfectivo, proyeccionFormato } from '../engine/formatoLlave';
 import { ganadorPartido, resolverSlot } from '../engine/llave';
 import { repartirEnCanchas } from '../engine/programacion';
 import type { PartidoAProgramar } from '../engine/programacion';
@@ -216,6 +217,8 @@ export type CatProg = {
   copas: boolean;
   /** Llave de 6 (3 grupos, 2 mejores primeros a semis). */
   llave6: boolean;
+  /** Texto del botón de En vivo para armar la llave según el formato del cuadro. */
+  textoArmar: string;
 };
 
 /** Clave de un partido real dentro del evento. */
@@ -253,6 +256,15 @@ function llaveProyectada(nGrupos: number): { a: string; b: string; fase: string 
 }
 
 const esJugable = (p: PartidoLlave) => p.a !== null && p.b !== null;
+
+function textoArmarLlave(t: Torneo): string {
+  const f = formatoEfectivo(t);
+  const g = t.grupos.length;
+  if (f === 'final') return 'Armar FINAL (1° vs 2°)';
+  if (f === 'semis' || (f === 'cruces' && g === 2)) return 'Armar SEMIS + FINAL';
+  if (f === 'seis' || (f === 'cruces' && g === 4)) return 'Armar CUARTOS + SEMIS + FINAL';
+  return 'Ver cómo armar';
+}
 
 /** Campeón declarado: quien ganó la final (la ronda más alta, sin contar 3er puesto). En un
  *  americano (o un grupo único que se dio por terminado), el 1° de la tabla con todo jugado. */
@@ -400,13 +412,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
       previos = claves;
     }
   } else if (t.fase !== 'terminado' && total > 0 && !t.sinLlave && !t.americanoIndividual) {
-    const olas = t.llave6 && nGrupos === 3
-      ? [
-        [{ a: '3er mejor 1°', b: 'peor 2°', fase: '4TOS' }, { a: 'mejor 2°', b: '2° mejor 2°', fase: '4TOS' }],
-        [{ a: 'mejor 1°', b: 'ganador 4tos', fase: 'SEMIS' }, { a: '2° mejor 1°', b: 'ganador 4tos', fase: 'SEMIS' }],
-        [{ a: 'Ganador SF1', b: 'Ganador SF2', fase: 'FINAL' }],
-      ]
-      : llaveProyectada(nGrupos);
+    const olas = (t.grupos.length > 0 ? proyeccionFormato(t) : null) ?? llaveProyectada(nGrupos);
     etapasDeLlave = olas.length;
     let previos = deGrupo.map((p) => p.clave);
     olas.forEach((ola, w) => {
@@ -451,6 +457,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
     sinLlave: !!t.sinLlave || !!t.americanoIndividual,
     copas: !!t.copas,
     llave6: !!t.llave6,
+    textoArmar: textoArmarLlave(t),
   };
 }
 

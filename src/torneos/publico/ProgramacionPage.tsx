@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { resultadoDe } from '../engine/tipos';
 import { resolverSlot } from '../engine/llave';
-import { armarCopas, armarLlaveSeis } from '../engine/copas';
-import { calcularTabla } from '../engine/tabla';
+import { armarCopas } from '../engine/copas';
+import { armarLlaveFormato, formatoEfectivo } from '../engine/formatoLlave';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
 import { listarTorneosPublicos } from './datos';
@@ -38,14 +38,7 @@ function nombresPila(nombre: string): string {
   return nombre.split(/\s+y\s+/i).map(pila).join(' y ');
 }
 
-// Posiciones de un grupo: las mismas de la tabla que ve el público (engine/tabla), así la llave
-// que se arma acá nunca contradice lo que muestra la tabla del cuadro y la TV.
-function posicionesDeGrupo(t: Torneo, parejaIds: string[]): string[] {
-  const ids = new Set(parejaIds);
-  return calcularTabla(parejaIds, t.partidosGrupo.filter((p) => ids.has(p.aId) && ids.has(p.bId))).map((f) => f.parejaId);
-}
 
-const idCorto = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 
 // Arma la llave en el servidor cuando la fase de grupos está completa. Soporta
 // liga única (final 1° vs 2°) y 2 grupos (semis cruzadas + final). Con 3+ grupos
@@ -60,39 +53,12 @@ async function armarLlaveEnServidor(torneoId: string): Promise<string | null> {
   if (t.partidosGrupo.length === 0 || t.partidosGrupo.some((p) => resultadoDe(p) === null)) {
     return 'Todavía quedan partidos de grupo sin resultado';
   }
-  const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
-  let llave: PartidoLlave[];
-  if (t.grupos.length === 1) {
-    const pos = posicionesDeGrupo(t, t.grupos[0].parejaIds);
-    llave = [{ id: idCorto(), ronda: 1, posicion: 0, esTercerPuesto: false, a: seed(pos[0]), b: seed(pos[1]), puntosA: null, puntosB: null }];
-  } else if (t.grupos.length === 2) {
-    const posA = posicionesDeGrupo(t, t.grupos[0].parejaIds);
-    const posB = posicionesDeGrupo(t, t.grupos[1].parejaIds);
-    const sf1 = { id: idCorto(), ronda: 1, posicion: 0, esTercerPuesto: false, a: seed(posA[0]), b: seed(posB[1]), puntosA: null, puntosB: null };
-    const sf2 = { id: idCorto(), ronda: 1, posicion: 1, esTercerPuesto: false, a: seed(posB[0]), b: seed(posA[1]), puntosA: null, puntosB: null };
-    const final = {
-      id: idCorto(), ronda: 2, posicion: 0, esTercerPuesto: false,
-      a: { tipo: 'ganadorDe', partidoId: sf1.id } as SlotLlave,
-      b: { tipo: 'ganadorDe', partidoId: sf2.id } as SlotLlave,
-      puntosA: null, puntosB: null,
-    };
-    llave = [sf1, sf2, final];
-  } else if (t.grupos.length === 4) {
-    // 4 grupos, pasan 1° y 2°: cuartos cruzados (1A-2B, 1C-2D | 1B-2A, 1D-2C); 1A y 1B en mitades distintas.
-    const [pa, pb, pc, pd] = t.grupos.map((g) => posicionesDeGrupo(t, g.parejaIds));
-    const q = (pos: number, a: string, b: string): PartidoLlave => ({ id: idCorto(), ronda: 1, posicion: pos, esTercerPuesto: false, a: seed(a), b: seed(b), puntosA: null, puntosB: null });
-    const qs = [q(0, pa[0], pb[1]), q(1, pc[0], pd[1]), q(2, pb[0], pa[1]), q(3, pd[0], pc[1])];
-    const g = (id: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId: id });
-    const s1: PartidoLlave = { id: idCorto(), ronda: 2, posicion: 0, esTercerPuesto: false, a: g(qs[0].id), b: g(qs[1].id), puntosA: null, puntosB: null };
-    const s2: PartidoLlave = { id: idCorto(), ronda: 2, posicion: 1, esTercerPuesto: false, a: g(qs[2].id), b: g(qs[3].id), puntosA: null, puntosB: null };
-    llave = [...qs, s1, s2, { id: idCorto(), ronda: 3, posicion: 0, esTercerPuesto: false, a: g(s1.id), b: g(s2.id), puntosA: null, puntosB: null }];
-  } else if (t.llave6 && t.grupos.length === 3) {
-    try { llave = armarLlaveSeis(t); } catch (e) { return e instanceof Error ? e.message : 'No se pudo armar la llave'; }
-  } else {
-    return 'Esta categoría lleva mejores terceros: armá la llave desde el gestor';
-  }
+  // Mismo armador que el gestor: el formato elegido para el cuadro (final, semis, cruces, llave de 6).
+  let llave: PartidoLlave[] | null;
+  try { llave = armarLlaveFormato(t); } catch (e) { return e instanceof Error ? e.message : 'No se pudo armar la llave'; }
+  if (!llave) return 'Elegí el formato de la llave en el gestor (Ajustes del cuadro) o armala desde ahí';
   t.partidosLlave = llave;
-  t.configLlave = { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false };
+  t.configLlave = formatoEfectivo(t) === 'cruces' ? { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false } : null;
   // el cuadro pasa a la llave (el gestor abre directo ahí) y la columna fase acompaña al documento
   t.fase = 'llave';
   const { data: upd, error: e2 } = await sb.from('rk_torneos')
@@ -963,7 +929,7 @@ export default function ProgramacionPage() {
                     if (problema) window.alert(problema);
                     void cargar(false);
                   }}>
-                    {c.nGrupos === 1 ? 'Armar FINAL (1° vs 2°)' : c.nGrupos === 2 ? 'Armar SEMIS + FINAL' : (c.llave6 && c.nGrupos === 3) || c.nGrupos === 4 ? 'Armar CUARTOS + SEMIS + FINAL' : 'Ver cómo armar'}
+                    {c.textoArmar}
                   </button>
                 </div>
               ))}

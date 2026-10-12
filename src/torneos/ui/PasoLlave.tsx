@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, Check, ChevronDown, ListChecks, Medal, RotateCcw, Shuffle, Trophy } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowLeft, Check, ChevronDown, ListChecks, Medal, Pencil, RotateCcw, Shuffle, Trophy } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { PartidoLlave, Torneo } from '../engine/tipos';
 import { conWo, resultadoValido } from '../engine/tipos';
@@ -10,6 +10,9 @@ import { armarLlaveRolling } from '../engine/llaveIndividual';
 import { crearRng, mezclar } from '../engine/rng';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { armarCopas, gruposCompletos, tablaGeneral } from '../engine/copas';
+import { armarLlaveFormato, formatoDe } from '../engine/formatoLlave';
+import { editarSlot, moverEnRonda, origenesPosibles } from '../engine/editarLlave';
+import SelectorFormato from './SelectorFormato';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
@@ -170,6 +173,11 @@ function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
     return <ConfigurarCopas torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />;
   }
 
+  const formato = formatoDe(torneo);
+  if (formato === 'final' || formato === 'semis' || formato === 'cruces' || formato === 'seis') {
+    return <ArmarConFormato torneo={torneo} actualizar={actualizar} />;
+  }
+
   if (americano) {
     return (
       <section className="space-y-4">
@@ -192,6 +200,9 @@ function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
 
   return (
     <section className="space-y-4">
+      <Tarjeta titulo="Formato">
+        <SelectorFormato torneo={torneo} actualizar={actualizar} />
+      </Tarjeta>
       <Tarjeta titulo="¿Cómo se arma la llave?">
         <p className="mb-3 text-sm text-gray-600">Elegí cuántos clasifican. La primera es la recomendada: la llave más justa con estos grupos.</p>
         <div role="radiogroup" aria-label="Cómo se arma la llave" className="grid gap-2">
@@ -414,6 +425,50 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
   const esAncho = useEsAncho();
   const [modo, setModo] = useState<'ronda' | 'cuadro' | null>(null);
   const modoVisible = modo ?? (esAncho ? 'cuadro' : 'ronda');
+  const [corrigiendo, setCorrigiendo] = useState(false);
+
+  // Corregir a mano: quién juega cada lado de un cruce sin resultado, y el orden del dibujo.
+  function describir(p: PartidoLlave): string {
+    const n = (s: SlotLlave | null, id: string | null) => (s === null ? 'BYE' : id ? nombreDe(torneo, id) : 'a definir');
+    return `${nombreRonda(p.ronda)} ${p.posicion + 1}: ${n(p.a, resolverSlot(p.a, partidos))} vs ${n(p.b, resolverSlot(p.b, partidos))}`;
+  }
+  async function cambiarLado(partido: PartidoLlave, lado: 'a' | 'b') {
+    const opciones = [
+      ...torneo.parejas.map((p) => ({ clave: `p:${p.id}`, etiqueta: nombreDe(torneo, p.id) })),
+      ...origenesPosibles(partidos, partido.id).map((o) => ({ clave: `g:${o.id}`, etiqueta: `Ganador de ${describir(o)}` })),
+    ];
+    const elegido = await dialogos.elegirDeLista({
+      titulo: `Quién juega ${lado === 'a' ? 'arriba' : 'abajo'}`,
+      mensaje: describir(partido),
+      opciones,
+      textoConfirmar: 'Cambiar',
+      sinPreseleccion: true,
+      buscador: true,
+    });
+    if (!elegido) return;
+    const slot: SlotLlave = elegido.startsWith('p:') ? { tipo: 'seed', parejaId: elegido.slice(2) } : { tipo: 'ganadorDe', partidoId: elegido.slice(2) };
+    if (slot.tipo === 'seed') {
+      const otro = partidos.find((p) => p.id !== partido.id && !resultadoValido(p.puntosA, p.puntosB)
+        && [p.a, p.b].some((s) => s?.tipo === 'seed' && s.parejaId === slot.parejaId));
+      if (otro) {
+        const ok = await dialogos.confirmar({
+          titulo: 'Ya juega otro cruce',
+          mensaje: `${nombreDe(torneo, slot.parejaId)} ya está en ${describir(otro)}. ¿Ponerla igual acá? Acordate de cambiar el otro cruce.`,
+          textoConfirmar: 'Poner igual',
+        });
+        if (!ok) return;
+      }
+    }
+    try {
+      const nueva = editarSlot(partidos, partido.id, lado, slot);
+      actualizar((t) => ({ ...t, partidosLlave: nueva }));
+    } catch (e) {
+      await dialogos.avisar({ titulo: 'No se pudo', mensaje: e instanceof Error ? e.message : 'No se pudo cambiar el cruce' });
+    }
+  }
+  function mover(partido: PartidoLlave, delta: -1 | 1) {
+    actualizar((t) => ({ ...t, partidosLlave: t.partidosLlave ? moverEnRonda(t.partidosLlave, partido.id, delta) : t.partidosLlave }));
+  }
 
   // Procedencia "2º B" por pareja según la tabla ACTUAL de su grupo (solo formato grupos):
   // explica cada cruce de la ronda 1 y se mantiene coherente con las tablas del paso 3.
@@ -507,6 +562,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
           etiquetaCancha={etiquetaCancha}
           procedenciaA={procA}
           procedenciaB={procB}
+          edicion={corrigiendo && !individual ? { onCambiar: (l) => void cambiarLado(p, l), onMover: (d) => mover(p, d) } : undefined}
         />
       );
     });
@@ -589,6 +645,13 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
         </div>
       )}
 
+      {corrigiendo && (
+        <Nota>
+          Modo corregir: en cada cruce sin resultado podés cambiar quién juega (una pareja o el ganador de otro partido)
+          y subirlo o bajarlo en el dibujo. Los resultados cargados no se tocan.
+        </Nota>
+      )}
+
       {!individual && torneo.configLlave && (
         <ResumenClasificacion torneo={torneo} config={torneo.configLlave} partidosLlave={partidos} />
       )}
@@ -600,9 +663,16 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
           </Boton>
         )}
         derecha={(
-          <Boton variante="secundario" icono={<RotateCcw size={18} />} onClick={() => void rearmar()} className="text-red-700 hover:border-red-700">
-            Rearmar llave
-          </Boton>
+          <>
+            {!individual && (
+              <Boton variante={corrigiendo ? 'primario' : 'secundario'} icono={corrigiendo ? <Check size={18} /> : <Pencil size={18} />} onClick={() => setCorrigiendo((c) => !c)}>
+                {corrigiendo ? 'Listo' : 'Corregir cruces'}
+              </Boton>
+            )}
+            <Boton variante="secundario" icono={<RotateCcw size={18} />} onClick={() => void rearmar()} className="text-red-700 hover:border-red-700">
+              Rearmar llave
+            </Boton>
+          </>
         )}
       />
     </section>
@@ -671,7 +741,7 @@ function ResumenClasificacion({ torneo, config, partidosLlave }: {
   );
 }
 
-function CajaPartido({ torneo, partido, partidos, onCargar, onWo, etiquetaCancha, procedenciaA, procedenciaB }: {
+function CajaPartido({ torneo, partido, partidos, onCargar, onWo, etiquetaCancha, procedenciaA, procedenciaB, edicion }: {
   torneo: Torneo;
   partido: PartidoLlave;
   partidos: PartidoLlave[];
@@ -682,6 +752,8 @@ function CajaPartido({ torneo, partido, partidos, onCargar, onWo, etiquetaCancha
   etiquetaCancha?: string;
   procedenciaA?: string;
   procedenciaB?: string;
+  /** Modo corregir cruces (solo en partidos sin resultado). */
+  edicion?: { onCambiar: (lado: 'a' | 'b') => void; onMover: (delta: -1 | 1) => void };
 }) {
   const idA = resolverSlot(partido.a, partidos);
   const idB = resolverSlot(partido.b, partidos);
@@ -753,6 +825,14 @@ function CajaPartido({ torneo, partido, partidos, onCargar, onWo, etiquetaCancha
           </button>
         </div>
       )}
+      {edicion && !resultadoValido(partido.puntosA, partido.puntosB) && (
+        <div className="slot flex flex-wrap gap-1.5">
+          <Boton variante="secundario" onClick={() => edicion.onCambiar('a')}>Cambiar arriba</Boton>
+          <Boton variante="secundario" onClick={() => edicion.onCambiar('b')}>Cambiar abajo</Boton>
+          <Boton variante="fantasma" onClick={() => edicion.onMover(-1)} aria-label="Subir en el dibujo">↑</Boton>
+          <Boton variante="fantasma" onClick={() => edicion.onMover(1)} aria-label="Bajar en el dibujo">↓</Boton>
+        </div>
+      )}
       {invalido && !borrador.sucio && (
         <div className="slot">
           <span className="text-[13px] font-semibold text-red-700">
@@ -785,6 +865,59 @@ function Campeon({ nombre, subcampeon, tercero, accion }: {
       {accion && <div className="mt-5">{accion}</div>}
     </div>
   );
+}
+
+// Formatos con reglas fijas (final, semis, cruces, llave de 6): se ve el cruce que va a salir
+// con la tabla actual y se arma con un botón. El mismo armador usa En vivo.
+function ArmarConFormato({ torneo, actualizar }: PropsPaso) {
+  const [llave, error] = useMemo(() => {
+    try { return [armarLlaveFormato(torneo), null] as const; } catch (e) { return [null, e instanceof Error ? e.message : 'No se pudo armar'] as const; }
+  }, [torneo]);
+  const nombre = (s: SlotLlave | null, todos: PartidoLlave[]) => {
+    if (s === null) return 'BYE';
+    if (s.tipo === 'seed') return nombreDe(torneo, s.parejaId);
+    const origen = todos.find((p) => p.id === s.partidoId);
+    return origen ? `Ganador de ${nombreRondaCorta(origen.ronda, todos)} ${origen.posicion + 1}` : 'A definir';
+  };
+  function armar() {
+    if (!llave) return;
+    actualizar((t) => ({ ...t, partidosLlave: llave, configLlave: formatoDe(t) === 'cruces' ? { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false } : null }));
+  }
+  return (
+    <section className="space-y-4">
+      <Tarjeta titulo="Formato">
+        <SelectorFormato torneo={torneo} actualizar={actualizar} />
+      </Tarjeta>
+      <Tarjeta titulo="Así sale la llave">
+        {error ? <Nota tono="alerta">{error}. Cuando esté todo cargado se ve el cruce.</Nota> : llave && (
+          <ol className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+            {[...llave].sort((a, b) => a.ronda - b.ronda || a.posicion - b.posicion).map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[15px] text-navy-700">
+                <Insignia>{nombreRondaCorta(p.ronda, llave)} {p.posicion + 1}</Insignia>
+                <span className="font-semibold">{nombre(p.a, llave)}</span>
+                <span className="text-gray-500">vs</span>
+                <span className="font-semibold">{nombre(p.b, llave)}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Tarjeta>
+      <PiePaso
+        izquierda={(
+          <Boton variante="secundario" icono={<ArrowLeft size={18} />} onClick={() => actualizar((t) => ({ ...t, fase: 'faseGrupos' }))}>
+            Fase de grupos
+          </Boton>
+        )}
+        derecha={<Boton icono={<Check size={18} />} disabled={!llave} onClick={armar}>Armar llave</Boton>}
+      />
+    </section>
+  );
+}
+
+function nombreRondaCorta(r: number, llave: PartidoLlave[]): string {
+  const max = Math.max(...llave.filter((p) => !p.esTercerPuesto).map((p) => p.ronda));
+  const d = max - r;
+  return d === 0 ? 'Final' : d === 1 ? 'Semi' : d === 2 ? 'Cuarto' : `Ronda ${r}`;
 }
 
 function ConfigurarCopas({ torneo, actualizar, agregarTorneos }: PropsPaso) {

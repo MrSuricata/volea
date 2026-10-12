@@ -9,10 +9,11 @@ import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
 import { Boton, Insignia, Segmentado, Selector } from '../../admin/ui';
 import { FilaMarcador, Nota, PiePaso } from './piezas';
+import EditorGrupos from './EditorGrupos';
 
 export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   const dialogos = useDialogos();
-  const [vista, setVista] = useState<'rondas' | 'grupos'>('rondas');
+  const [vista, setVista] = useState<'rondas' | 'grupos' | 'editar'>('rondas');
   const canchas = torneo.canchas ?? 2;
 
   function cargarResultado(partidoId: string, puntosA: number | null, puntosB: number | null) {
@@ -75,7 +76,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
             etiqueta="Ver partidos"
             valor={vista}
             alCambiar={setVista}
-            opciones={[{ valor: 'rondas', texto: 'Por rondas' }, { valor: 'grupos', texto: 'Por grupo' }]}
+            opciones={[{ valor: 'rondas', texto: 'Por rondas' }, { valor: 'grupos', texto: 'Por grupo' }, { valor: 'editar', texto: 'Editar duplas' }]}
           />
           <label className="flex items-center gap-2 text-sm font-semibold text-navy-700">
             Canchas
@@ -140,6 +141,8 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
             </div>
           );
         })}
+
+      {vista === 'editar' && <EditorGrupos torneo={torneo} actualizar={actualizar} />}
 
       {vista === 'grupos' &&
         torneo.grupos.map((g) => (

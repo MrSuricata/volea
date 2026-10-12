@@ -8,6 +8,7 @@ import { CONFIG_PUNTOS_DEFAULT, nuevoId } from './engine/tipos';
 import { DialogosProvider, useDialogos } from './ui/dialogos';
 import { reconciliarTorneo } from './ui/reconciliar';
 import { agruparParaGestor, avanceDe } from './ui/listaGestor';
+import { formatoDe, formatosPosibles } from './engine/formatoLlave';
 import PasoParejas from './ui/PasoParejas';
 import PasoGrupos from './ui/PasoGrupos';
 import PasoFaseGrupos from './ui/PasoFaseGrupos';
@@ -15,6 +16,7 @@ import PasoLlave from './ui/PasoLlave';
 import PantallaRanking from './ui/PantallaRanking';
 import PantallaJugadores from './ui/PantallaJugadores';
 import PantallaConfigPuntos from './ui/ConfigPuntos';
+import SelectorFormato from './ui/SelectorFormato';
 import { Boton, BotonIcono, Campo, EncabezadoPagina, Entrada, Insignia, Interruptor, Selector, Vacio, type TonoInsignia } from '../admin/ui';
 import { cn } from '../lib/cn';
 
@@ -372,6 +374,7 @@ function AjustesTorneo({ torneo, eventosUsados, esIndividual, actualizar }: {
           {!esIndividual && torneo.evento && <Insignia>Evento {torneo.evento}</Insignia>}
           {torneo.cuentaParaRanking === false && <Insignia tono="atencion">No suma</Insignia>}
           {torneo.visible === false && <Insignia><EyeOff size={12} aria-hidden /> Oculto</Insignia>}
+          {!esIndividual && formatoDe(torneo) !== 'auto' && <Insignia tono="navy">Llave: {formatosPosibles(torneo).find((o) => o.valor === formatoDe(torneo))?.texto ?? formatoDe(torneo)}</Insignia>}
         </span>
         <ChevronDown size={18} aria-hidden className={cn('shrink-0 text-gray-500 transition-transform', abierto && 'rotate-180')} />
       </button>
@@ -425,6 +428,11 @@ function AjustesTorneo({ torneo, eventosUsados, esIndividual, actualizar }: {
               descripcion="Si está apagado, la web no lo muestra."
             />
           </div>
+          {!esIndividual && (
+            <div className="sm:col-span-2">
+              <SelectorFormato torneo={torneo} actualizar={actualizar} />
+            </div>
+          )}
         </div>
       )}
     </section>
