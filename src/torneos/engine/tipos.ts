@@ -14,6 +14,8 @@ export type PartidoGrupo = {
   // W.O.: el partido no se jugó (alguien no se presentó o se retiró). El resultado cargado vale para
   // la tabla y la llave, pero se muestra como W.O. y no es un partido jugado (no va a DUPR).
   wo?: boolean;
+  // Cuándo se cargó el resultado (ISO): para medir el ritmo real del torneo.
+  cargadoEl?: string;
 };
 
 export type SlotLlave =
@@ -31,6 +33,7 @@ export type PartidoLlave = {
   puntosB: number | null;
   esTercerPuesto: boolean;
   wo?: boolean; // W.O.: ver PartidoGrupo
+  cargadoEl?: string; // ver PartidoGrupo
 };
 
 export type ConfigLlave = {

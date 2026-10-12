@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Shuffle } from 'lucide-react';
 import type { PropsPaso } from '../TorneosApp';
 import type { Torneo } from '../engine/tipos';
@@ -7,9 +7,12 @@ import { crearRng } from '../engine/rng';
 import {
   generarPartidosGrupos,
   opcionesCantidadGrupos,
+  elegirCabezas,
+  repartirConCabezas,
   repartirEnGrupos,
   sugerirCantidadGrupos,
 } from '../engine/grupos';
+import { supabase } from '../../services/supabaseClient';
 import { nombreDe } from './util';
 import { useDialogos } from './dialogos';
 import { Boton, Campo, Insignia, Interruptor, Selector } from '../../admin/ui';
@@ -17,8 +20,21 @@ import { Nota, PiePaso } from './piezas';
 
 const LETRAS = 'ABCDEFGHIJKL';
 
+// Rating DUPR (dobles) de los jugadores vinculados al padrón, leído de la base.
+async function ratingsDupr(ids: string[]): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  if (!supabase || ids.length === 0) return m;
+  const { data } = await supabase.from('rk_jugadores').select('id, dupr_rating').in('id', [...new Set(ids)]);
+  for (const f of (data ?? []) as { id: string; dupr_rating: number | null }[]) {
+    if (typeof f.dupr_rating === 'number') m.set(f.id, f.dupr_rating);
+  }
+  return m;
+}
+
 export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
   const dialogos = useDialogos();
+  const [conCabezas, setConCabezas] = useState(false);
+  const [avisoCabezas, setAvisoCabezas] = useState<string | null>(null);
   const cantParejas = torneo.parejas.length;
   const opciones = opcionesCantidadGrupos(cantParejas);
   const sugerida = sugerirCantidadGrupos(cantParejas);
@@ -73,11 +89,19 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
     }
     // usa la cantidad acotada: si la actual quedó inválida, "volvé a sortear" recupera solo
     const cantidad = cantidadVisible || sugerida;
-    const repartidos = repartirEnGrupos(
-      torneo.parejas.map((p) => p.id),
-      cantidad,
-      crearRng(Math.floor(Math.random() * 2 ** 31)),
-    );
+    const rng = crearRng(Math.floor(Math.random() * 2 ** 31));
+    let repartidos: string[][];
+    if (conCabezas) {
+      const rating = await ratingsDupr(torneo.parejas.flatMap((p) => p.jugadorIds ?? []));
+      const cabezas = elegirCabezas(torneo.parejas, rating, cantidad);
+      setAvisoCabezas(cabezas.length < cantidad
+        ? `Solo ${cabezas.length} dupla${cabezas.length === 1 ? '' : 's'} con DUPR: ${cabezas.length === 0 ? 'se sorteó sin cabezas' : `cabeza${cabezas.length === 1 ? '' : 's'}: ${cabezas.map((id) => nombreDe(torneo, id)).join(', ')}`}.`
+        : `Cabezas de serie: ${cabezas.map((id, i) => `${LETRAS[i]} ${nombreDe(torneo, id)}`).join(' · ')}`);
+      repartidos = repartirConCabezas(torneo.parejas.map((p) => p.id), cantidad, cabezas, rng);
+    } else {
+      setAvisoCabezas(null);
+      repartidos = repartirEnGrupos(torneo.parejas.map((p) => p.id), cantidad, rng);
+    }
     actualizar((t) => ({
       ...t,
       grupos: repartidos.map((ids, i) => ({ id: nuevoId(), nombre: LETRAS[i], parejaIds: ids })),
@@ -148,6 +172,12 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
         </div>
         <div className="mt-3 border-t border-gray-100 pt-1">
           <Interruptor
+            activo={conCabezas}
+            alCambiar={setConCabezas}
+            etiqueta="Cabezas de serie por DUPR"
+            descripcion="Las duplas con mejor DUPR (promedio de sus jugadores) van una a cada grupo."
+          />
+          <Interruptor
             activo={torneo.idaYVuelta ?? false}
             alCambiar={(marcado) => actualizar((t) => ({ ...t, idaYVuelta: marcado }))}
             etiqueta="Ida y vuelta (doble rueda)"
@@ -155,6 +185,7 @@ export default function PasoGrupos({ torneo, actualizar }: PropsPaso) {
           />
         </div>
         <div className="mt-2 space-y-2 empty:hidden">
+          {avisoCabezas && <Nota>{avisoCabezas}</Nota>}
           {opciones.length === 0 && <Nota tono="alerta">Con {cantParejas} parejas no se puede armar ningún grupo válido (mínimo 2).</Nota>}
           {opciones.length > 0 && !opciones.includes(cantidadActual) && (
             <Nota>

@@ -603,3 +603,16 @@ export function programarEvento(args: {
   filas.sort((x, y) => orden(x.dia) - orden(y.dia) || x.ini - y.ini || x.cancha.localeCompare(y.cancha, undefined, { numeric: true }));
   return { filas, resumen };
 }
+
+/**
+ * Minutos reales por partido (por cancha) según cuándo se cargaron los últimos resultados:
+ * lapso entre el primero y el último de la ventana × canchas ÷ partidos. Null si hay pocos datos.
+ */
+export function ritmoReal(instantesMs: number[], canchas: number, ahoraMs: number, ventanaMin = 90): number | null {
+  const v = instantesMs.filter((x) => x > ahoraMs - ventanaMin * 60000 && x <= ahoraMs).sort((a, b) => a - b);
+  if (v.length < 4 || canchas < 1) return null;
+  const lapso = (v[v.length - 1] - v[0]) / 60000;
+  if (lapso < 10) return null;
+  return Math.max(5, Math.round((lapso * canchas) / (v.length - 1)));
+}
+

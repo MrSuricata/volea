@@ -6,6 +6,7 @@ import {
   repartirEnGrupos,
   sugerirCantidadGrupos,
 } from './grupos';
+import { elegirCabezas, repartirConCabezas } from './grupos';
 
 describe('opcionesCantidadGrupos', () => {
   it('solo permite configuraciones sin grupos de menos de 3', () => {
@@ -92,3 +93,23 @@ describe('generarPartidosGrupos', () => {
     }
   });
 });
+
+describe('cabezas de serie por DUPR', () => {
+  const parejas = [
+    { id: 'p1', jugadorIds: ['a', 'b'] }, { id: 'p2', jugadorIds: ['c', 'd'] },
+    { id: 'p3', jugadorIds: ['e'] }, { id: 'p4', jugadorIds: ['f', 'g'] }, { id: 'p5' },
+  ];
+  const rating = new Map([['a', 3.0], ['b', 3.4], ['c', 3.6], ['e', 3.3], ['f', 2.5]]);
+  it('elige por promedio de los que tienen rating', () => {
+    expect(elegirCabezas(parejas, rating, 3)).toEqual(['p2', 'p3', 'p1']);
+    expect(elegirCabezas(parejas, new Map(), 2)).toEqual([]);
+  });
+  it('una cabeza por grupo y el resto parejo', () => {
+    const g = repartirConCabezas(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'], 2, ['p2', 'p3'], () => 0.5);
+    expect(g[0][0]).toBe('p2');
+    expect(g[1][0]).toBe('p3');
+    expect(g.map((x) => x.length).sort()).toEqual([3, 4]);
+    expect(new Set(g.flat()).size).toBe(7);
+  });
+});
+

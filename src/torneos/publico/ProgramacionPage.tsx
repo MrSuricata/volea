@@ -15,6 +15,7 @@ import { almacenLocal } from '../../utils/almacen';
 import {
   BLOQUE_OPC, PROGRAMA, aHora, aMinuto, aplicarAjustes, categoriasDelEvento, claveDePartido, minutoDesde,
   momentoDeTorneo, programarEvento,
+  ritmoReal,
 } from './programa';
 import type { AjustesPrograma, CatProg, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
 import '../torneos.css';
@@ -129,6 +130,7 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
     if (!p) return 'El partido ya no existe (¿se rearmó el cuadro?)';
     p.puntosA = pa;
     p.puntosB = pb;
+    if (pa !== null && !p.cargadoEl) p.cargadoEl = new Date().toISOString();
     const { data: upd, error: e2 } = await sb.from('rk_torneos')
       .update({ data: t, updated_at: new Date().toISOString() })
       .eq('id', torneoId)
@@ -538,6 +540,14 @@ export default function ProgramacionPage() {
     void cargar(false);
   }
 
+  // El cronómetro sale de cuándo se marcó la cancha: corregirlo es mover esa hora para atrás.
+  async function ajustarCronometro(cancha: string, minutos: number) {
+    const sb = supabase;
+    if (!sb || !Number.isFinite(minutos) || minutos < 0 || minutos > 180) return;
+    await sb.from('rk_en_cancha').update({ updated_at: new Date(Date.now() - minutos * 60000).toISOString() }).eq('cancha', cancha);
+    void cargar(false);
+  }
+
   async function setHabilitada(cancha: string, valor: boolean) {
     const sb = supabase;
     if (!sb) return;
@@ -607,7 +617,7 @@ export default function ProgramacionPage() {
     ? enCancha.filter((e) => e.habilitada).map((e) => e.cancha).sort(ordenCancha)
     : PROGRAMA.canchas;
 
-  const { filas, resumen, cats, vigente, momento } = useMemo(() => {
+  const { filas, resumen, cats, vigente, momento, ritmo, resumenRitmo } = useMemo(() => {
     const vigente = aplicarAjustes(PROGRAMA, ajustes);
     const cats = categoriasDelEvento(torneos, PROGRAMA, vigente);
     const momento = momentoDeTorneo(new Date(), vigente.dias);
@@ -615,7 +625,17 @@ export default function ProgramacionPage() {
       ? [{ cancha: e.cancha, torneoId: e.torneoId, partidoId: e.partidoId, desde: minutoDesde(momento.fecha, new Date(e.desde)) }]
       : []));
     const programado = programarEvento({ cats, vigente, ahora: momento, canchas: { activas, enJuego } });
-    return { ...programado, cats, vigente, momento };
+    // Ritmo real: cuándo se fueron cargando los resultados del evento (últimos 90 minutos).
+    const instantes = torneos
+      .filter((t) => PROGRAMA.esDelEvento(t))
+      .flatMap((t) => [...t.partidosGrupo, ...(t.partidosLlave ?? [])])
+      .map((p) => (p.cargadoEl ? Date.parse(p.cargadoEl) : NaN))
+      .filter((x) => Number.isFinite(x));
+    const ritmo = ritmoReal(instantes, activas.length, Date.now());
+    const resumenRitmo = ritmo !== null && ritmo !== vigente.duracion
+      ? programarEvento({ cats, vigente: { ...vigente, duracion: ritmo }, ahora: momento, canchas: { activas, enJuego } }).resumen
+      : null;
+    return { ...programado, cats, vigente, momento, ritmo, resumenRitmo };
   }, [torneos, ajustes, actualizado, enCancha, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
@@ -673,6 +693,26 @@ export default function ProgramacionPage() {
   const diaTablero = momento.dia ?? dia;
   const jugable = (f: Fila) => !!f.partidoId && !!f.listo && !enCanchaYa(f) && conflictosDe(f).length === 0;
   const porMandar = filas.filter((f) => f.dia === diaTablero && jugable(f));
+  // Cualquier partido con las dos duplas definidas (aunque no sea el sugerido), para elegir a mano.
+  const elegibles = filas.filter((f) => f.dia === diaTablero && !!f.partidoId && !!f.listo && !enCanchaYa(f));
+  const selectorPartido = (cancha: string, texto: string) => elegibles.length > 0 && (
+    <select
+      value=""
+      aria-label={`${texto} en ${cancha}`}
+      onChange={(ev) => {
+        const f = elegibles.find((x) => `${x.torneoId}|${x.partidoId}` === ev.target.value);
+        if (f) void mandarACancha(cancha, f);
+      }}
+      style={{ width: '100%', marginTop: 8, padding: '6px 8px', fontSize: '0.82rem' }}
+    >
+      <option value="">{texto}…</option>
+      {elegibles.map((f) => (
+        <option key={`${f.torneoId}|${f.partidoId}`} value={`${f.torneoId}|${f.partidoId}`}>
+          {aHora(f.ini)} · {f.categoria} · {f.fase}: {f.a} vs {f.b}
+        </option>
+      ))}
+    </select>
+  );
   const sugerencias = new Map<string, Fila>();
   for (const cancha of canchasLibres) {
     const suya = porMandar.findIndex((f) => f.cancha === cancha && f.ini === porMandar[0].ini);
@@ -703,7 +743,7 @@ export default function ProgramacionPage() {
         proximos={proximosTv}
         resultados={cinta.slice(0, 5)}
         campeones={campeones.map((c) => ({ corto: c.corto, campeon: c.campeon as string }))}
-        termina={(resumen[diaTv] ?? resumenDia).termina}
+        termina={(resumenRitmo?.[diaTv] ?? resumen[diaTv] ?? resumenDia).termina}
         ahora={new Date()}
         tv={ajustes?.tv}
       />
@@ -886,6 +926,14 @@ export default function ProgramacionPage() {
             {momento.dia === diaElegido.clave ? '' : `Arranca ${aHora(diaElegido.inicio)} · `}
             <strong>{resumenDia.partidos}</strong> {resumenDia.partidos === 1 ? 'partido' : 'partidos'} por jugar en {activas.length}{' '}
             {activas.length === 1 ? 'cancha' : 'canchas'} · termina cerca de las <strong>{aHora(resumenDia.termina)}</strong>
+            {ritmo !== null && momento.dia === diaElegido.clave && (
+              <>
+                {' '}· ritmo real <strong>{ritmo} min</strong> por partido
+                {resumenRitmo && resumenRitmo[diaElegido.clave]?.termina != null && (
+                  <> (a ese ritmo termina <strong>{aHora(resumenRitmo[diaElegido.clave].termina as number)}</strong>)</>
+                )}
+              </>
+            )}
           </p>
         )}
 
@@ -1053,6 +1101,21 @@ export default function ProgramacionPage() {
                             ✕ Cancelar
                           </button>
                         </div>
+                        {selectorPartido(nombre, 'Cambiar por otro partido')}
+                        <form
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, fontSize: '0.78rem' }}
+                          onSubmit={(ev) => {
+                            ev.preventDefault();
+                            const n = Number(new FormData(ev.currentTarget).get('min'));
+                            void ajustarCronometro(nombre, n);
+                          }}
+                        >
+                          <span style={{ opacity: 0.6, fontWeight: 700 }}>Empezó hace</span>
+                          <input name="min" type="number" inputMode="numeric" min={0} max={180} aria-label={`Minutos que lleva ${nombre}`}
+                            style={{ width: 64, padding: '3px 6px', fontSize: '0.8rem' }} />
+                          <span style={{ opacity: 0.6 }}>min</span>
+                          <button className="boton secundario" style={{ padding: '4px 10px', fontSize: '0.8rem' }} type="submit">Corregir</button>
+                        </form>
                       </>
                     )}
                   </>
@@ -1074,7 +1137,7 @@ export default function ProgramacionPage() {
                       Deshabilitar cancha
                     </button>
                   ) : null;
-                  if (!sug) return <div><div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>{apagar}</div>;
+                  if (!sug) return <div><div style={{ opacity: 0.45, fontWeight: 600 }}>Libre</div>{modoCarga && selectorPartido(nombre, 'Elegir partido')}{apagar}</div>;
                   return (
                     <>
                       <div style={{ fontSize: '0.72rem', opacity: 0.6, textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
@@ -1086,6 +1149,7 @@ export default function ProgramacionPage() {
                       <button className="boton" style={{ width: '100%' }} onClick={() => void mandarACancha(nombre, sug)}>
                         Mandar a {nombre}
                       </button>
+                      {selectorPartido(nombre, 'Otro partido')}
                       {apagar}
                     </>
                   );

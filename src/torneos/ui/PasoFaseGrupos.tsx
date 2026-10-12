@@ -21,7 +21,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
       ...t,
       // Un W.O. sin resultado no existe: si se borra el puntaje, la marca se va con él.
       partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId
-        ? conWo({ ...p, puntosA, puntosB }, !!p.wo && puntosA !== null && puntosB !== null)
+        ? conWo({ ...p, puntosA, puntosB, cargadoEl: puntosA !== null ? (p.cargadoEl ?? new Date().toISOString()) : undefined }, !!p.wo && puntosA !== null && puntosB !== null)
         : p)),
     }));
   }

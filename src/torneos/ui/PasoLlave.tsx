@@ -495,6 +495,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
       ...t,
       partidosLlave: t.partidosLlave
         ? cargarResultadoLlave(t.partidosLlave, partido.id, puntosA, puntosB).partidos
+          .map((p) => (p.id === partido.id && puntosA !== null && !p.cargadoEl ? { ...p, cargadoEl: new Date().toISOString() } : p))
         : t.partidosLlave,
     }));
   }

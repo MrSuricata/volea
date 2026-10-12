@@ -4,6 +4,7 @@ import {
   PROGRAMA, aHora, aMinuto, aplicarAjustes, armarCategoria, categoriasDelEvento, minutoDesde, momentoDeTorneo,
   personasDe, programarEvento,
 } from './programa';
+import { ritmoReal } from './programa';
 import type { CatProg, Fila } from './programa';
 
 // ─── Armado de cuadros de prueba ─────────────────────────────────────────────
@@ -386,6 +387,19 @@ describe('americano (sin llave)', () => {
     expect(casi.campeon).toBeNull();
     const todo = armarCategoria({ ...conGrupoDe4('X +50', gente, res), sinLlave: true }, cfg);
     expect(todo.campeon).toBe('OMAR');
+  });
+});
+
+describe('ritmoReal', () => {
+  const m = 60000;
+  it('mide minutos por partido por cancha con los últimos resultados', () => {
+    // 2 canchas, un resultado cada 7 minutos ⇒ 14 min por partido por cancha
+    const ahora = 1000 * m;
+    expect(ritmoReal([ahora - 28 * m, ahora - 21 * m, ahora - 14 * m, ahora - 7 * m, ahora], 2, ahora)).toBe(14);
+  });
+  it('sin datos suficientes no inventa', () => {
+    expect(ritmoReal([1, 2, 3], 2, 10)).toBeNull();
+    expect(ritmoReal([0, m, 2 * m, 3 * m, 4 * m], 2, 4 * m)).toBeNull();
   });
 });
 

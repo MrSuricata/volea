@@ -39,6 +39,37 @@ export function repartirEnGrupos(parejaIds: string[], cantidad: number, rng: () 
   return grupos;
 }
 
+/**
+ * Cabezas de serie: las `cantidad` parejas con mejor promedio de rating (DUPR) de sus jugadores.
+ * Las que no tienen ningún jugador con rating no entran. Devuelve de la más fuerte a la más débil.
+ */
+export function elegirCabezas(parejas: { id: string; jugadorIds?: string[] }[], rating: Map<string, number>, cantidad: number): string[] {
+  const conRating = parejas
+    .map((p) => {
+      const rs = (p.jugadorIds ?? []).map((j) => rating.get(j)).filter((r): r is number => typeof r === 'number' && Number.isFinite(r));
+      return { id: p.id, prom: rs.length ? rs.reduce((s, r) => s + r, 0) / rs.length : null };
+    })
+    .filter((x): x is { id: string; prom: number } => x.prom !== null)
+    .sort((a, b) => b.prom - a.prom);
+  return conRating.slice(0, cantidad).map((x) => x.id);
+}
+
+/** Como repartirEnGrupos, pero con una cabeza de serie por grupo (la 1ª al grupo A, la 2ª al B…). */
+export function repartirConCabezas(parejaIds: string[], cantidad: number, cabezas: string[], rng: () => number): string[][] {
+  if (cantidad < 1) throw new Error(`cantidad de grupos inválida: ${cantidad}`);
+  const grupos: string[][] = Array.from({ length: cantidad }, () => []);
+  const usadas = cabezas.slice(0, cantidad);
+  usadas.forEach((id, i) => grupos[i].push(id));
+  const resto = mezclar(parejaIds.filter((id) => !usadas.includes(id)), rng);
+  for (const id of resto) {
+    // al grupo con menos parejas (desempata el de letra más baja)
+    let k = 0;
+    for (let i = 1; i < cantidad; i++) if (grupos[i].length < grupos[k].length) k = i;
+    grupos[k].push(id);
+  }
+  return grupos;
+}
+
 export function generarPartidosGrupos(grupos: Grupo[], opciones?: OpcionesFixture): PartidoGrupo[] {
   const partidos: PartidoGrupo[] = [];
   for (const g of grupos) {
