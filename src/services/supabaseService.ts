@@ -345,16 +345,17 @@ export const SupabaseService = {
    * monto null = cobra todo; con monto = pago parcial FIFO (la RPC parte el
    * ítem a caballo y deja el resto pendiente). Misma semántica que «cobré».
    */
-  async cobrarDeudorCaja(debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null): Promise<{ ok: boolean; error?: string; restante?: number }> {
+  async cobrarDeudorCaja(debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null = null): Promise<{ ok: boolean; error?: string; restante?: number }> {
     // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
     if (!supabase) {
       return { ok: false, error: 'Sin conexión con Supabase' };
     }
-    const { data, error } = await conTechoEscritura(supabase.rpc('admin_cobrar_deudor', {
-      p_debtor: debtor,
-      p_method: method,
-      p_monto: monto,
-    }));
+    const base = { p_debtor: debtor, p_method: method, p_monto: monto };
+    let { data, error } = await conTechoEscritura(supabase.rpc('admin_cobrar_deudor', { ...base, p_cobrado_por: cobradoPor }));
+    // Base sin la v33 (la función todavía no conoce p_cobrado_por): se cobra igual, sin el dato.
+    if (error && ('code' in error && error.code === 'PGRST202' || /p_cobrado_por/.test(error.message))) {
+      ({ data, error } = await conTechoEscritura(supabase.rpc('admin_cobrar_deudor', base)));
+    }
     if (error) {
       console.error('Error cobrando deudor:', error);
       return { ok: false, error: error.message };

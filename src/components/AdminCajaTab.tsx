@@ -134,7 +134,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   registrarGasto: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
   /** Socio deducido del admin logueado; null con la cuenta compartida. */
   socioSugerido: SocioName | null;
-  cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
   /** Gastos que hay que pagar y todavía no salieron de la caja. */
   loadGastosPendientes: () => Promise<GastoPendiente[] | null>;
   saveGastoPendiente: (g: GastoPendienteInput) => Promise<{ ok: boolean; error?: string }>;
@@ -776,6 +776,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         <CobroModal
           deudor={aCobrar}
           cobrar={cobrarDeudor}
+          socioSugerido={socioSugerido}
           onClose={() => setACobrar(null)}
           onDone={() => { setACobrar(null); refresh(); }}
         />
@@ -923,25 +924,28 @@ function BorrarDeudaModal({ deudor, revertEntry, onClose, onDone }: {
  * (pago parcial FIFO: cancela las deudas más viejas; un ítem a caballo se
  * parte y el resto sigue pendiente). Misma semántica que «cobré» del bot.
  */
-function CobroModal({ deudor, cobrar, onClose, onDone }: {
+function CobroModal({ deudor, cobrar, socioSugerido, onClose, onDone }: {
   deudor: { nombre: string; total: number };
-  cobrar: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  cobrar: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  socioSugerido: SocioName | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const [monto, setMonto] = useState<number | null>(deudor.total);
   const [metodo, setMetodo] = useState<'mp' | 'efectivo' | 'transferencia' | null>(null);
+  // Quién recibe la plata: arranca en quien está usando el panel; al liquidar va a su cuenta.
+  const [quien, setQuien] = useState<SocioName | null>(socioSugerido);
   const [cobrando, setCobrando] = useState(false);
 
   const montoNum = monto ?? NaN;
-  const listo = Number.isFinite(montoNum) && montoNum > 0 && montoNum <= deudor.total && !!metodo;
+  const listo = Number.isFinite(montoNum) && montoNum > 0 && montoNum <= deudor.total && !!metodo && !!quien;
   const esParcial = listo && montoNum < deudor.total;
 
   const handleCobrar = async () => {
     if (!listo || cobrando || !metodo) return;
     setCobrando(true);
     try {
-      const result = await cobrar(deudor.nombre, metodo, esParcial ? montoNum : null);
+      const result = await cobrar(deudor.nombre, metodo, esParcial ? montoNum : null, quien);
       if (!result.ok) {
         toast.error(result.error || 'No se pudo cobrar');
         return;
@@ -975,6 +979,7 @@ function CobroModal({ deudor, cobrar, onClose, onDone }: {
           <Boton variante="secundario" onClick={onClose} disabled={cobrando}>Cancelar</Boton>
           <Boton onClick={handleCobrar} disabled={!listo} cargando={cobrando}>
             {!metodo ? 'Elegí cómo paga'
+              : !quien ? 'Elegí quién recibe la plata'
               : esParcial ? `Cobrar ${formatoPlata(montoNum)} (parcial)`
               : `Cobrar todo · ${formatoPlata(deudor.total)}`}
           </Boton>
@@ -994,6 +999,17 @@ function CobroModal({ deudor, cobrar, onClose, onDone }: {
         <div>
           <span className={claseRotulo}>¿Cómo paga?</span>
           <Segmentado etiqueta="¿Cómo paga?" opciones={METODOS_COBRO} valor={metodo} alCambiar={setMetodo} anchoCompleto />
+        </div>
+        <div>
+          <span className={claseRotulo}>¿Quién recibe la plata?</span>
+          <Segmentado
+            etiqueta="¿Quién recibe la plata?"
+            opciones={SOCIOS.map(s => ({ valor: s, texto: NOMBRES_SOCIOS[s] }))}
+            valor={quien}
+            alCambiar={setQuien}
+            anchoCompleto
+          />
+          <p className="mt-1.5 text-[12px] text-gray-500">Al liquidar la caja, esta plata va a su cuenta.</p>
         </div>
       </div>
     </Dialogo>

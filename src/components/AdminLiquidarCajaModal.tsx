@@ -6,8 +6,7 @@ import { esCuotaFutura, impactosGasto, impactosVenta, SOCIOS, NOMBRES_SOCIOS } f
 import { cn } from '../lib/cn';
 import { Boton, Dialogo, Confirmar, Plata, Insignia, Segmentado, Vacio, CargandoFilas, ErrorEstado, formatoPlata } from '../admin/ui';
 import { plural } from '../admin/ui-ventas/ventas';
-
-const METODO_LBL: Record<string, string> = { mp: 'Mercado Pago', efectivo: 'Efectivo', transferencia: 'Transferencia' };
+import { agruparPorCobrador, ventaALiquidar, type VentaALiquidar } from '../utils/liquidacionCaja';
 
 const TZ = 'America/Montevideo';
 const diaMvd = (iso?: string) => {
@@ -33,10 +32,12 @@ const personaASocio = (nombre: string): SocioName => {
 const pagadorDe = (e: LedgerEntry): SocioName => e.paidBy ?? personaASocio(e.reportedBy || '');
 
 /**
- * `cobrador` arranca en null: antes venía 'gaston' fijo y, si nadie lo tocaba, toda
- * la plata del grupo se le asentaba a él. Ahora hay que elegirlo para liquidar.
+ * Cada venta lleva su cobrador (quién tiene la plata). Viene sugerido por quien cobró
+ * la deuda o quien registró la venta; las de cuentas compartidas arrancan sin elegir.
+ * Se agrupan por cómo entró la plata solo para mostrarlas y para asentar un
+ * movimiento por grupo y socio.
  */
-type VentaGroup = { key: string; label: string; ids: string[]; n: number; total: number; cobrador: SocioName | null; incluir: boolean };
+const fechaCorta = (iso: string) => new Date(iso).toLocaleDateString('es-UY', { day: 'numeric', month: 'short', timeZone: TZ });
 type GastoRow = {
   id: string; label: string; fecha: string | null; monto: number; persona: string;
   pagador: SocioName;
@@ -70,7 +71,9 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
 }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [ventaGroups, setVentaGroups] = useState<VentaGroup[]>([]);
+  const [ventas, setVentas] = useState<VentaALiquidar[]>([]);
+  const [excluidos, setExcluidos] = useState<Set<string>>(new Set());
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
   const [gastoRows, setGastoRows] = useState<GastoRow[]>([]);
   const [fiadosSinCobrar, setFiadosSinCobrar] = useState({ n: 0, total: 0 });
   const [area, setArea] = useState<SocioMove['area']>('marca');
@@ -85,7 +88,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       if (data === null) { setFailed(true); setLoading(false); return; }
       const pendientes = data.filter(e => !e.reverted && !e.socioSettledAt);
 
-      const grupos = new Map<string, VentaGroup>();
+      const vs: VentaALiquidar[] = [];
       let fiadosN = 0, fiadosTotal = 0;
       for (const e of pendientes) {
         if (e.kind !== 'venta') continue;
@@ -93,12 +96,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
           fiadosN++; fiadosTotal += e.amount;
           continue; // plata que todavía no entró: se liquida cuando se cobre
         }
-        const metodo = e.paymentMethod === 'debe'
-          ? `Fiados cobrados (${e.settledMethod ? METODO_LBL[e.settledMethod] : '—'})`
-          : (e.paymentMethod ? METODO_LBL[e.paymentMethod] : 'Sin método');
-        const g = grupos.get(metodo) || { key: metodo, label: metodo, ids: [], n: 0, total: 0, cobrador: null, incluir: true };
-        g.ids.push(e.id); g.n++; g.total += e.amount;
-        grupos.set(metodo, g);
+        vs.push(ventaALiquidar(e));
       }
 
       const gastos: GastoRow[] = pendientes
@@ -109,7 +107,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
           persona: e.reportedBy || '—', pagador: pagadorDe(e), elegido: e.paidBy !== null, incluir: true,
         }));
 
-      setVentaGroups(Array.from(grupos.values()).sort((a, b) => b.total - a.total));
+      setVentas(vs.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
       setGastoRows(gastos);
       setFiadosSinCobrar({ n: fiadosN, total: fiadosTotal });
       setLoading(false);
@@ -127,11 +125,27 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
     return s;
   }, [socioMoves]);
 
+  // Grupos por cómo entró la plata, de mayor a menor.
+  const ventaGroups = useMemo(() => {
+    const m = new Map<string, VentaALiquidar[]>();
+    for (const v of ventas) m.set(v.grupo, [...(m.get(v.grupo) ?? []), v]);
+    return [...m.entries()]
+      .map(([key, filas]) => ({
+        key, filas, incluir: !excluidos.has(key),
+        total: filas.reduce((s, v) => s + v.monto, 0),
+        porSocio: SOCIOS.map(s => ({ s, total: filas.filter(v => v.cobrador === s).reduce((t, v) => t + v.monto, 0) })).filter(x => x.total > 0),
+        sinElegir: filas.filter(v => v.cobrador === null),
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [ventas, excluidos]);
+  const ventasIncluidas = useMemo(() => ventas.filter(v => !excluidos.has(v.grupo)), [ventas, excluidos]);
+  const asignar = (ids: Set<string>, s: SocioName) =>
+    setVentas(vs => vs.map(v => ids.has(v.id) ? { ...v, cobrador: s, origen: 'cobro' } : v));
+  const alternar = (set: Set<string>, k: string) => { const n = new Set(set); if (n.has(k)) n.delete(k); else n.add(k); return n; };
+
   const deltas = useMemo(() => {
     const d: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
-    for (const g of ventaGroups) {
-      // Sin cobrador elegido todavía no se puede repartir: la previsión lo deja afuera.
-      if (!g.incluir || g.cobrador === null) continue;
+    for (const g of agruparPorCobrador(ventasIncluidas)) {
       const imp = impactosVenta(g.total, g.cobrador);
       for (const s of SOCIOS) d[s] += imp[s];
     }
@@ -141,14 +155,14 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       for (const s of SOCIOS) d[s] += imp[s];
     }
     return d;
-  }, [ventaGroups, gastoRows]);
+  }, [ventasIncluidas, gastoRows]);
 
-  const totVentas = ventaGroups.filter(g => g.incluir).reduce((s, g) => s + g.total, 0);
+  const totVentas = ventasIncluidas.reduce((s, v) => s + v.monto, 0);
   const totGastos = gastoRows.filter(r => r.incluir).reduce((s, r) => s + r.monto, 0);
-  const nMovs = ventaGroups.filter(g => g.incluir).length + gastoRows.filter(r => r.incluir).length;
-  const hayAlgo = ventaGroups.length + gastoRows.length > 0;
-  // Grupos de ventas incluidos a los que les falta decir quién tiene la plata.
-  const sinCobrador = ventaGroups.filter(g => g.incluir && g.cobrador === null);
+  const nMovs = ventasIncluidas.length + gastoRows.filter(r => r.incluir).length;
+  const hayAlgo = ventas.length + gastoRows.length > 0;
+  // Ventas incluidas a las que les falta decir quién tiene la plata.
+  const sinCobrador = ventasIncluidas.filter(v => v.cobrador === null);
   // Gastos que se van a liquidar con un pagador ADIVINADO. Se muestra el monto,
   // no solo la cantidad: es la plata que se le puede asentar al socio equivocado.
   const sinConfirmar = gastoRows.filter(r => r.incluir && !r.elegido);
@@ -162,13 +176,13 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       const hoy = diaMvd();
       const ids: string[] = [];
       const moves: SocioLiquidacionMove[] = [];
-      for (const g of ventaGroups) {
-        if (!g.incluir || g.cobrador === null) continue;
+      for (const g of agruparPorCobrador(ventasIncluidas)) {
         ids.push(...g.ids);
         const imp = impactosVenta(g.total, g.cobrador);
+        const n = g.ids.length;
         moves.push({
           area, tipo: 'venta', fecha: hoy,
-          descripcion: `Liquidación caja — ${g.label} (${g.n} venta${g.n === 1 ? '' : 's'})`,
+          descripcion: `Liquidación caja — ${g.grupo} cobrado por ${NOMBRES_SOCIOS[g.cobrador]} (${n} venta${n === 1 ? '' : 's'})`,
           monto: Math.round(g.total * 100) / 100,
           pagador: null, de: null, para: g.cobrador,
           imp_brian: imp.brian, imp_paula: imp.paula, imp_gaston: imp.gaston,
@@ -203,7 +217,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
   };
 
   const textoBoton = nMovs === 0 ? 'Nada seleccionado'
-    : sinCobrador.length > 0 ? `Elegí quién cobró (${sinCobrador.length})`
+    : sinCobrador.length > 0 ? `Falta elegir quién cobró ${plural(sinCobrador.length, 'venta', 'ventas')}`
     : `Liquidar ${formatoPlata(totVentas)} en ventas y ${formatoPlata(totGastos)} en gastos`;
 
   // Saldos redondos (sin centavos), como en la pestaña Socios.
@@ -271,35 +285,67 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
               <section>
                 <h3 className="mb-2 font-display text-sm font-bold uppercase tracking-wide text-navy-700">Ventas por repartir</h3>
                 <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200">
-                  {ventaGroups.map(g => (
+                  {ventaGroups.map(g => {
+                    const abierto = abiertos.has(g.key);
+                    const todos = new Set(g.filas.map(v => v.id));
+                    const faltan = new Set(g.sinElegir.map(v => v.id));
+                    return (
                     <li key={g.key} className={cn('space-y-2.5 px-3 py-3', !g.incluir && 'bg-gray-50')}>
                       <div className="flex items-center gap-3">
                         <Casilla
                           marcada={g.incluir}
-                          etiqueta={`Incluir ${g.label}`}
-                          alCambiar={() => setVentaGroups(vs => vs.map(v => v.key === g.key ? { ...v, incluir: !v.incluir } : v))}
+                          etiqueta={`Incluir ${g.key}`}
+                          alCambiar={() => setExcluidos(ex => alternar(ex, g.key))}
                         />
                         <div className={cn('min-w-0 flex-1', !g.incluir && 'opacity-50')}>
-                          <p className="font-display text-sm font-bold text-navy-700">{g.label}</p>
-                          <p className="text-xs text-gray-500">{plural(g.n, 'venta', 'ventas')}</p>
+                          <p className="font-display text-sm font-bold text-navy-700">{g.key}</p>
+                          <p className="text-xs text-gray-500">
+                            {plural(g.filas.length, 'venta', 'ventas')}
+                            {g.porSocio.map(x => <span key={x.s}> · {NOMBRES_SOCIOS[x.s]} {formatoPlata(x.total)}</span>)}
+                            {g.sinElegir.length > 0 && <span className="font-semibold text-amber-800"> · sin elegir {formatoPlata(g.sinElegir.reduce((t, v) => t + v.monto, 0))}</span>}
+                          </p>
                         </div>
                         <Plata monto={g.total} className={cn('shrink-0 text-sm font-bold text-emerald-700', !g.incluir && 'opacity-50')} />
                       </div>
                       {g.incluir && (
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 sm:pl-11">
-                          <span className="text-[13px] font-semibold text-gray-600">¿Quién cobró?</span>
+                          <span className="text-[13px] font-semibold text-gray-600">
+                            {g.sinElegir.length === 1 ? 'La que falta, a' : g.sinElegir.length > 1 ? `Las ${g.sinElegir.length} que faltan, a` : g.filas.length === 1 ? 'Va a' : 'Todas a'}
+                          </span>
                           <Segmentado
-                            etiqueta={`Quién cobró ${g.label}`}
+                            etiqueta={`Quién cobró ${g.key}`}
                             opciones={OPCIONES_SOCIOS}
-                            valor={g.cobrador}
-                            alCambiar={s => setVentaGroups(vs => vs.map(v => v.key === g.key ? { ...v, cobrador: s } : v))}
-                            className={g.cobrador === null ? 'ring-1 ring-inset ring-amber-300' : undefined}
+                            valor={g.sinElegir.length === 0 && g.porSocio.length === 1 ? g.porSocio[0].s : null}
+                            alCambiar={s => asignar(g.sinElegir.length > 0 ? faltan : todos, s)}
+                            className={g.sinElegir.length > 0 ? 'ring-1 ring-inset ring-amber-300' : undefined}
                           />
-                          {g.cobrador === null && <Insignia tono="atencion">falta elegir</Insignia>}
+                          <Boton chico variante="fantasma" onClick={() => setAbiertos(a => alternar(a, g.key))}>
+                            {abierto ? 'Ocultar' : 'Ver una por una'}
+                          </Boton>
                         </div>
                       )}
+                      {g.incluir && abierto && (
+                        <ul className="space-y-2 sm:pl-11">
+                          {g.filas.map(v => (
+                            <li key={v.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-gray-50 px-2.5 py-2">
+                              <span className="min-w-0 flex-1 text-[13px] text-gray-700">
+                                <span className="text-gray-500">{fechaCorta(v.createdAt)} ·</span> {v.label}
+                              </span>
+                              <Plata monto={v.monto} className="text-[13px] font-semibold text-navy-700" />
+                              <Segmentado
+                                etiqueta={`Quién cobró ${v.label}`}
+                                opciones={OPCIONES_SOCIOS}
+                                valor={v.cobrador}
+                                alCambiar={s => asignar(new Set([v.id]), s)}
+                                className={v.cobrador === null ? 'ring-1 ring-inset ring-amber-300' : undefined}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
                 {fiadosSinCobrar.n > 0 && (
                   <p className="mt-2 text-[13px] text-amber-800">
@@ -389,7 +435,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
               </ul>
               {sinCobrador.length > 0 && (
                 <p className="mt-2 text-[13px] text-gray-500">
-                  Todavía no cuenta {plural(sinCobrador.length, 'el grupo de ventas', 'los grupos de ventas')} sin cobrador elegido.
+                  Todavía no cuentan {plural(sinCobrador.length, 'venta', 'ventas')} sin cobrador elegido.
                 </p>
               )}
             </section>
