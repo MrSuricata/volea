@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, FileDown, Plus, Minus, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil, Check, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, Product, SocioMove, SocioName, VentaCajaInput, GastoPendiente, GastoPendienteInput } from '../types';
-import { NOMBRES_SOCIOS, SOCIOS } from '../utils/socios';
+import type { LedgerEntry, Product, SocioMove, SocioName, Tenedor, VentaCajaInput, GastoPendiente, GastoPendienteInput } from '../types';
+import { NOMBRES_TENEDOR, TENEDORES } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { fechaHumana } from '../utils/fechas';
 import { formatVariant, normalizarVentasRapidas, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
@@ -119,7 +119,8 @@ const METODOS_COBRO: { valor: 'mp' | 'efectivo' | 'transferencia'; texto: string
   { valor: 'transferencia', texto: 'Transferencia' },
 ];
 
-const OPCIONES_SOCIOS = SOCIOS.map(s => ({ valor: s, texto: NOMBRES_SOCIOS[s] }));
+// Quién puso / tiene la plata: la Caja VOLEA (plata física) o uno de los socios.
+const OPCIONES_SOCIOS = TENEDORES.map(s => ({ valor: s, texto: NOMBRES_TENEDOR[s] }));
 
 /** Rótulo chico de sección (mismo que el de las tarjetas del kit). */
 const claseRotulo = 'mb-1.5 block text-[13px] font-semibold text-navy-700';
@@ -131,14 +132,14 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   loadSocioMoves: () => Promise<SocioMove[] | null>;
   products: Product[];
   registrarVenta: (input: VentaCajaInput) => Promise<{ ok: boolean; error?: string }>;
-  registrarGasto: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  registrarGasto: (label: string, amount: number, paidBy: Tenedor) => Promise<{ ok: boolean; error?: string }>;
   /** Socio deducido del admin logueado; null con la cuenta compartida. */
   socioSugerido: SocioName | null;
-  cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  cobrarDeudor: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: Tenedor | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
   /** Gastos que hay que pagar y todavía no salieron de la caja. */
   loadGastosPendientes: () => Promise<GastoPendiente[] | null>;
   saveGastoPendiente: (g: GastoPendienteInput) => Promise<{ ok: boolean; error?: string }>;
-  pagarGastoPendiente: (id: string, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  pagarGastoPendiente: (id: string, paidBy: Tenedor) => Promise<{ ok: boolean; error?: string }>;
   deleteGastoPendiente: (id: string) => Promise<boolean>;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
@@ -640,7 +641,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                           )}
                           {entry.reverted && <Insignia>Anulada</Insignia>}
                           {entry.kind === 'gasto' && entry.paidBy && (
-                            <Insignia tono="navy">pagó {NOMBRES_SOCIOS[entry.paidBy]}</Insignia>
+                            <Insignia tono="navy">pagó {NOMBRES_TENEDOR[entry.paidBy]}</Insignia>
                           )}
                           <span>por {entry.reportedBy}</span>
                         </div>
@@ -926,7 +927,7 @@ function BorrarDeudaModal({ deudor, revertEntry, onClose, onDone }: {
  */
 function CobroModal({ deudor, cobrar, socioSugerido, onClose, onDone }: {
   deudor: { nombre: string; total: number };
-  cobrar: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
+  cobrar: (debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: Tenedor | null) => Promise<{ ok: boolean; error?: string; restante?: number }>;
   socioSugerido: SocioName | null;
   onClose: () => void;
   onDone: () => void;
@@ -934,7 +935,9 @@ function CobroModal({ deudor, cobrar, socioSugerido, onClose, onDone }: {
   const [monto, setMonto] = useState<number | null>(deudor.total);
   const [metodo, setMetodo] = useState<'mp' | 'efectivo' | 'transferencia' | null>(null);
   // Quién recibe la plata: arranca en quien está usando el panel; al liquidar va a su cuenta.
-  const [quien, setQuien] = useState<SocioName | null>(socioSugerido);
+  // null = automático: el efectivo va a la Caja VOLEA; lo demás, a quien usa el panel.
+  const [quienElegido, setQuien] = useState<Tenedor | null>(null);
+  const quien: Tenedor | null = quienElegido ?? (metodo === 'efectivo' ? 'caja' : socioSugerido);
   const [cobrando, setCobrando] = useState(false);
 
   const montoNum = monto ?? NaN;
@@ -1004,7 +1007,7 @@ function CobroModal({ deudor, cobrar, socioSugerido, onClose, onDone }: {
           <span className={claseRotulo}>¿Quién recibe la plata?</span>
           <Segmentado
             etiqueta="¿Quién recibe la plata?"
-            opciones={SOCIOS.map(s => ({ valor: s, texto: NOMBRES_SOCIOS[s] }))}
+            opciones={OPCIONES_SOCIOS}
             valor={quien}
             alCambiar={setQuien}
             anchoCompleto
@@ -1690,12 +1693,12 @@ function GastoPendienteModal({ gasto, guardar, pedirBorrado, bloqueado, onClose,
  */
 function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
   gasto: GastoPendiente;
-  pagar: (id: string, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  pagar: (id: string, paidBy: Tenedor) => Promise<{ ok: boolean; error?: string }>;
   socioSugerido: SocioName | null;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [pagador, setPagador] = useState<SocioName | null>(socioSugerido);
+  const [pagador, setPagador] = useState<Tenedor | null>(socioSugerido);
   const [pagando, setPagando] = useState(false);
 
   const handlePagar = async () => {
@@ -1745,7 +1748,7 @@ function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
           <p className="mt-1.5 text-[13px] text-gray-500">
             {pagador === null
               ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
-              : `Entra a la caja como gasto de hoy, a nombre de ${NOMBRES_SOCIOS[pagador]}.`}
+              : `Entra a la caja como gasto de hoy, a nombre de ${NOMBRES_TENEDOR[pagador]}.`}
           </p>
         </div>
       </div>
@@ -1755,7 +1758,7 @@ function PagarPendienteModal({ gasto, pagar, socioSugerido, onClose, onDone }: {
 
 /** Gasto rápido: descripción + monto + quién puso la plata (sin stock ni método de pago). */
 function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
-  registrar: (label: string, amount: number, paidBy: SocioName) => Promise<{ ok: boolean; error?: string }>;
+  registrar: (label: string, amount: number, paidBy: Tenedor) => Promise<{ ok: boolean; error?: string }>;
   /** Socio deducido del admin logueado; null con la cuenta compartida ("VOLEA Team"). */
   socioSugerido: SocioName | null;
   onClose: () => void;
@@ -1765,7 +1768,7 @@ function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
   const [monto, setMonto] = useState<number | null>(null);
   // Si no se puede deducir de la sesión, se elige a mano: sin esto el gasto se le
   // asentaba a Gastón por descarte y el reparto 50/25/25 salía mal.
-  const [pagador, setPagador] = useState<SocioName | null>(socioSugerido);
+  const [pagador, setPagador] = useState<Tenedor | null>(socioSugerido);
   const [registrando, setRegistrando] = useState(false);
 
   const montoNum = monto ?? NaN;
@@ -1828,7 +1831,7 @@ function GastoModal({ registrar, socioSugerido, onClose, onDone }: {
           <p className="mt-1.5 text-[13px] text-gray-500">
             {pagador === null
               ? 'Elegí de quién salió la plata: define el reparto 50/25/25.'
-              : `El gasto se le asienta a ${NOMBRES_SOCIOS[pagador]} y se reparte 50/25/25.`}
+              : pagador === 'caja' ? 'Sale de la plata de la Caja VOLEA: no cambia las cuentas entre socios.' : `El gasto se le asienta a ${NOMBRES_TENEDOR[pagador]} y se reparte 50/25/25.`}
           </p>
         </div>
       </div>

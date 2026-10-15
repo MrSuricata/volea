@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, SocioMove, SocioName, SocioLiquidacionMove } from '../types';
-import { esCuotaFutura, impactosGasto, impactosVenta, SOCIOS, NOMBRES_SOCIOS } from '../utils/socios';
+import type { LedgerEntry, SocioMove, SocioName, SocioLiquidacionMove, Tenedor } from '../types';
+import { esCuotaFutura, impactosGasto, impactosVenta, SOCIOS, NOMBRES_SOCIOS, TENEDORES, NOMBRES_TENEDOR } from '../utils/socios';
 import { cn } from '../lib/cn';
 import { Boton, Dialogo, Confirmar, Plata, Insignia, Segmentado, Vacio, CargandoFilas, ErrorEstado, formatoPlata } from '../admin/ui';
 import { plural } from '../admin/ui-ventas/ventas';
@@ -29,7 +29,7 @@ const personaASocio = (nombre: string): SocioName => {
 };
 
 /** Quién puso la plata: lo elegido al registrar manda; si no hay, se adivina. */
-const pagadorDe = (e: LedgerEntry): SocioName => e.paidBy ?? personaASocio(e.reportedBy || '');
+const pagadorDe = (e: LedgerEntry): Tenedor => e.paidBy ?? personaASocio(e.reportedBy || '');
 
 /**
  * Cada venta lleva su cobrador (quién tiene la plata). Viene sugerido por quien cobró
@@ -40,13 +40,14 @@ const pagadorDe = (e: LedgerEntry): SocioName => e.paidBy ?? personaASocio(e.rep
 const fechaCorta = (iso: string) => new Date(iso).toLocaleDateString('es-UY', { day: 'numeric', month: 'short', timeZone: TZ });
 type GastoRow = {
   id: string; label: string; fecha: string | null; monto: number; persona: string;
-  pagador: SocioName;
+  pagador: Tenedor;
   /** true = lo eligió alguien al registrar; false = lo adivinamos por el nombre. */
   elegido: boolean;
   incluir: boolean;
 };
 
-const OPCIONES_SOCIOS = SOCIOS.map(s => ({ valor: s, texto: NOMBRES_SOCIOS[s] }));
+// La Caja VOLEA primero: es donde queda el efectivo. Lo que va a la caja no mueve las cuentas de socios.
+const OPCIONES_SOCIOS = TENEDORES.map(s => ({ valor: s, texto: NOMBRES_TENEDOR[s] }));
 const AREAS: { valor: SocioMove['area']; texto: string }[] = [
   { valor: 'marca', texto: 'Marca' },
   { valor: 'cafeteria', texto: 'Cafetería' },
@@ -133,29 +134,35 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       .map(([key, filas]) => ({
         key, filas, incluir: !excluidos.has(key),
         total: filas.reduce((s, v) => s + v.monto, 0),
-        porSocio: SOCIOS.map(s => ({ s, total: filas.filter(v => v.cobrador === s).reduce((t, v) => t + v.monto, 0) })).filter(x => x.total > 0),
+        porSocio: TENEDORES.map(s => ({ s, total: filas.filter(v => v.cobrador === s).reduce((t, v) => t + v.monto, 0) })).filter(x => x.total > 0),
         sinElegir: filas.filter(v => v.cobrador === null),
       }))
       .sort((a, b) => b.total - a.total);
   }, [ventas, excluidos]);
   const ventasIncluidas = useMemo(() => ventas.filter(v => !excluidos.has(v.grupo)), [ventas, excluidos]);
-  const asignar = (ids: Set<string>, s: SocioName) =>
+  const asignar = (ids: Set<string>, s: Tenedor) =>
     setVentas(vs => vs.map(v => ids.has(v.id) ? { ...v, cobrador: s, origen: 'cobro' } : v));
   const alternar = (set: Set<string>, k: string) => { const n = new Set(set); if (n.has(k)) n.delete(k); else n.add(k); return n; };
 
   const deltas = useMemo(() => {
     const d: Record<SocioName, number> = { brian: 0, paula: 0, gaston: 0 };
     for (const g of agruparPorCobrador(ventasIncluidas)) {
+      if (g.cobrador === 'caja') continue;
       const imp = impactosVenta(g.total, g.cobrador);
       for (const s of SOCIOS) d[s] += imp[s];
     }
     for (const r of gastoRows) {
-      if (!r.incluir) continue;
+      if (!r.incluir || r.pagador === 'caja') continue;
       const imp = impactosGasto(r.monto, r.pagador);
       for (const s of SOCIOS) d[s] += imp[s];
     }
     return d;
   }, [ventasIncluidas, gastoRows]);
+  // Lo que entra (+) o sale (−) de la Caja VOLEA con esta liquidación.
+  const deltaCaja = useMemo(() =>
+    ventasIncluidas.filter(v => v.cobrador === 'caja').reduce((t, v) => t + v.monto, 0)
+    - gastoRows.filter(r => r.incluir && r.pagador === 'caja').reduce((t, r) => t + r.monto, 0),
+  [ventasIncluidas, gastoRows]);
 
   const totVentas = ventasIncluidas.reduce((s, v) => s + v.monto, 0);
   const totGastos = gastoRows.filter(r => r.incluir).reduce((s, r) => s + r.monto, 0);
@@ -178,12 +185,21 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       const moves: SocioLiquidacionMove[] = [];
       for (const g of agruparPorCobrador(ventasIncluidas)) {
         ids.push(...g.ids);
-        const imp = impactosVenta(g.total, g.cobrador);
         const n = g.ids.length;
+        const monto = Math.round(g.total * 100) / 100;
+        if (g.cobrador === 'caja') {
+          moves.push({
+            caja: true, area, tipo: 'venta', fecha: hoy,
+            descripcion: `Liquidación caja — ${g.grupo} (${n} venta${n === 1 ? '' : 's'})`,
+            monto, pagador: null, de: null, para: null, imp_brian: 0, imp_paula: 0, imp_gaston: 0,
+          });
+          continue;
+        }
+        const imp = impactosVenta(g.total, g.cobrador);
         moves.push({
           area, tipo: 'venta', fecha: hoy,
           descripcion: `Liquidación caja — ${g.grupo} cobrado por ${NOMBRES_SOCIOS[g.cobrador]} (${n} venta${n === 1 ? '' : 's'})`,
-          monto: Math.round(g.total * 100) / 100,
+          monto,
           pagador: null, de: null, para: g.cobrador,
           imp_brian: imp.brian, imp_paula: imp.paula, imp_gaston: imp.gaston,
         });
@@ -191,6 +207,13 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
       for (const r of gastoRows) {
         if (!r.incluir) continue;
         ids.push(r.id);
+        if (r.pagador === 'caja') {
+          moves.push({
+            caja: true, area, tipo: 'gasto', fecha: r.fecha, descripcion: r.label,
+            monto: Math.round(r.monto * 100) / 100, pagador: null, de: null, para: null, imp_brian: 0, imp_paula: 0, imp_gaston: 0,
+          });
+          continue;
+        }
         const imp = impactosGasto(r.monto, r.pagador);
         moves.push({
           area, tipo: 'gasto', fecha: r.fecha,
@@ -301,7 +324,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
                           <p className="font-display text-sm font-bold text-navy-700">{g.key}</p>
                           <p className="text-xs text-gray-500">
                             {plural(g.filas.length, 'venta', 'ventas')}
-                            {g.porSocio.map(x => <span key={x.s}> · {NOMBRES_SOCIOS[x.s]} {formatoPlata(x.total)}</span>)}
+                            {g.porSocio.map(x => <span key={x.s}> · {NOMBRES_TENEDOR[x.s]} {formatoPlata(x.total)}</span>)}
                             {g.sinElegir.length > 0 && <span className="font-semibold text-amber-800"> · sin elegir {formatoPlata(g.sinElegir.reduce((t, v) => t + v.monto, 0))}</span>}
                           </p>
                         </div>
@@ -396,7 +419,7 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
                   «Pagó» = quién puso la plata. Los gastos cargados desde la Caja web ya vienen con el
                   pagador elegido; los <span className="font-semibold text-amber-800">sugeridos</span> vienen
                   del bot o son viejos y están adivinados por el nombre: revisalos.
-                  Si un gasto salió del efectivo de la caja, dejalo a nombre de quien tenía esa caja.
+                  Si un gasto salió del efectivo de la caja, elegí «Caja VOLEA».
                   Si algo ya está cargado en las cuentas, destildalo para no contarlo dos veces.
                 </p>
               </section>
@@ -433,6 +456,14 @@ export function AdminLiquidarCajaModal({ socioMoves, loadLedgerFull, liquidar, o
                   );
                 })}
               </ul>
+              {deltaCaja !== 0 && (
+                <p className="mt-2 grid grid-cols-[4.5rem_1fr] items-baseline gap-x-2 border-t border-gray-200 pt-2 text-sm">
+                  <span className="font-semibold text-navy-700">Caja</span>
+                  <span className={cn('font-semibold tabular-nums', deltaCaja > 0 ? 'text-emerald-700' : 'text-red-700')}>
+                    {deltaCaja > 0 ? 'entran' : 'salen'} {formatoPlata(Math.abs(Math.round(deltaCaja)))} a la Caja VOLEA
+                  </span>
+                </p>
+              )}
               {sinCobrador.length > 0 && (
                 <p className="mt-2 text-[13px] text-gray-500">
                   Todavía no cuentan {plural(sinCobrador.length, 'venta', 'ventas')} sin cobrador elegido.

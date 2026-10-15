@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useMemo, Suspense, type ReactNode } f
 import { Link, useSearchParams } from 'react-router-dom';
 import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Product, SocioName, VentaCajaInput, GastoPendienteInput } from '../types';
+import type { Product, SocioName, Tenedor, VentaCajaInput, GastoPendienteInput } from '../types';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConnected } from '../services/supabaseClient';
 import { cambiarPassword, signInWithPassword, sesionAdminVencida } from '../services/authService';
@@ -108,7 +108,7 @@ export default function AdminPage() {
     return result;
   }, [cajaReportedBy, refreshProducts]);
   const registrarGasto = useCallback(
-    (label: string, amount: number, paidBy: SocioName) =>
+    (label: string, amount: number, paidBy: Tenedor) =>
       SupabaseService.registrarGastoCaja(label, amount, cajaReportedBy, paidBy),
     [cajaReportedBy],
   );
@@ -119,7 +119,7 @@ export default function AdminPage() {
     [cajaReportedBy],
   );
   const pagarGastoPendiente = useCallback(
-    (id: string, paidBy: SocioName) =>
+    (id: string, paidBy: Tenedor) =>
       SupabaseService.pagarGastoPendiente(id, paidBy, cajaReportedBy),
     [cajaReportedBy],
   );
@@ -643,6 +643,8 @@ export default function AdminPage() {
                   deleteSocioMove={SupabaseService.deleteSocioMove}
                   deleteSocioMovesGrupo={SupabaseService.deleteSocioMovesGrupo}
                   liquidarCaja={SupabaseService.liquidarCaja}
+                  reportedBy={cajaReportedBy}
+                  socioSugerido={socioSugerido}
                 />
               </Suspense>
             )}

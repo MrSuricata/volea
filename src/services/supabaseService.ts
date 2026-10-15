@@ -7,7 +7,8 @@ import { planLineasCompra, type LineaEnBase } from '../utils/compras';
 import type { JugadorPadron } from '../utils/dupr';
 import type { CobroPedido } from '../utils/cobroPedido';
 import type { Cambio, CambioInput } from '../utils/cambios';
-import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
+import type { CajaVoleaMov } from '../utils/cajaVolea';
+import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, Tenedor, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
 // supabase-js no tiene timeout propio: con la sesión vencida y el refresh del token
@@ -345,7 +346,7 @@ export const SupabaseService = {
    * monto null = cobra todo; con monto = pago parcial FIFO (la RPC parte el
    * ítem a caballo y deja el resto pendiente). Misma semántica que «cobré».
    */
-  async cobrarDeudorCaja(debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: SocioName | null = null): Promise<{ ok: boolean; error?: string; restante?: number }> {
+  async cobrarDeudorCaja(debtor: string, method: 'mp' | 'efectivo' | 'transferencia', monto: number | null, cobradoPor: Tenedor | null = null): Promise<{ ok: boolean; error?: string; restante?: number }> {
     // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
     if (!supabase) {
       return { ok: false, error: 'Sin conexión con Supabase' };
@@ -377,7 +378,7 @@ export const SupabaseService = {
   // se olvide del argumento compila en silencio y graba un gasto sin atribuir — que
   // es exactamente el bug que este cambio vino a cerrar.
   async registrarGastoCaja(
-    label: string, amount: number, reportedBy: string, paidBy: SocioName,
+    label: string, amount: number, reportedBy: string, paidBy: Tenedor,
   ): Promise<{ ok: boolean; error?: string }> {
     // Misma regla que registrarVentaCaja: intentar siempre que haya cliente.
     if (!supabase) {
@@ -447,7 +448,7 @@ export const SupabaseService = {
    * y el que necesita el reparto 50/25/25.
    */
   async pagarGastoPendiente(
-    id: string, paidBy: SocioName, reportedBy: string,
+    id: string, paidBy: Tenedor, reportedBy: string,
   ): Promise<{ ok: boolean; error?: string }> {
     if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
     const { data, error } = await conTechoEscritura(supabase.rpc('admin_pagar_gasto_pendiente', {
@@ -1102,6 +1103,42 @@ export const SupabaseService = {
       console.error('Error cobrando pedido:', error);
       return { ok: false, error: error.message };
     }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  // ── Caja VOLEA: la plata física de la caja (v34) ──
+  /** null = no se pudo leer (sin sesión, red, o falta la migración v34). */
+  async getCajaVolea(): Promise<CajaVoleaMov[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.from('caja_volea_movs').select('*')
+      .eq('reverted', false).order('created_at', { ascending: false }).limit(500));
+    if (error) { console.error('Error leyendo la caja VOLEA:', error); return null; }
+    return (data || []).map(row => ({
+      id: row.id,
+      createdAt: row.created_at,
+      fecha: row.fecha,
+      tipo: row.tipo,
+      monto: Number(row.monto) || 0,
+      descripcion: row.descripcion || '',
+      socio: row.socio ?? null,
+      contado: row.contado === null || row.contado === undefined ? null : Number(row.contado),
+      reportedBy: row.reported_by || '',
+    }));
+  },
+
+  async movCajaVolea(tipo: 'conteo' | 'retiro' | 'aporte' | 'reparto', monto: number, socio: SocioName | null, descripcion: string, reportedBy: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_caja_volea', {
+      p_tipo: tipo, p_monto: monto, p_socio: socio, p_descripcion: descripcion, p_reported_by: reportedBy,
+    }));
+    if (error) { console.error('Error en la caja VOLEA:', error); return { ok: false, error: error.message }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  async anularMovCajaVolea(id: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con Supabase' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_anular_caja_volea', { p_id: id }));
+    if (error) { console.error('Error anulando en la caja VOLEA:', error); return { ok: false, error: error.message }; }
     return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 

@@ -1,7 +1,10 @@
-import type { SocioMove, SocioName } from '../types';
+import type { SocioMove, SocioName, Tenedor } from '../types';
 
 export const SOCIOS: SocioName[] = ['brian', 'paula', 'gaston'];
 export const NOMBRES_SOCIOS: Record<SocioName, string> = { brian: 'Brian', paula: 'Paula', gaston: 'Gastón' };
+/** Los tres socios más la Caja VOLEA (plata física de los tres). */
+export const TENEDORES: Tenedor[] = ['caja', 'brian', 'paula', 'gaston'];
+export const NOMBRES_TENEDOR: Record<Tenedor, string> = { ...NOMBRES_SOCIOS, caja: 'Caja VOLEA' };
 
 /**
  * Reparto estándar Brian 50% / Paula 25% / Gastón 25%. Las partes se redondean

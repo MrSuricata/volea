@@ -75,7 +75,7 @@ export interface LedgerEntry {
    * null en ventas, en gastos del bot y en los históricos: ahí el modal de
    * liquidación sigue adivinando a partir del nombre de quien registró.
    */
-  paidBy: SocioName | null;
+  paidBy: Tenedor | null;
 }
 
 /**
@@ -97,7 +97,7 @@ export interface GastoPendiente {
   /** Cuándo se pagó; null = sigue pendiente. */
   pagadoAt: string | null;
   /** Qué socio puso la plata (define el reparto 50/25/25). */
-  pagadoPor: SocioName | null;
+  pagadoPor: Tenedor | null;
   /** Movimiento de caja que generó el pago. */
   ledgerId: string | null;
 }
@@ -131,6 +131,8 @@ export interface VentaCajaInput {
 
 /** Fila que la liquidación de caja asienta en socio_moves (claves = columnas del RPC). */
 export interface SocioLiquidacionMove {
+  /** true = va a la Caja VOLEA (no a las cuentas de socios). */
+  caja?: boolean;
   area: SocioMove['area'];
   tipo: 'venta' | 'gasto';
   fecha: string | null;
@@ -145,6 +147,8 @@ export interface SocioLiquidacionMove {
 }
 
 export type SocioName = 'brian' | 'paula' | 'gaston';
+/** Quién tiene / puso la plata: un socio o la Caja VOLEA (la plata física de la caja, de los tres). */
+export type Tenedor = SocioName | 'caja';
 
 /**
  * Movimiento de cuentas entre socios (reparto Brian 50% / Paula 25% / Gastón 25%).

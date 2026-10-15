@@ -1,5 +1,5 @@
 import type { LedgerEntry, SocioMove, SocioName } from '../types';
-import { esCuotaFutura, NOMBRES_SOCIOS, ventasBrutasSocios } from './socios';
+import { esCuotaFutura, NOMBRES_SOCIOS, ventasBrutasSocios, NOMBRES_TENEDOR } from './socios';
 
 const TZ = 'America/Montevideo';
 const NAVY = 'FF1F3557';
@@ -186,7 +186,7 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
         debeInfo, e.reportedBy,
         // Quién puso la plata del gasto (para el reparto 50/25/25). Vacío en
         // ventas y en gastos viejos/del bot, donde nadie lo eligió.
-        e.paidBy ? NOMBRES_SOCIOS[e.paidBy] : '',
+        e.paidBy ? NOMBRES_TENEDOR[e.paidBy] : '',
         e.reverted ? 'Sí' : '',
         e.socioSettledAt ? 'Sí' : '',
       ]);

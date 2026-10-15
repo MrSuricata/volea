@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, FileDown, HandCoins } from 'lucide-react';
 import { toast } from 'sonner';
-import type { LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove } from '../types';
+import type { LedgerEntry, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName } from '../types';
 import { AdminSociosSection } from './AdminSociosSection';
 import { AdminLiquidarCajaModal } from './AdminLiquidarCajaModal';
+import { CajaVoleaPanel } from './CajaVoleaPanel';
 import { exportCajaExcel } from '../utils/cajaExcel';
 import { Boton, BotonIcono, EncabezadoPagina } from '../admin/ui';
 
 /** Pestaña Socios: cuentas entre socios + números del negocio (separada de la Caja del bot). */
-export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMoves, deleteSocioMove, deleteSocioMovesGrupo, liquidarCaja }: {
+export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMoves, deleteSocioMove, deleteSocioMovesGrupo, liquidarCaja, reportedBy, socioSugerido }: {
   loadLedgerFull: () => Promise<LedgerEntry[] | null>;
   loadSocioMoves: () => Promise<SocioMove[] | null>;
   addSocioMoves: (inputs: SocioMoveInput[]) => Promise<boolean>;
   deleteSocioMove: (id: string) => Promise<boolean>;
   deleteSocioMovesGrupo: (grupo: string) => Promise<boolean>;
   liquidarCaja: (ids: string[], moves: SocioLiquidacionMove[]) => Promise<{ ok: boolean; error?: string }>;
+  reportedBy: string;
+  socioSugerido: SocioName | null;
 }) {
+  // Se sube al liquidar para que el panel de la caja vuelva a leer el saldo.
+  const [vueltaCaja, setVueltaCaja] = useState(0);
   const [moves, setMoves] = useState<SocioMove[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -79,6 +84,8 @@ export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMoves, 
         )}
       />
 
+      <CajaVoleaPanel key={vueltaCaja} reportedBy={reportedBy} socioSugerido={socioSugerido} onCuentasCambiaron={refresh} />
+
       <AdminSociosSection
         moves={moves}
         loading={loading}
@@ -94,7 +101,7 @@ export function AdminSociosTab({ loadLedgerFull, loadSocioMoves, addSocioMoves, 
           loadLedgerFull={loadLedgerFull}
           liquidar={liquidarCaja}
           onClose={() => setShowLiquidar(false)}
-          onDone={() => { setShowLiquidar(false); refresh(); }}
+          onDone={() => { setShowLiquidar(false); refresh(); setVueltaCaja((v) => v + 1); }}
         />
       )}
     </div>

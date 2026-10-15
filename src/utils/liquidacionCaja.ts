@@ -1,4 +1,4 @@
-import type { LedgerEntry, SocioName } from '../types';
+import type { LedgerEntry, SocioName, Tenedor } from '../types';
 
 // Ventas de la caja al liquidar: cada una con QUIÉN TIENE LA PLATA. Antes se elegía un solo
 // cobrador por método (todo el efectivo a una persona), y si el efectivo lo habían cobrado
@@ -25,9 +25,9 @@ export interface VentaALiquidar {
   createdAt: string;
   /** Grupo por cómo entró la plata ("Efectivo", "Fiados cobrados (Efectivo)"…). */
   grupo: string;
-  cobrador: SocioName | null;
-  /** De dónde salió el cobrador: elegido al cobrar, deducido de quien registró, o falta. */
-  origen: 'cobro' | 'registro' | 'falta';
+  cobrador: Tenedor | null;
+  /** De dónde salió el cobrador: elegido al cobrar, efectivo → Caja VOLEA, deducido de quien registró, o falta. */
+  origen: 'cobro' | 'efectivo' | 'registro' | 'falta';
 }
 
 export function ventaALiquidar(e: LedgerEntry): VentaALiquidar {
@@ -37,14 +37,17 @@ export function ventaALiquidar(e: LedgerEntry): VentaALiquidar {
     : (e.paymentMethod ? METODO_LBL[e.paymentMethod] : 'Sin método');
   // En ventas, paidBy = quién recibió la plata (lo elige quien cobra la deuda, v33).
   if (e.paidBy) return { id: e.id, label: e.label, monto: e.amount, createdAt: e.createdAt, grupo, cobrador: e.paidBy, origen: 'cobro' };
+  // El efectivo queda en la Caja VOLEA (la plata física de los tres) salvo que alguien diga otra cosa.
+  const efectivo = fiado ? e.settledMethod === 'efectivo' : e.paymentMethod === 'efectivo';
+  if (efectivo) return { id: e.id, label: e.label, monto: e.amount, createdAt: e.createdAt, grupo, cobrador: 'caja', origen: 'efectivo' };
   // Un fiado lo registra quien vendió, no quien cobró después: no se adivina.
   const porNombre = fiado ? null : socioPorNombre(e.reportedBy);
   return { id: e.id, label: e.label, monto: e.amount, createdAt: e.createdAt, grupo, cobrador: porNombre, origen: porNombre ? 'registro' : 'falta' };
 }
 
 /** Un movimiento por grupo y socio: así la cuenta de socios queda legible. */
-export function agruparPorCobrador(ventas: VentaALiquidar[]): { grupo: string; cobrador: SocioName; ids: string[]; total: number }[] {
-  const m = new Map<string, { grupo: string; cobrador: SocioName; ids: string[]; total: number }>();
+export function agruparPorCobrador(ventas: VentaALiquidar[]): { grupo: string; cobrador: Tenedor; ids: string[]; total: number }[] {
+  const m = new Map<string, { grupo: string; cobrador: Tenedor; ids: string[]; total: number }>();
   for (const v of ventas) {
     if (!v.cobrador) continue;
     const k = `${v.grupo}|${v.cobrador}`;

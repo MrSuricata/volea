@@ -18,26 +18,29 @@ describe('liquidación de ventas por cobrador', () => {
     expect(socioPorNombre('Usuario')).toBeNull();
   });
 
-  it('una venta cobrada en el momento va a quien la registró', () => {
-    expect(ventaALiquidar(venta({ reportedBy: 'Gasty' }))).toMatchObject({ grupo: 'Efectivo', cobrador: 'gaston', origen: 'registro' });
-    expect(ventaALiquidar(venta({}))).toMatchObject({ cobrador: null, origen: 'falta' });
+  it('el efectivo queda en la Caja VOLEA; lo demás, a quien la registró', () => {
+    expect(ventaALiquidar(venta({ reportedBy: 'Gasty' }))).toMatchObject({ grupo: 'Efectivo', cobrador: 'caja', origen: 'efectivo' });
+    expect(ventaALiquidar(venta({ paymentMethod: 'transferencia', reportedBy: 'Gasty' }))).toMatchObject({ cobrador: 'gaston', origen: 'registro' });
+    expect(ventaALiquidar(venta({ paymentMethod: 'mp' }))).toMatchObject({ cobrador: null, origen: 'falta' });
   });
 
   it('un fiado cobrado va a quien cobró, no a quien vendió', () => {
-    const f = venta({ paymentMethod: 'debe', settledAt: '2026-10-15', settledMethod: 'efectivo', reportedBy: 'Gasty' });
-    expect(ventaALiquidar(f)).toMatchObject({ grupo: 'Fiados cobrados (Efectivo)', cobrador: null, origen: 'falta' });
+    const f = venta({ paymentMethod: 'debe', settledAt: '2026-10-15', settledMethod: 'transferencia', reportedBy: 'Gasty' });
+    expect(ventaALiquidar(f)).toMatchObject({ grupo: 'Fiados cobrados (Transferencia)', cobrador: null, origen: 'falta' });
     expect(ventaALiquidar({ ...f, paidBy: 'brian' })).toMatchObject({ cobrador: 'brian', origen: 'cobro' });
+    expect(ventaALiquidar({ ...f, settledMethod: 'efectivo' })).toMatchObject({ cobrador: 'caja' });
+    expect(ventaALiquidar({ ...f, settledMethod: 'efectivo', paidBy: 'brian' })).toMatchObject({ cobrador: 'brian' });
   });
 
   it('arma un movimiento por grupo y socio, sin los que falta elegir', () => {
     const vs = [
-      { ...ventaALiquidar(venta({ id: 'a', reportedBy: 'Gasty', amount: 100 })) },
-      { ...ventaALiquidar(venta({ id: 'b', reportedBy: 'Gasty', amount: 50 })) },
-      { ...ventaALiquidar(venta({ id: 'c', reportedBy: 'Brian', amount: 2980 })) },
-      { ...ventaALiquidar(venta({ id: 'd', amount: 10 })) },
+      { ...ventaALiquidar(venta({ id: 'a', amount: 100 })) },
+      { ...ventaALiquidar(venta({ id: 'b', amount: 50 })) },
+      { ...ventaALiquidar(venta({ id: 'c', amount: 2980 })), cobrador: 'brian' as const },
+      { ...ventaALiquidar(venta({ id: 'd', paymentMethod: 'mp', amount: 10 })) },
     ];
     expect(agruparPorCobrador(vs)).toEqual([
-      { grupo: 'Efectivo', cobrador: 'gaston', ids: ['a', 'b'], total: 150 },
+      { grupo: 'Efectivo', cobrador: 'caja', ids: ['a', 'b'], total: 150 },
       { grupo: 'Efectivo', cobrador: 'brian', ids: ['c'], total: 2980 },
     ]);
   });
