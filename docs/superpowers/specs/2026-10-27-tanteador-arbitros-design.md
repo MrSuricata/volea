@@ -18,7 +18,7 @@ No reemplaza al tanteador de bádminton (`tanteador_partidos`, `/copa`): es otro
 | Tema | Decisión |
 |---|---|
 | Tipo de tanteo | Rally o saque tradicional (side out), **elegible por categoría** |
-| Formato | Un game o al mejor de 3, **por categoría** (se puede uno para grupos y otro para semis/final) |
+| Formato | Un game o al mejor de 3, **por categoría** (uno para la fase de grupos y otro para la llave) |
 | Dónde se ve en vivo | TV del club, página pública del torneo, panel En vivo |
 | Cierre | Entra **directo** al cuadro; Brian corrige si hace falta |
 | Acceso | **Un código por partido** |
@@ -41,8 +41,9 @@ No reemplaza al tanteador de bádminton (`tanteador_partidos`, `/copa`): es otro
 
 Tabla nueva `arbitraje_partidos` — una fila por partido de torneo que se arbitra:
 
-- `torneo_id text`, `partido_id text` (únicos juntos), `codigo char(4)`
-  (único entre los partidos no terminados), `estado` (`pendiente` / `en_juego` / `terminado`).
+- `torneo_id text`, `partido_id text` (únicos juntos), `estado` (`pendiente` / `en_juego` / `terminado`).
+- El **código vive en otra tabla, `arbitraje_codigos`**, sin lectura pública ni Realtime: la tabla del
+  marcador se transmite a todos los que miran y el código no puede viajar ahí.
 - `formato jsonb`: `{tipo: 'rally'|'sideout', a: 11|15|21, mejorDe: 1|3, dobles: bool}`, copiado de la
   categoría al crear el código.
 - `jugadas jsonb`: la lista de eventos (`saque_inicial`, `gana_saque`, `gana_recibe`, `tiempo`, `deshacer`
@@ -50,14 +51,17 @@ Tabla nueva `arbitraje_partidos` — una fila por partido de torneo que se arbit
 - `marcador jsonb`: resumen ya calculado (games, puntos, quién saca, servidor, lado), para que la TV y la
   web pública lo lean sin rehacer el cálculo.
 - `version int` (control de concurrencia), `actualizado timestamptz`, `intentos_fallidos` por IP/código.
-- RLS: lectura pública solo de las columnas del marcador (nunca `codigo`); escritura **solo** por RPC.
+- RLS: `arbitraje_partidos` lectura pública (no tiene secretos); `arbitraje_codigos` sin acceso para
+  nadie salvo las funciones. Escritura **solo** por RPC.
+- `arbitraje_intentos (origen, cuando)`: los códigos fallidos, para frenar a quien prueba números.
 - Realtime activado (como `tanteador_partidos`).
 
 ### Funciones de la base (SECURITY DEFINER)
 
 - `arbitro_entrar(codigo)`: valida el código (partido no terminado), con freno a los intentos al azar
-  (5 fallos por minuto desde el mismo origen → espera), y devuelve el partido: nombres, formato, estado y
-  `version`. No devuelve nada si el código no existe.
+  (10 fallos en 10 minutos desde el mismo origen → espera), y devuelve `torneo_id`, `partido_id`,
+  formato, jugadas, estado y `version`. Los nombres los arma la pantalla leyendo el cuadro público
+  (`rk_torneos`) con el motor de llaves, así funcionan también los cruces que dependen de otro partido.
 - `arbitro_marcar(codigo, version, jugadas, marcador)`: guarda el estado nuevo si `version` coincide
   (si no, devuelve el estado vigente para que el celular se ponga al día).
 - `arbitro_terminar(codigo, version)`: valida que el marcador final sea un resultado legal, lo escribe en
@@ -85,9 +89,10 @@ Tabla nueva `arbitraje_partidos` — una fila por partido de torneo que se arbit
 ### Resultado en el cuadro
 
 - Un game: `puntosA/puntosB` = puntos del game (como hoy).
-- Mejor de 3: `puntosA/puntosB` = games ganados y `games: [{a, b}]` con el detalle (nuevo campo
-  opcional en `PartidoGrupo`/`PartidoLlave`; las tablas siguen ordenando por partidos ganados y usan la
-  diferencia de puntos de los games). El export a DUPR usa `games` cuando existe.
+- Mejor de 3: `puntosA/puntosB` = games ganados (2-0 o 2-1) y `games: [{a, b}]` con el detalle (nuevo
+  campo opcional en `PartidoGrupo`/`PartidoLlave`). En una fase de grupos al mejor de 3 la tabla desempata
+  por diferencia de games (lo que ya hace con `puntosA/puntosB`). El export a DUPR usa `games` si existe.
+- `arbitro_terminar` no pisa un partido que ya tiene resultado (cargado a mano desde el gestor o En vivo).
 
 ## Fuera de alcance (v1)
 

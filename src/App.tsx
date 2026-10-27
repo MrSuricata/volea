@@ -71,6 +71,7 @@ const RankingPageLazy = lazyConRecarga(() => import('./torneos/publico/RankingPa
 const TorneosListaPageLazy = lazyConRecarga(() => import('./torneos/publico/TorneosListaPage'));
 const TorneoDetallePageLazy = lazyConRecarga(() => import('./torneos/publico/TorneoDetallePage'));
 const ProgramacionPageLazy = lazyConRecarga(() => import('./torneos/publico/ProgramacionPage'));
+const ArbitroPageLazy = lazyConRecarga(() => import('./torneos/arbitraje/ArbitroPage'));
 const CopaVivoPageLazy = lazyConRecarga(() => import('./components/CopaVivoPage'));
 // Galería (álbumes de fotos, cada uno un link de salida a Drive/Photos): mismo motivo que
 // los lazy de arriba — la tienda pública (critical path) no la necesita hasta que alguien
@@ -4339,6 +4340,15 @@ function ProgramacionRoute() {
   );
 }
 
+function ArbitroRoute() {
+  usePageMeta({ title: 'Árbitro', description: 'Marcador del árbitro VOLEA: entrá con el código del partido.' });
+  return (
+    <Suspense fallback={<TorneosCargando />}>
+      <ArbitroPageLazy />
+    </Suspense>
+  );
+}
+
 function CopaVivoRoute() {
   usePageMeta({
     title: 'Copa Badminton EN VIVO',
@@ -4413,6 +4423,7 @@ function AnimatedRoutes() {
       <Route path="/torneos" element={<PageTransition><TorneosListaRoute /></PageTransition>} />
       <Route path="/programacion" element={<PageTransition><ProgramacionRoute /></PageTransition>} />
       <Route path="/copa" element={<PageTransition><CopaVivoRoute /></PageTransition>} />
+      <Route path="/arbitro" element={<ArbitroRoute />} />
       <Route path="/torneos/:id" element={<PageTransition><TorneoDetalleRoute /></PageTransition>} />
       <Route path="/eventos" element={<PageTransition><EventsPage /></PageTransition>} />
       <Route path="/inscripcion/:eventId" element={<PageTransition><InscripcionPage /></PageTransition>} />
@@ -4434,6 +4445,8 @@ function AnimatedRoutes() {
 function Marco({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   if (/^\/admin(\/|$)/.test(pathname)) return <main className="min-h-screen bg-gray-50">{children}</main>;
+  // Pantalla del árbitro: a pantalla completa en el celular, sin menú, pie ni WhatsApp.
+  if (/^\/arbitro(\/|$)/.test(pathname)) return <main>{children}</main>;
   return (
     <div className="flex flex-col min-h-screen">
       <TopBar />

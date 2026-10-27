@@ -8,8 +8,9 @@ import { formatPrice } from '../../lib/formato';
 import type { Product } from '../../types';
 import { aHora } from './programa';
 import type { AnuncioTv, ConfigTv, SponsorTv } from './programa';
+import type { Marcador } from '../arbitraje/motor';
 
-export type CanchaTv = { cancha: string; cat: string | null; a: string | null; b: string | null; minutos: number | null; sigue: { cat: string; a: string; b: string } | null };
+export type CanchaTv = { cancha: string; cat: string | null; a: string | null; b: string | null; minutos: number | null; sigue: { cat: string; a: string; b: string } | null; marcador?: Marcador | null };
 export type ProximoTv = { ini: number; cancha: string; categoria: string; fase: string; a: string; b: string; bloque?: boolean };
 export type ResultadoTv = { cat: string; fase: string; a: string; b: string; pa: number; pb: number; wo?: boolean };
 
@@ -27,6 +28,9 @@ type Props = {
 
 const LIMA = '#CCFF00';
 const NAVY = '#001328';
+// Marcador en vivo de la cancha (tanteador de árbitros): el puntaje al lado de cada nombre, el que saca en lima.
+const filaTv: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5em' };
+const puntoTv = (saca: boolean): CSSProperties => ({ fontVariantNumeric: 'tabular-nums', fontSize: '1.5em', color: saca ? LIMA : '#fff' });
 const CARTA = 'rgba(0, 31, 63, 0.92)';
 const BORDE = 'rgba(255,255,255,0.12)';
 
@@ -217,9 +221,11 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
             </div>
             {c.a ? (
               <div style={{ marginTop: '0.35em', fontWeight: 900, fontSize: '1.3em', lineHeight: 1.15, textTransform: 'uppercase' }}>
-                <div>{c.a}</div>
-                <div style={{ color: LIMA, fontSize: '0.6em', fontWeight: 800, margin: '0.1em 0' }}>VS</div>
-                <div>{c.b}</div>
+                <div style={filaTv}><span>{c.a}</span>{c.marcador && <span style={puntoTv(c.marcador.saca === 'A')}>{c.marcador.puntos.a}</span>}</div>
+                <div style={{ color: LIMA, fontSize: '0.6em', fontWeight: 800, margin: '0.1em 0' }}>
+                  {c.marcador ? `EN VIVO${c.marcador.games.length > 0 || c.marcador.game > 1 ? ` · GAMES ${c.marcador.gamesA}-${c.marcador.gamesB}` : ''}` : 'VS'}
+                </div>
+                <div style={filaTv}><span>{c.b}</span>{c.marcador && <span style={puntoTv(c.marcador.saca === 'B')}>{c.marcador.puntos.b}</span>}</div>
               </div>
             ) : (
               <div style={{ marginTop: '0.35em' }}>

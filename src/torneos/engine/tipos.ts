@@ -16,6 +16,8 @@ export type PartidoGrupo = {
   wo?: boolean;
   // Cuándo se cargó el resultado (ISO): para medir el ritmo real del torneo.
   cargadoEl?: string;
+  // Mejor de 3 (tanteador de árbitros): puntosA/puntosB son los games ganados y acá va el detalle.
+  games?: { a: number; b: number }[];
 };
 
 export type SlotLlave =
@@ -34,6 +36,8 @@ export type PartidoLlave = {
   esTercerPuesto: boolean;
   wo?: boolean; // W.O.: ver PartidoGrupo
   cargadoEl?: string; // ver PartidoGrupo
+  // Mejor de 3 (tanteador de árbitros): puntosA/puntosB son los games ganados y acá va el detalle.
+  games?: { a: number; b: number }[];
 };
 
 export type ConfigLlave = {
@@ -46,6 +50,9 @@ export type ConfigLlave = {
 };
 
 export type Fase = 'parejas' | 'grupos' | 'faseGrupos' | 'llave' | 'terminado';
+
+// Cómo se cuenta un partido arbitrado (tanteador de árbitros).
+export type FormatoArbitraje = { tipo: 'rally' | 'sideout'; a: 11 | 15 | 21; mejorDe: 1 | 3 };
 
 export type Torneo = {
   id: string;
@@ -79,6 +86,8 @@ export type Torneo = {
   llave6?: boolean;
   // Formato de llave elegido desde la web (los de banderas viejas: copas, llave6, sinLlave).
   formatoLlave?: 'final' | 'semis' | 'cruces';
+  // Formato del tanteador de árbitros: uno para la fase de grupos y otro para la llave.
+  arbitraje?: { grupos?: FormatoArbitraje; llave?: FormatoArbitraje };
 };
 
 export function nuevoId(): string {

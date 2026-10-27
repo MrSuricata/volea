@@ -17,6 +17,8 @@ import PantallaRanking from './ui/PantallaRanking';
 import PantallaJugadores from './ui/PantallaJugadores';
 import PantallaConfigPuntos from './ui/ConfigPuntos';
 import SelectorFormato from './ui/SelectorFormato';
+import SelectorArbitraje from './ui/SelectorArbitraje';
+import HojaCodigos from './arbitraje/HojaCodigos';
 import { Boton, BotonIcono, Campo, EncabezadoPagina, Entrada, Insignia, Interruptor, Selector, Vacio, type TonoInsignia } from '../admin/ui';
 import { cn } from '../lib/cn';
 
@@ -360,6 +362,7 @@ function AjustesTorneo({ torneo, eventosUsados, esIndividual, actualizar }: {
   actualizar: (cambio: (t: Torneo) => Torneo) => void;
 }) {
   const [abierto, setAbierto] = useState(!torneo.categoria);
+  const [hojaCodigos, setHojaCodigos] = useState(false);
   return (
     <section className="mb-5 rounded-xl border border-gray-200 bg-white">
       <button
@@ -431,6 +434,13 @@ function AjustesTorneo({ torneo, eventosUsados, esIndividual, actualizar }: {
           {!esIndividual && (
             <div className="sm:col-span-2">
               <SelectorFormato torneo={torneo} actualizar={actualizar} />
+            </div>
+          )}
+          {!esIndividual && (
+            <div className="space-y-3 sm:col-span-2">
+              <SelectorArbitraje torneo={torneo} actualizar={actualizar} />
+              <Boton variante="secundario" onClick={() => setHojaCodigos(true)}>Códigos de árbitro</Boton>
+              {hojaCodigos && <HojaCodigos torneo={torneo} onCerrar={() => setHojaCodigos(false)} />}
             </div>
           )}
         </div>

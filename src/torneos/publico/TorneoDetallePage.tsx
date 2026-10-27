@@ -10,6 +10,7 @@ import { obtenerTorneoPublico } from './datos';
 import { RkAviso, RkCargando, RkError } from './Estados';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
+import { MarcadorVivo, MarcadoresContext, useMarcadorDe, useMarcadores } from '../arbitraje/MarcadorVivo';
 
 // 30s de polling: sigue siendo "en vivo" para el ritmo de un torneo de pickleball y
 // gasta la mitad de egress de Supabase que los 15s originales con espectadores mirando.
@@ -33,6 +34,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
   const [torneo, setTorneo] = useState<Torneo | null>(null);
   const onNombreRef = useRef(onNombre);
   onNombreRef.current = onNombre;
+  const marcadores = useMarcadores();
 
   const cargar = useCallback(async () => {
     if (!id) { setEstado('no-encontrado'); return; }
@@ -125,6 +127,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
   const tieneGrupos = !individual && grupos.length > 0;
 
   return (
+    <MarcadoresContext.Provider value={marcadores}>
     <div className="rk">
       <main className="contenedor">
         <header className="cabecera">
@@ -167,6 +170,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
         <VitrinaTienda />
       </main>
     </div>
+    </MarcadoresContext.Provider>
   );
 }
 
@@ -234,11 +238,12 @@ function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
 function FilaResultado({ torneo, partido }: { torneo: Torneo; partido: PartidoGrupo }) {
   const valido = resultadoValido(partido.puntosA, partido.puntosB);
   const ganaA = valido && (partido.puntosA as number) > (partido.puntosB as number);
+  const vivo = useMarcadorDe(torneo.id, partido.id);
   return (
     <div className="fila-partido">
       <span className={`lado ${ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.aId)}</span>
       <span className="chip" title={valido && partido.wo ? 'W.O.: el partido no se jugó' : undefined}>
-        {valido ? `${partido.wo ? 'W.O. · ' : ''}${partido.puntosA} – ${partido.puntosB}` : 'sin jugar'}
+        {valido ? `${partido.wo ? 'W.O. · ' : ''}${partido.puntosA} – ${partido.puntosB}` : vivo ? <MarcadorVivo m={vivo} tamano={0.85} /> : 'sin jugar'}
       </span>
       <span className={`lado der ${valido && !ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.bId)}</span>
     </div>
@@ -322,6 +327,7 @@ function CajaPartidoPublica({ torneo, partido, partidos, procedenciaA, procedenc
   const idA = resolverSlot(partido.a, partidos);
   const idB = resolverSlot(partido.b, partidos);
   const ganador = ganadorPartido(partido, partidos);
+  const vivo = useMarcadorDe(torneo.id, partido.id);
 
   function etiqueta(slot: PartidoLlave['a'], id: string | null): string {
     if (slot === null) return 'BYE';
@@ -346,6 +352,9 @@ function CajaPartidoPublica({ torneo, partido, partidos, procedenciaA, procedenc
         </span>
         {idB !== null && partido.puntosB !== null && <span className="puntaje-llave">{partido.puntosB}</span>}
       </div>
+      {vivo && partido.puntosA === null && (
+        <div className="slot"><MarcadorVivo m={vivo} tamano={0.85} /></div>
+      )}
       {partido.wo && partido.puntosA !== null && partido.puntosB !== null && (
         <div className="slot"><span className="chip" title="W.O.: el partido no se jugó">W.O.</span></div>
       )}

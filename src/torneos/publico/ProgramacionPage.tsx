@@ -21,6 +21,7 @@ import type { AjustesPrograma, CatProg, Fila, ProgramaVigente, RefPartido, Resul
 import '../torneos.css';
 import PantallaTv from './PantallaTv';
 import PanelTv from './PanelTv';
+import { MarcadorVivo, claveMarcador, useMarcadores } from '../arbitraje/MarcadorVivo';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
 // Dos vistas en una: los partidos PENDIENTES con hora y cancha estimadas (el reparto
@@ -474,6 +475,7 @@ function diaInicial(): string {
 }
 
 export default function ProgramacionPage() {
+  const marcadores = useMarcadores();
   const [estado, setEstado] = useState<Estado>('cargando');
   const [mensajeError, setMensajeError] = useState('');
   const [torneos, setTorneos] = useState<TorneoPublico[]>([]);
@@ -732,6 +734,7 @@ export default function ProgramacionPage() {
         cancha: nombre, cat: et?.cat ?? null, a: et?.a ?? null, b: et?.b ?? null,
         minutos: et && e?.desde ? Math.max(0, Math.floor((Date.now() - new Date(e.desde).getTime()) / 60000)) : null,
         sigue: !et && s ? { cat: s.categoria, a: s.a, b: s.b } : null,
+        marcador: et && e?.torneoId && e?.partidoId ? marcadores.get(claveMarcador(e.torneoId, e.partidoId)) ?? null : null,
       };
     });
     const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 5);
@@ -1081,6 +1084,9 @@ export default function ProgramacionPage() {
                   <>
                     <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
                     <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
+                    {e.torneoId && e.partidoId && marcadores.get(claveMarcador(e.torneoId, e.partidoId)) && (
+                      <div style={{ marginTop: 6 }}><MarcadorVivo m={marcadores.get(claveMarcador(e.torneoId, e.partidoId))!} /></div>
+                    )}
                     {modoCarga && e?.torneoId && e?.partidoId && (
                       <>
                         <CargaResultado
