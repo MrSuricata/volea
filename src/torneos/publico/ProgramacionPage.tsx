@@ -737,6 +737,14 @@ export default function ProgramacionPage() {
         marcador: et && e?.torneoId && e?.partidoId ? marcadores.get(claveMarcador(e.torneoId, e.partidoId)) ?? null : null,
       };
     });
+    // Partidos con árbitro que no están asignados a una cancha: también van a la tele.
+    const enAlgunaCancha = new Set(enCancha.flatMap((e) => (e.torneoId && e.partidoId ? [claveMarcador(e.torneoId, e.partidoId)] : [])));
+    for (const [k, m] of marcadores) {
+      if (enAlgunaCancha.has(k)) continue;
+      const [torneoId, partidoId] = k.split(':');
+      const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true });
+      if (et) canchasTv.push({ cancha: 'Con árbitro', cat: et.cat, a: et.a, b: et.b, minutos: null, sigue: null, marcador: m });
+    }
     const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 5);
     return (
       <PantallaTv
@@ -1058,6 +1066,32 @@ export default function ProgramacionPage() {
 
         </div>
         <div className="col-der">
+          {/* Partidos que marca un árbitro y no están asignados a ninguna cancha: igual se ven en vivo. */}
+          {(() => {
+            const enAlgunaCancha = new Set(enCancha.flatMap((e) => (e.torneoId && e.partidoId ? [claveMarcador(e.torneoId, e.partidoId)] : [])));
+            const sueltos = [...marcadores.entries()].filter(([k]) => !enAlgunaCancha.has(k)).flatMap(([k, m]) => {
+              const [torneoId, partidoId] = k.split(':');
+              const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true });
+              return et ? [{ k, m, et }] : [];
+            });
+            if (sueltos.length === 0) return null;
+            return (
+              <>
+                <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '0 0 10px' }}>
+                  Con árbitro
+                </h2>
+                <div style={{ display: 'grid', gap: 10, marginBottom: 18 }}>
+                  {sueltos.map(({ k, m, et }) => (
+                    <div key={k} style={{ ...carta, borderColor: 'var(--lima)' }}>
+                      <div style={{ fontSize: '0.72rem', opacity: 0.65, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>{et.cat}</div>
+                      <div style={{ fontSize: '0.98rem', fontWeight: 700, lineHeight: 1.35 }}>{et.a} vs {et.b}</div>
+                      <div style={{ marginTop: 6 }}><MarcadorVivo m={m} /></div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
           <h2 style={{ fontSize: '1.05rem', letterSpacing: '0.06em', textTransform: 'uppercase', opacity: 0.8, margin: '0 0 10px' }}>
             En cancha
           </h2>

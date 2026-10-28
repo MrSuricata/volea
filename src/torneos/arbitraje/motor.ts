@@ -7,7 +7,8 @@ import type { FormatoArbitraje } from '../engine/tipos';
 export type Lado = 'A' | 'B';
 
 export type Jugada =
-  | { t: 'inicio'; saca: Lado; derechaA: 0 | 1; derechaB: 0 | 1 }
+  // formato: el que eligió el árbitro al empezar (si no, vale el de la categoría).
+  | { t: 'inicio'; saca: Lado; derechaA: 0 | 1; derechaB: 0 | 1; formato?: FormatoArbitraje }
   | { t: 'rally'; gana: Lado }
   | { t: 'tiempo'; equipo: Lado };
 
@@ -32,6 +33,15 @@ export type EstadoArbitraje = {
 };
 
 export const FORMATO_DEFECTO: FormatoArbitraje = { tipo: 'rally', a: 15, mejorDe: 1 };
+
+const FORMATO_VALIDO = (f: FormatoArbitraje | undefined): f is FormatoArbitraje =>
+  !!f && (f.tipo === 'rally' || f.tipo === 'sideout') && [11, 15, 21].includes(f.a) && (f.mejorDe === 1 || f.mejorDe === 3);
+
+/** Formato con el que se juega: el elegido al empezar el partido o, si no hay, el de la categoría. */
+export function formatoDelPartido(base: FormatoArbitraje, jugadas: Jugada[]): FormatoArbitraje {
+  const ini = jugadas[0];
+  return ini?.t === 'inicio' && FORMATO_VALIDO(ini.formato) ? ini.formato : base;
+}
 
 const otro = (l: Lado): Lado => (l === 'A' ? 'B' : 'A');
 const cruzar = (i: 0 | 1): 0 | 1 => (i === 0 ? 1 : 0);

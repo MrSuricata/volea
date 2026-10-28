@@ -1,8 +1,8 @@
 // /arbitro: el árbitro pone el código del partido y lo marca punto a punto. Sin login.
 // Lo marcado se guarda en el teléfono y se sube en cuanto hay señal.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Torneo } from '../engine/tipos';
-import { estadoDe, resultadoFinal, resumen, type Jugada, type Lado } from './motor';
+import type { FormatoArbitraje, Torneo } from '../engine/tipos';
+import { estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada, type Lado } from './motor';
 import { ladosDelPartido, type PartidoArbitrado } from './partido';
 import { entrar, leerTorneo, marcar, terminar, type PartidoDelArbitro } from './servicio';
 
@@ -66,8 +66,12 @@ function Marco({ children }: { children: React.ReactNode }) {
 }
 
 function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: string; inicial: PartidoDelArbitro; pendiente: boolean; torneo: Torneo | null; onSalir: () => void }) {
-  const f = inicial.formato;
   const [jugadas, setJugadas] = useState<Jugada[]>(inicial.jugadas);
+  // El formato lo puede cambiar el árbitro al empezar (viaja en la jugada de inicio).
+  const f = useMemo(() => formatoDelPartido(inicial.formato, jugadas), [inicial.formato, jugadas]);
+  // Lo último que eligió al empezar, para volver a la pantalla de inicio con eso marcado.
+  const [ultimoInicio, setUltimoInicio] = useState<Extract<Jugada, { t: 'inicio' }> | null>(
+    inicial.jugadas[0]?.t === 'inicio' ? inicial.jugadas[0] : null);
   const [version, setVersion] = useState(inicial.version);
   // Al reabrir con puntos marcados sin señal, quedan para subir enseguida.
   const [sinSubir, setSinSubir] = useState(pendiente);
@@ -83,7 +87,7 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
   const subir = useCallback(async (lista: Jugada[], ver: number) => {
     if (enviando.current) return;
     enviando.current = true;
-    const r = await marcar(codigo, ver, lista, resumen(estadoDe(f, inicial.dobles, lista)));
+    const r = await marcar(codigo, ver, lista, resumen(estadoDe(formatoDelPartido(inicial.formato, lista), inicial.dobles, lista)));
     enviando.current = false;
     if (r.ok) {
       setVersion(r.valor); setSinSubir(false); guardarLocal(codigo, { jugadas: lista, version: r.valor, pendiente: false });
@@ -93,7 +97,7 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
     } else {
       setSinSubir(true); guardarLocal(codigo, { jugadas: lista, version: ver, pendiente: true });
     }
-  }, [codigo, f, inicial.dobles]);
+  }, [codigo, inicial.formato, inicial.dobles]);
 
   // Reintento si quedó algo sin subir (cada 5 s y al volver la señal).
   useEffect(() => {
@@ -105,6 +109,7 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
   }, [sinSubir, subir, jugadas, version]);
 
   function jugar(j: Jugada | 'deshacer') {
+    if (j !== 'deshacer' && j.t === 'inicio') setUltimoInicio(j);
     const lista = j === 'deshacer' ? jugadas.slice(0, -1) : [...jugadas, j];
     setJugadas(lista); setAviso(null);
     guardarLocal(codigo, { jugadas: lista, version, pendiente: true });
@@ -130,7 +135,10 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
     );
   }
 
-  if (!e.iniciado) return <Inicio datos={datos} dobles={inicial.dobles} jugadores={jugadores} nombre={nombre} onEmpezar={(j) => jugar(j)} onSalir={onSalir} faltanRivales={!!torneo && (!datos?.a || !datos?.b)} />;
+  if (!e.iniciado) {
+    return <Inicio datos={datos} dobles={inicial.dobles} jugadores={jugadores} nombre={nombre} base={inicial.formato} previo={ultimoInicio}
+      onEmpezar={(j) => jugar(j)} onSalir={onSalir} faltanRivales={!!torneo && (!datos?.a || !datos?.b)} />;
+  }
 
   const recibe: Lado = e.saca === 'A' ? 'B' : 'A';
   const tiempo = (l: Lado) => (
@@ -179,7 +187,9 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
             Ganó el que recibe
           </button>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <button onClick={() => jugar('deshacer')} disabled={jugadas.length <= 1} className="rounded-lg bg-white/10 px-4 py-2 font-bold disabled:opacity-40">↶ Deshacer</button>
+            <button onClick={() => jugar('deshacer')} className="rounded-lg bg-white/10 px-4 py-2 font-bold">
+              {jugadas.length <= 1 ? '↶ Cambiar saque o formato' : '↶ Deshacer'}
+            </button>
             <div className="flex gap-2">{tiempo('A')}{tiempo('B')}</div>
           </div>
         </div>
@@ -188,12 +198,15 @@ function Partido({ codigo, inicial, pendiente, torneo, onSalir }: { codigo: stri
   );
 }
 
-function Inicio({ datos, dobles, jugadores, nombre, onEmpezar, onSalir, faltanRivales }: {
+function Inicio({ datos, dobles, jugadores, nombre, base, previo, onEmpezar, onSalir, faltanRivales }: {
   datos: PartidoArbitrado | null; dobles: boolean; jugadores: (l: Lado) => string[]; nombre: (l: Lado) => string;
+  base: FormatoArbitraje; previo: Extract<Jugada, { t: 'inicio' }> | null;
   onEmpezar: (j: Jugada) => void; onSalir: () => void; faltanRivales: boolean;
 }) {
-  const [saca, setSaca] = useState<Lado | null>(null);
-  const [der, setDer] = useState<{ A: 0 | 1; B: 0 | 1 }>({ A: 0, B: 0 });
+  const [saca, setSaca] = useState<Lado | null>(previo?.saca ?? null);
+  const [der, setDer] = useState<{ A: 0 | 1; B: 0 | 1 }>({ A: previo?.derechaA ?? 0, B: previo?.derechaB ?? 0 });
+  const [formato, setFormato] = useState<FormatoArbitraje>(previo?.formato ?? base);
+  const opcion = (activa: boolean) => `rounded-xl p-3 text-sm font-bold ${activa ? 'bg-white text-[#001F3F]' : 'bg-white/10'}`;
   if (faltanRivales) {
     return (
       <Marco>
@@ -208,6 +221,20 @@ function Inicio({ datos, dobles, jugadores, nombre, onEmpezar, onSalir, faltanRi
     <Marco>
       <p className="text-sm uppercase opacity-70">{datos?.titulo ?? 'Partido'}</p>
       <h1 className="mt-1 text-xl font-black">{nombre('A')} <span className="text-[#CCFF00]">vs</span> {nombre('B')}</h1>
+      <p className="mt-5 text-sm font-bold uppercase opacity-75">¿Cómo se juega?</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button onClick={() => setFormato({ ...formato, tipo: 'sideout' })} className={opcion(formato.tipo === 'sideout')}>Saque tradicional</button>
+        <button onClick={() => setFormato({ ...formato, tipo: 'rally' })} className={opcion(formato.tipo === 'rally')}>Rally</button>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        {([11, 15, 21] as const).map((a) => (
+          <button key={a} onClick={() => setFormato({ ...formato, a })} className={opcion(formato.a === a)}>A {a}</button>
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button onClick={() => setFormato({ ...formato, mejorDe: 1 })} className={opcion(formato.mejorDe === 1)}>Un game</button>
+        <button onClick={() => setFormato({ ...formato, mejorDe: 3 })} className={opcion(formato.mejorDe === 3)}>Mejor de 3</button>
+      </div>
       <p className="mt-5 text-sm font-bold uppercase opacity-75">¿Quién saca primero?</p>
       <div className="mt-2 grid grid-cols-2 gap-2">
         {(['A', 'B'] as Lado[]).map((l) => (
@@ -224,7 +251,7 @@ function Inicio({ datos, dobles, jugadores, nombre, onEmpezar, onSalir, faltanRi
           </div>
         </div>
       ))}
-      <button disabled={!saca} onClick={() => saca && onEmpezar({ t: 'inicio', saca, derechaA: der.A, derechaB: der.B })}
+      <button disabled={!saca} onClick={() => saca && onEmpezar({ t: 'inicio', saca, derechaA: der.A, derechaB: der.B, formato })}
         className="mt-6 w-full rounded-2xl bg-[#CCFF00] py-5 text-xl font-black text-[#001F3F] disabled:opacity-40">
         Empezar partido
       </button>

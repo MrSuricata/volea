@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estadoDe, resultadoFinal, resumen, type Jugada } from './motor';
+import { estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada } from './motor';
 import type { FormatoArbitraje } from '../engine/tipos';
 
 const SO11: FormatoArbitraje = { tipo: 'sideout', a: 11, mejorDe: 1 };
@@ -116,5 +116,24 @@ describe('tiempos, deshacer y resumen', () => {
   it('el resumen lleva lo que necesita la TV', () => {
     const e = estadoDe(RA15, true, [ini('A'), r('A'), r('B')]);
     expect(resumen(e)).toMatchObject({ puntos: { a: 1, b: 1 }, saca: 'B', game: 1, gamesA: 0, gamesB: 0, terminado: false });
+  });
+});
+
+describe('formato elegido al empezar', () => {
+  it('sin elección vale el de la categoría; con elección, el elegido', () => {
+    expect(formatoDelPartido(SO11, [ini('A'), r('A')])).toEqual(SO11);
+    expect(formatoDelPartido(SO11, [{ t: 'inicio', saca: 'A', derechaA: 0, derechaB: 0, formato: RA11x3 }])).toEqual(RA11x3);
+    expect(formatoDelPartido(SO11, [])).toEqual(SO11);
+  });
+  it('un formato roto se ignora', () => {
+    const malo = { tipo: 'rally', a: 9, mejorDe: 1 } as unknown as FormatoArbitraje;
+    expect(formatoDelPartido(SO11, [{ t: 'inicio', saca: 'A', derechaA: 0, derechaB: 0, formato: malo }])).toEqual(SO11);
+  });
+  it('rally a 15 elegido sobre una categoría de side out: termina a 15', () => {
+    const jug: Jugada[] = [{ t: 'inicio', saca: 'A', derechaA: 0, derechaB: 0, formato: RA15 }, ...rallies('B', 15)];
+    const f = formatoDelPartido(SO11, jug);
+    const e = estadoDe(f, true, jug);
+    expect(e.terminado).toBe(true);
+    expect(resultadoFinal(f, e)).toEqual({ puntosA: 0, puntosB: 15 });
   });
 });
