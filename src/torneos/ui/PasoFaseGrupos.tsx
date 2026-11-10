@@ -201,10 +201,11 @@ function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
       W.O.
     </button>
   ) : null;
-  const encabezado = (cancha !== undefined || (conGrupo && grupo) || botonWo) ? (
+  const encabezado = (cancha !== undefined || (conGrupo && grupo) || botonWo || partido.etiqueta) ? (
     <>
       {cancha !== undefined && <Insignia tono="navy" className="bg-navy-700 text-white ring-0">Cancha {cancha}</Insignia>}
       {conGrupo && grupo && <Insignia>Grupo {grupo.nombre}</Insignia>}
+      {partido.etiqueta && <Insignia>{partido.etiqueta}</Insignia>}
       {botonWo}
     </>
   ) : undefined;

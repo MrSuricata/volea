@@ -36,17 +36,19 @@ function statsBase(parejaIds: string[], partidos: PartidoGrupo[]): Map<string, S
   return map;
 }
 
-// Devuelve el ganador del duelo directo entre dos, o null si no jugaron / sin resultado
-// Asume una sola confrontación por par (invariante del fixture); si hubiera más, usa la primera.
+// Devuelve el ganador del duelo directo entre dos, o null si no jugaron / sin resultado / quedaron
+// iguales. Si jugaron más de una vez (cruces por equipos, ida y vuelta) gana el que ganó más partidos.
 function ganadorH2h(x: string, y: string, partidos: PartidoGrupo[]): string | null {
+  let gx = 0;
+  let gy = 0;
   for (const p of partidos) {
     const r = resultadoDe(p);
     if (!r) continue;
     const esXY = (p.aId === x && p.bId === y) || (p.aId === y && p.bId === x);
     if (!esXY) continue;
-    return r.a > r.b ? p.aId : p.bId;
+    if ((r.a > r.b ? p.aId : p.bId) === x) gx += 1; else gy += 1;
   }
-  return null;
+  return gx > gy ? x : gy > gx ? y : null;
 }
 
 function difEntre(subset: string[], partidos: PartidoGrupo[]): Map<string, number> {

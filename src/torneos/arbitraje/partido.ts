@@ -21,7 +21,7 @@ export function ladosDelPartido(t: Torneo, partidoId: string): PartidoArbitrado 
   const g = t.partidosGrupo.find((p) => p.id === partidoId);
   if (g) {
     const grupo = t.grupos.find((x) => x.id === g.grupoId);
-    return { fase: 'grupo', titulo: `Grupo ${grupo?.nombre ?? ''} · Ronda ${g.ronda}`, a: lado(t, g.aId), b: lado(t, g.bId), jugado: g.puntosA !== null };
+    return { fase: 'grupo', titulo: `Grupo ${grupo?.nombre ?? ''} · Ronda ${g.ronda}${g.etiqueta ? ` · ${g.etiqueta}` : ''}`, a: lado(t, g.aId), b: lado(t, g.bId), jugado: g.puntosA !== null };
   }
   const llave = t.partidosLlave ?? [];
   const l = llave.find((p) => p.id === partidoId);

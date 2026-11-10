@@ -91,4 +91,17 @@ describe('calcularTabla', () => {
     const conNan = calcularTabla(['a', 'b'], [partido('a', 'b', NaN, 5)]);
     expect(conNan[0]).toMatchObject({ pj: 0, pg: 0 });
   });
+
+  it('cruces por equipos: el duelo directo lo gana quien ganó más partidos del cruce, no el primero', () => {
+    const tabla = calcularTabla(
+      ['a', 'b', 'c'],
+      [
+        partido('a', 'b', 21, 5), partido('a', 'b', 19, 21), partido('a', 'b', 19, 21), // b gana el cruce 2-1
+        partido('a', 'c', 21, 10), partido('a', 'c', 21, 10), partido('a', 'c', 21, 10),
+        partido('b', 'c', 21, 18), partido('b', 'c', 21, 18), partido('b', 'c', 18, 21),
+      ],
+    );
+    // a y b: 4 partidos ganados cada uno; a tiene más dif, pero b ganó el cruce directo
+    expect(tabla.map((f) => f.parejaId)).toEqual(['b', 'a', 'c']);
+  });
 });

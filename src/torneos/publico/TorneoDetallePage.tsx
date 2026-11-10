@@ -139,7 +139,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
         </header>
 
         <div className="acciones" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
-          <span className="chip">{ETIQUETA_FORMATO[torneo.formato ?? 'grupos']}</span>
+          <span className="chip">{torneo.sinLlave ? 'Todos contra todos' : ETIQUETA_FORMATO[torneo.formato ?? 'grupos']}</span>
           <span className="chip">{ETIQUETA_FASE[torneo.fase]}</span>
           {torneo.categoria && <span className="chip">Cat {torneo.categoria}</span>}
           {torneo.evento && !individual && <span className="chip">Evento {torneo.evento}</span>}
@@ -241,6 +241,7 @@ function FilaResultado({ torneo, partido }: { torneo: Torneo; partido: PartidoGr
   const vivo = useMarcadorDe(torneo.id, partido.id);
   return (
     <div className="fila-partido">
+      {partido.etiqueta && <span className="chip" style={{ flexBasis: '100%', maxWidth: 'max-content' }}>{partido.etiqueta}</span>}
       <span className={`lado ${ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.aId)}</span>
       <span className="chip" title={valido && partido.wo ? 'W.O.: el partido no se jugó' : undefined}>
         {valido ? `${partido.wo ? 'W.O. · ' : ''}${partido.puntosA} – ${partido.puntosB}` : vivo ? <MarcadorVivo m={vivo} tamano={0.85} /> : 'sin jugar'}

@@ -18,6 +18,8 @@ export type PartidoGrupo = {
   cargadoEl?: string;
   // Mejor de 3 (tanteador de árbitros): puntosA/puntosB son los games ganados y acá va el detalle.
   games?: { a: number; b: number }[];
+  // Qué partido es dentro de un cruce por equipos (ej. "Dobles masculino"); solo se muestra.
+  etiqueta?: string;
 };
 
 export type SlotLlave =
