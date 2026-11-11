@@ -33,6 +33,8 @@
 --  6. admin_codigos_torneo: no emite para partidos con resultado o W.O., da de baja los códigos
 --     huérfanos (cuadro rearmado) y los viejos, y la búsqueda de un código libre está acotada.
 --  7. La cancha se libera filtrando por torneo_id además de partido_id.
+--  8. arbitro_entrar devuelve quién juega (`cuadro`): en un torneo oculto la pantalla del árbitro no
+--     puede leer rk_torneos como anónimo y se quedaba sin nombres.
 
 -- ---------------------------------------------------------------- tablas
 ALTER TABLE arbitraje_partidos ADD COLUMN IF NOT EXISTS cierre text;      -- 'arbitro' | 'mesa'
@@ -398,6 +400,61 @@ CREATE OR REPLACE FUNCTION public._arbitraje_rivales_definidos(p_data jsonb, p_u
   END
 $$;
 
+-- Pareja que ocupa un lugar de la llave (como resolverSlot() de src/torneos/engine/llave.ts), o NULL.
+CREATE OR REPLACE FUNCTION public._arbitraje_slot_pareja(p_llave jsonb, p_slot jsonb, p_prof int DEFAULT 0) RETURNS text LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_p jsonb;
+  v_a text;
+  v_b text;
+  v_gan text;
+BEGIN
+  IF p_prof > 30 OR p_slot IS NULL OR jsonb_typeof(p_slot) <> 'object' THEN RETURN NULL; END IF;
+  IF p_slot->>'tipo' = 'seed' THEN RETURN NULLIF(p_slot->>'parejaId', ''); END IF;
+  IF NOT COALESCE(p_slot->>'tipo' IN ('ganadorDe', 'perdedorDe'), false) THEN RETURN NULL; END IF;
+  SELECT x INTO v_p FROM jsonb_array_elements(p_llave) x WHERE x->>'id' = p_slot->>'partidoId' LIMIT 1;
+  IF v_p IS NULL THEN RETURN NULL; END IF;
+  v_a := _arbitraje_slot_pareja(p_llave, v_p->'a', p_prof + 1);
+  v_b := _arbitraje_slot_pareja(p_llave, v_p->'b', p_prof + 1);
+  IF (v_p->'a' IS NULL OR jsonb_typeof(v_p->'a') = 'null') AND v_b IS NOT NULL THEN v_gan := v_b;      -- bye
+  ELSIF (v_p->'b' IS NULL OR jsonb_typeof(v_p->'b') = 'null') AND v_a IS NOT NULL THEN v_gan := v_a;   -- bye
+  ELSIF v_a IS NULL OR v_b IS NULL OR NOT _arbitraje_resultado_valido(v_p) THEN RETURN NULL;
+  ELSE v_gan := CASE WHEN (v_p->>'puntosA')::numeric > (v_p->>'puntosB')::numeric THEN v_a ELSE v_b END;
+  END IF;
+  IF p_slot->>'tipo' = 'ganadorDe' THEN RETURN v_gan; END IF;
+  RETURN CASE WHEN v_gan = v_a THEN v_b ELSE v_a END;
+END $$;
+
+-- Quién juega y cómo se llama el partido, para la pantalla del árbitro (como ladosDelPartido() de
+-- src/torneos/arbitraje/partido.ts). Hace falta porque un torneo oculto no se puede leer como anónimo.
+CREATE OR REPLACE FUNCTION public._arbitraje_cuadro(p_data jsonb, p_ubic jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  e jsonb := p_ubic->'elem';
+  v_a text;
+  v_b text;
+  v_titulo text;
+  v_en_ronda int;
+BEGIN
+  IF p_data IS NULL OR p_ubic IS NULL THEN RETURN NULL; END IF;
+  IF p_ubic->>'lista' = 'partidosGrupo' THEN
+    v_a := NULLIF(e->>'aId', ''); v_b := NULLIF(e->>'bId', '');
+    v_titulo := 'Grupo ' || COALESCE((SELECT g->>'nombre' FROM jsonb_array_elements(COALESCE(p_data->'grupos', '[]')) g WHERE g->>'id' = e->>'grupoId' LIMIT 1), '')
+      || ' · Ronda ' || COALESCE(e->>'ronda', '') || COALESCE(' · ' || NULLIF(e->>'etiqueta', ''), '');
+  ELSE
+    v_a := _arbitraje_slot_pareja(p_data->'partidosLlave', e->'a');
+    v_b := _arbitraje_slot_pareja(p_data->'partidosLlave', e->'b');
+    IF COALESCE((e->>'esTercerPuesto')::boolean, false) THEN
+      v_titulo := 'Tercer puesto';
+    ELSE
+      SELECT count(*) INTO v_en_ronda FROM jsonb_array_elements(p_data->'partidosLlave') x
+       WHERE x->>'ronda' = e->>'ronda' AND NOT COALESCE((x->>'esTercerPuesto')::boolean, false);
+      v_titulo := CASE v_en_ronda WHEN 1 THEN 'Final' WHEN 2 THEN 'Semifinal' WHEN 4 THEN 'Cuartos' WHEN 8 THEN 'Octavos' ELSE 'Ronda ' || COALESCE(e->>'ronda', '') END;
+    END IF;
+  END IF;
+  RETURN jsonb_build_object('fase', CASE WHEN p_ubic->>'lista' = 'partidosGrupo' THEN 'grupo' ELSE 'llave' END, 'titulo', v_titulo,
+    'a', (SELECT jsonb_build_object('parejaId', x->>'id', 'nombre', x->>'nombre') FROM jsonb_array_elements(COALESCE(p_data->'parejas', '[]')) x WHERE x->>'id' = v_a LIMIT 1),
+    'b', (SELECT jsonb_build_object('parejaId', x->>'id', 'nombre', x->>'nombre') FROM jsonb_array_elements(COALESCE(p_data->'parejas', '[]')) x WHERE x->>'id' = v_b LIMIT 1));
+END $$;
+
 -- Respuesta para un partido ya cerrado (por el árbitro o desde la mesa). error = 'desfasado' para
 -- que la web vieja (v35/v36) se ponga al día con las jugadas y deje de reintentar.
 CREATE OR REPLACE FUNCTION public._arbitraje_cerrado(p_p arbitraje_partidos, p_resultado jsonb) RETURNS jsonb LANGUAGE sql STABLE AS $$
@@ -443,7 +500,8 @@ BEGIN
     'formato', v_p.formato, 'dobles', v_p.dobles, 'jugadas', v_p.jugadas, 'version', v_p.version, 'estado', v_p.estado,
     'motivo', CASE WHEN v_p.estado <> 'terminado' THEN NULL WHEN v_p.cierre = 'mesa' THEN 'cargado_en_mesa' ELSE 'terminado' END,
     'resultado', CASE WHEN v_p.estado = 'terminado' THEN COALESCE(v_res, _arbitraje_resultado_de(v_p.formato, v_p.marcador)) END,
-    'rivales', CASE WHEN v_data IS NULL THEN NULL ELSE _arbitraje_rivales_definidos(v_data, v_ubic) END);
+    'rivales', CASE WHEN v_data IS NULL THEN NULL ELSE _arbitraje_rivales_definidos(v_data, v_ubic) END,
+    'cuadro', _arbitraje_cuadro(v_data, v_ubic));
 END $$;
 
 CREATE OR REPLACE FUNCTION public.arbitro_marcar(p_codigo text, p_version int, p_jugadas jsonb, p_marcador jsonb) RETURNS jsonb
@@ -724,6 +782,8 @@ REVOKE ALL ON FUNCTION public._arbitraje_resultado_cuadro(jsonb) FROM PUBLIC, an
 REVOKE ALL ON FUNCTION public._arbitraje_resultado_valido(jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._arbitraje_slot_resuelto(jsonb, jsonb, int) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._arbitraje_rivales_definidos(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._arbitraje_slot_pareja(jsonb, jsonb, int) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._arbitraje_cuadro(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._arbitraje_cerrado(arbitraje_partidos, jsonb) FROM PUBLIC, anon, authenticated;
 
 REVOKE ALL ON FUNCTION public.arbitro_entrar(text) FROM PUBLIC;

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormatoArbitraje } from '../engine/tipos';
 import { estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada, type Lado } from './motor';
-import { ladosDelPartido, nombreJugador, resultadoEnCuadro, type PartidoArbitrado } from './partido';
+import { ladosDelPartido, nombreCorto, nombreJugador, resultadoEnCuadro, type PartidoArbitrado } from './partido';
 import { entrar, leerTorneo, marcar, terminar, type PartidoDelArbitro } from './servicio';
 import {
   alEntrar, alEnviar, alResponder, colaGuardada, iguales, jugar as jugarCola, pendiente, proximoEnvio, reconciliar, textoAviso,
@@ -101,7 +101,8 @@ export default function ArbitroPage() {
     const local = g && (!g.partido || (g.partido.torneoId === partido.torneoId && g.partido.partidoId === partido.partidoId)) ? g : null;
     const { cola, aviso } = alEntrar(local?.cola ?? null, jugadas, version);
     const t = await leerTorneo(partido.torneoId);
-    const datos = t && t !== 'red' ? ladosDelPartido(t, partido.partidoId) : local?.datos ?? null;
+    // Nombres: del cuadro público; si el torneo está oculto o no se pudo leer, los que manda la base al entrar.
+    const datos = (t && t !== 'red' ? ladosDelPartido(t, partido.partidoId) : null) ?? partido.cuadro ?? local?.datos ?? null;
     setCargando(false);
     setSesion({ codigo: c, partido, cola, datos, leido: t === 'red' ? 'red' : t ? 'ok' : 'no', aviso, sinSenal: false, confirmada: true });
   }
@@ -276,9 +277,12 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   }, [vaciarCola, base, codigo, setCola, terminarSesion]);
 
   // Abierta desde lo guardado (recarga sin señal): apenas hay señal se pregunta al servidor cómo está.
+  const refrescando = useRef(false);
   const refrescar = useCallback(async () => {
-    if (confirmada.current || finalRef.current) return;
-    const r = await entrar(codigo);
+    // Una consulta por vez (un toque mientras se consulta, o el doble montaje de StrictMode, no repiten).
+    if (confirmada.current || finalRef.current || refrescando.current) return;
+    refrescando.current = true;
+    const r = await entrar(codigo).finally(() => { refrescando.current = false; });
     if (!r.ok) {
       if (r.red) { setSinSenal(true); programar(() => void refrescar(), 5000); } else setAviso({ tipo: 'error', mensaje: r.error });
       return;
@@ -290,7 +294,10 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
     const s = alEntrar(colaRef.current, r.valor.jugadas, r.valor.version);
     setCola(s.cola);
     if (s.aviso) setAviso(s.aviso);
-    if (!datosRef.current) void releerCuadro();
+    if (!datosRef.current) {
+      const c = r.valor.cuadro;
+      if (c) { datosRef.current = c; setDatos(c); setLeido('ok'); } else void releerCuadro();
+    }
     void bombear();
   }, [codigo, bombear, setCola, terminarSesion]);
   refrescarRef.current = refrescar;
@@ -321,7 +328,7 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
     setLeido('red');
     const t = await leerTorneo(base.torneoId);
     if (t === 'red') return;
-    const d = t ? ladosDelPartido(t, base.partidoId) : null;
+    const d = (t ? ladosDelPartido(t, base.partidoId) : null) ?? base.cuadro ?? null;
     datosRef.current = d;
     setDatos(d);
     setLeido(t ? 'ok' : 'no');
@@ -370,6 +377,10 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
             Usar lo de este teléfono
           </button>
         )}
+        {aviso.tipo === 'codigo' && (
+          // El código ya no sirve: que no quede atrapado en este partido (lo marcado sigue guardado).
+          <button className="min-h-[44px] rounded-lg bg-white/10 px-3 font-bold" onClick={onSalir}>Salir / otro código</button>
+        )}
         <button className="min-h-[44px] rounded-lg bg-white/10 px-3 font-bold" onClick={() => setAviso(null)}>Entendido</button>
       </div>
     </div>
@@ -387,7 +398,7 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   const botonTiempo = (l: Lado) => (
     <button onClick={() => setTiempoPedido(l)} disabled={e.tiempos[l] >= e.maxTiempos || cierre !== 'nada'}
       className="min-h-[44px] min-w-[44px] rounded-lg bg-white/10 px-3 text-sm font-bold disabled:opacity-40">
-      Tiempo {nombre(l).split(/\s+/)[0]} ({e.maxTiempos - e.tiempos[l]})
+      Tiempo {nombreCorto(nombre(l))} ({e.maxTiempos - e.tiempos[l]})
     </button>
   );
   const enCierre = cierre === 'enviando' || cierre === 'esperando';
@@ -402,7 +413,8 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       {/* El marcador se anuncia a los lectores de pantalla cada vez que cambia. */}
       <div aria-live="polite" aria-atomic="true">
         <p className="sr-only">
-          {nombre('A')} {e.puntos.a}, {nombre('B')} {e.puntos.b}{f.mejorDe === 3 ? `, games ${e.gamesA} a ${e.gamesB}` : ''}. Saca {nombre(e.saca)}. Canto {e.canto}.
+          {nombre('A')} {e.puntos.a}, {nombre('B')} {e.puntos.b}{f.mejorDe === 3 ? `, games ${e.gamesA} a ${e.gamesB}` : ''}.
+          {e.terminado ? ` Ganó ${nombre(e.ganador as Lado)}.` : ` Saca ${nombre(e.saca)}. Canto ${e.canto}.`}
         </p>
         <div aria-hidden>
           {f.mejorDe === 3 && <p className="mt-1 text-center text-sm font-bold">Games {e.gamesA}-{e.gamesB}</p>}
@@ -411,11 +423,12 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
               <div key={l} className={`rounded-2xl p-3 ${e.saca === l ? 'bg-[#CCFF00] text-[#001F3F]' : 'bg-white/10'}`}>
                 <p className="text-xs font-bold uppercase leading-tight">{nombre(l)}</p>
                 <p className="text-6xl font-black tabular-nums">{l === 'A' ? e.puntos.a : e.puntos.b}</p>
-                {e.saca === l && <p className="text-xs font-bold">Saca {quienSaca(l)}</p>}
+                {e.saca === l && !e.terminado && <p className="text-xs font-bold">Saca {quienSaca(l)}</p>}
               </div>
             ))}
           </div>
-          <p className="mt-3 text-center text-5xl font-black tracking-wider tabular-nums">{e.canto}</p>
+          {/* Terminado el partido el canto ya no sirve (y confunde al lado del resultado). */}
+          {!e.terminado && <p className="mt-3 text-center text-5xl font-black tracking-wider tabular-nums">{e.canto}</p>}
         </div>
       </div>
       {e.cambiarLado && <p className="mt-2 rounded-lg bg-orange-500 p-2 text-center font-black">CAMBIO DE LADO</p>}
@@ -425,7 +438,8 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
 
       {e.terminado ? (
         <div className="mt-6 grid gap-3">
-          <p className="text-center text-lg font-black">Ganó {nombre(e.ganador as Lado)} · {e.games.map((g) => `${g.a}-${g.b}`).join(' / ')}</p>
+          {/* El resultado contado desde el ganador: "Ganó X · 11-4", no "Ganó X · 4-11". */}
+          <p className="text-center text-lg font-black">Ganó {nombre(e.ganador as Lado)} · {e.games.map((g) => (e.ganador === 'B' ? `${g.b}-${g.a}` : `${g.a}-${g.b}`)).join(' / ')}</p>
           {cierre === 'nada' && (
             <>
               <button onClick={() => setCierre('confirmar')} className="rounded-2xl bg-[#CCFF00] py-5 text-xl font-black text-[#001F3F]">Terminar partido</button>

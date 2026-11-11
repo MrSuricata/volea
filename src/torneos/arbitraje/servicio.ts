@@ -3,7 +3,7 @@
 import { supabase } from '../../services/supabaseClient';
 import type { FormatoArbitraje, Torneo } from '../engine/tipos';
 import type { Jugada, Marcador } from './motor';
-import { esDobles, formatoDe, partidosArbitrables } from './partido';
+import { esDobles, formatoDe, jugadoresDe, partidosArbitrables, type PartidoArbitrado } from './partido';
 import { interpretar, mensajeAmigable, type Resultado, type Respuesta } from './sincro';
 
 export type PartidoDelArbitro = {
@@ -11,6 +11,7 @@ export type PartidoDelArbitro = {
   jugadas: Jugada[]; version: number; estado: 'pendiente' | 'en_juego' | 'terminado';
   // v37 (en la v36 no vienen):
   motivo?: 'terminado' | 'cargado_en_mesa'; resultado?: Resultado | null; rivales?: boolean | null;
+  cuadro?: PartidoArbitrado | null; // quién juega, según la base (sirve aunque el torneo esté oculto)
 };
 type Res<T> = { ok: true; valor: T } | { ok: false; error: string; red?: boolean };
 
@@ -36,7 +37,20 @@ export async function entrar(codigo: string): Promise<Res<PartidoDelArbitro>> {
     jugadas: (data.jugadas ?? []) as Jugada[], version: data.version ?? 0, estado: data.estado ?? 'pendiente',
     motivo: data.motivo === 'cargado_en_mesa' ? 'cargado_en_mesa' : data.motivo === 'terminado' ? 'terminado' : undefined,
     resultado: (data.resultado ?? null) as Resultado | null, rivales: typeof data.rivales === 'boolean' ? data.rivales : null,
+    cuadro: cuadroDe(data.cuadro),
   } };
+}
+
+type LadoCrudo = { parejaId?: unknown; nombre?: unknown } | null | undefined;
+const ladoDe = (l: LadoCrudo) => (l && typeof l.nombre === 'string' && typeof l.parejaId === 'string'
+  ? { parejaId: l.parejaId, nombre: l.nombre, jugadores: jugadoresDe(l.nombre) } : null);
+
+/** El `cuadro` que devuelve arbitro_entrar en la v37 (en la v36 no viene). */
+export function cuadroDe(x: unknown): PartidoArbitrado | null {
+  if (!x || typeof x !== 'object') return null;
+  const c = x as { fase?: unknown; titulo?: unknown; a?: LadoCrudo; b?: LadoCrudo };
+  if (c.fase !== 'grupo' && c.fase !== 'llave') return null;
+  return { fase: c.fase, titulo: typeof c.titulo === 'string' ? c.titulo : '', a: ladoDe(c.a), b: ladoDe(c.b), jugado: false };
 }
 
 export async function marcar(codigo: string, version: number, jugadas: Jugada[], marcador: Marcador): Promise<Respuesta> {

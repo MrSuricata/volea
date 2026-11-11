@@ -17,6 +17,17 @@ export function nombreJugador(jugadores: string[], i: 0 | 1): string {
   return jugadores.length >= 2 ? jugadores[i] : `Jugador ${i + 1}`;
 }
 
+const ARTICULOS = new Set(['los', 'las', 'el', 'la', 'the', 'os', 'as', 'o', 'a', 'les', 'del', 'de']);
+
+/** Nombre corto del equipo para botones chicos ("Tiempo Ana"): primer nombre del primer jugador o, si
+ *  la pareja no se separa, la primera palabra que no sea un artículo ("LOS TIGRES" → "TIGRES"). */
+export function nombreCorto(nombre: string): string {
+  const jug = jugadoresDe(nombre);
+  if (jug.length >= 2) return jug[0].split(/\s+/)[0];
+  const palabras = nombre.trim().split(/\s+/).filter(Boolean);
+  return palabras.find((w) => !ARTICULOS.has(w.toLowerCase())) ?? palabras[0] ?? nombre;
+}
+
 /** Resultado del partido en el cuadro (para comprobar si un "Terminar" sin respuesta llegó igual). */
 export function resultadoEnCuadro(t: Torneo, partidoId: string): { puntosA: number; puntosB: number; games?: { a: number; b: number }[] } | null {
   const p = t.partidosGrupo.find((x) => x.id === partidoId) ?? (t.partidosLlave ?? []).find((x) => x.id === partidoId);

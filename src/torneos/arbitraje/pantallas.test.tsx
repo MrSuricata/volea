@@ -83,6 +83,16 @@ describe('recargar la página en medio del partido (sin red)', () => {
   });
 });
 
+describe('partido terminado', () => {
+  it('el resultado se lee desde el ganador y desaparecen el canto y el "Saca"', () => {
+    guardado([{ ...ini, saca: 'B' }, ...Array.from({ length: 15 }, () => r('B'))], lados('A Y B', 'C Y D', ['A', 'B'], ['C', 'D']));
+    const html = renderToStaticMarkup(<ArbitroPage />);
+    expect(html).toContain('Ganó C Y D · 15-0');
+    expect(html).not.toMatch(/>Saca /);
+    expect(html).not.toContain('15-0-');
+  });
+});
+
 describe('pantalla de inicio', () => {
   it('muestra el formato de la organización y las opciones quedan escondidas', () => {
     guardado([], lados('A Y B', 'C Y D', ['A', 'B'], ['C', 'D']), { tipo: 'sideout', a: 11, mejorDe: 3 });

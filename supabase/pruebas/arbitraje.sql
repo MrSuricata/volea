@@ -251,12 +251,21 @@ SELECT pg_temp.ok('A5 entrar también lo informa', arbitro_entrar(pg_temp.cod('t
 SELECT pg_temp.ok('A8 entrar informa que el cruce todavía no tiene rivales (f depende de s2)', (arbitro_entrar(pg_temp.cod('t1', 'f'))->>'rivales')::boolean = false);
 SELECT pg_temp.ok('A8 resolución de lugares: bye pasa, perdedor de un bye no existe',
   (arbitro_entrar(pg_temp.cod('t1', 'x2'))->>'rivales')::boolean AND NOT (arbitro_entrar(pg_temp.cod('t1', 'x3'))->>'rivales')::boolean);
+SELECT pg_temp.ok('A8 entrar trae los nombres aunque el torneo no se pueda leer (cuadro), con el rival que falta en null',
+  (SELECT r->'cuadro' = '{"fase":"llave","titulo":"Ronda 2","a":{"parejaId":"p1","nombre":"A y B"},"b":null}'
+     FROM (SELECT arbitro_entrar(pg_temp.cod('t1', 'f')) r) s));
+SELECT pg_temp.ok('cuadro de un partido de grupo y del lugar que viene de un bye',
+  (SELECT r->'cuadro' = '{"fase":"grupo","titulo":"Grupo A · Ronda 2","a":{"parejaId":"p1","nombre":"A y B"},"b":{"parejaId":"p3","nombre":"E y F"}}'
+     FROM (SELECT arbitro_entrar(pg_temp.cod('t1', 'm3')) r) s)
+  AND (SELECT r->'cuadro'->'a'->>'parejaId' = 'p4' FROM (SELECT arbitro_entrar(pg_temp.cod('t1', 'x2')) r) s));
 SELECT arbitro_marcar(pg_temp.cod('t1', 'f'), 0, pg_temp.j('A', pg_temp.rep(11, 'A')), pg_temp.m('{"tipo":"rally","a":11,"mejorDe":1}', pg_temp.j('A', pg_temp.rep(11, 'A'))));
 SELECT pg_temp.ok('A8 terminar un cruce sin los dos rivales definidos → rechazo',
   arbitro_terminar(pg_temp.cod('t1', 'f'), 1, pg_temp.j('A', pg_temp.rep(11, 'A')), NULL, '{"puntosA":11,"puntosB":0}')->>'error' = 'Todavía no están definidos los dos rivales de este cruce.');
 UPDATE rk_torneos SET data = jsonb_set(data, '{partidosLlave,1}', (data->'partidosLlave'->1) || '{"puntosA":11,"puntosB":7}') WHERE id = 't1';
 SELECT arbitro_terminar(pg_temp.cod('t1', 'f'), 1, pg_temp.j('A', pg_temp.rep(11, 'A')), NULL, '{"puntosA":11,"puntosB":0}') AS r \gset
 SELECT pg_temp.ok('A8 con s2 jugado, la final se puede cerrar', (:'r'::jsonb->>'ok')::boolean AND pg_temp.elem('t1', 'f')->>'puntosA' = '11');
+SELECT pg_temp.ok('con s2 jugado, la final ya nombra a los dos (ganador de s1 y de s2)',
+  (SELECT r->'cuadro'->'a'->>'parejaId' = 'p1' AND r->'cuadro'->'b'->>'parejaId' = 'p2' FROM (SELECT arbitro_entrar(pg_temp.cod('t1', 'f')) r) s));
 
 -- ------------------------------------------------------------------ mejor de 3 completo
 SELECT arbitro_marcar(pg_temp.cod('t1', 'm3'), 0, pg_temp.j('A', pg_temp.rep(11, 'A') || pg_temp.rep(11, 'B') || pg_temp.rep(10, 'A') || pg_temp.rep(10, 'B') || 'BB'),

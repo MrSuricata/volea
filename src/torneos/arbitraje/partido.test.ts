@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Torneo } from '../engine/tipos';
-import { esDobles, formatoDe, jugadoresDe, ladosDelPartido, nombreJugador, partidosArbitrables, resultadoEnCuadro } from './partido';
+import { esDobles, formatoDe, jugadoresDe, ladosDelPartido, nombreCorto, nombreJugador, partidosArbitrables, resultadoEnCuadro } from './partido';
 
 const torneo = (c: Partial<Torneo> = {}): Torneo => ({
   id: 't', nombre: 'MIXTO A', creadoEl: '2026-10-27', fase: 'llave',
@@ -75,5 +75,14 @@ describe('resultado en el cuadro', () => {
     expect(resultadoEnCuadro(torneo(), 's1')).toEqual({ puntosA: 15, puntosB: 9 });
     expect(resultadoEnCuadro(torneo(), 'm1')).toBeNull();
     expect(resultadoEnCuadro(torneo(), 'no-existe')).toBeNull();
+  });
+});
+
+describe('nombre corto del equipo (botón de Tiempo)', () => {
+  it('primer nombre del primer jugador, o la primera palabra que no es artículo', () => {
+    expect(nombreCorto('Ana Pérez y Luis Gómez')).toBe('Ana');
+    expect(nombreCorto('João Silva e Maria Souza')).toBe('João');
+    expect(nombreCorto('LOS TIGRES DEL NORTE')).toBe('TIGRES');
+    expect(nombreCorto('Equipo A')).toBe('Equipo');
   });
 });
