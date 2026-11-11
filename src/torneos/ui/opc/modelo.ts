@@ -2,7 +2,8 @@
 // Nada de React acá: la pantalla (ControlOpc) solo dibuja lo que sale de estas funciones.
 import type { PartidoLlave, SlotLlave } from '../../engine/tipos';
 import { resultadoValido } from '../../engine/tipos';
-import { borradosSiCorrijo, cargarResultadoLlave, ganadorPartido, podio, resolverSlot } from '../../engine/llave';
+import { cargarResultadoLlave, ganadorPartido, podio, resolverSlot } from '../../engine/llave';
+import { realesBorrados, resolverAusentes } from './ausentes';
 
 export type EstadoCruce = 'esperando' | 'listo' | 'jugado';
 
@@ -19,6 +20,15 @@ export type Cruce = {
   idB: string | null;
   ganador: string | null;
   estado: EstadoCruce;
+  /** Resuelto por W.O. (alguien no se presentó): cuenta como resuelto, pero no se jugó. */
+  wo: boolean;
+  /**
+   * Si el jugador de cada lado figura, EN ESTE CRUCE, como que no se presentó: está marcado
+   * ausente y el cruce no se jugó de verdad. En un W.O. el que pasa solo figura ausente si nunca
+   * jugó un cruce (pasó contra otro ausente); si jugó y faltó después, ese W.O. lo ganó presente.
+   */
+  ausenteA: boolean;
+  ausenteB: boolean;
 };
 
 export type Ronda = {
@@ -27,7 +37,10 @@ export type Ronda = {
   /** Jugadores vivos al arrancar la ronda (los que juegan + el que pasa directo). */
   vivos: number;
   cruces: Cruce[];
+  /** Cruces resueltos (jugados + por W.O.). */
   jugados: number;
+  /** De esos, cuántos por W.O. */
+  porWo: number;
   /** Quién pasa directo a la ronda siguiente sin jugar esta (número impar). */
   pasaDirecto: { slot: SlotLlave; id: string | null } | null;
 };
@@ -37,11 +50,17 @@ export type ModeloOpc = {
   /** Todos los cruces en orden de juego (ronda, posición). */
   cruces: Cruce[];
   total: number;
+  /** Cruces resueltos (jugados + por W.O.): lo que ya no falta. */
   jugados: number;
+  porWo: number;
   /** Primera ronda con cruces sin resultado (la final si ya está todo). */
   rondaActual: number;
   campeon: string | null;
   subcampeon: string | null;
+  /** La final se resolvió por W.O. (el subcampeón no se presentó). */
+  finalPorWo: boolean;
+  /** Los que no se presentaron (parejaIds). */
+  ausentes: string[];
 };
 
 const ordenar = (a: PartidoLlave, b: PartidoLlave) => a.ronda - b.ronda || a.posicion - b.posicion;
@@ -56,7 +75,14 @@ export function nombreRonda(vivos: number, ronda: number): string {
   return `Ronda ${ronda}`;
 }
 
-export function armarModelo(partidos: PartidoLlave[]): ModeloOpc {
+export function armarModelo(partidos: PartidoLlave[], ausentes: readonly string[] = []): ModeloOpc {
+  const aus = new Set(ausentes);
+  // Los que jugaron al menos un cruce de verdad (con resultado y sin W.O.).
+  const jugaron = new Set<string>();
+  for (const p of partidos) {
+    if (p.wo || !resultadoValido(p.puntosA, p.puntosB)) continue;
+    for (const s of [p.a, p.b]) { const id = resolverSlot(s, partidos); if (id) jugaron.add(id); }
+  }
   const reales = partidos.filter((p) => !p.esTercerPuesto).sort(ordenar);
   const rondaDe = new Map(reales.map((p) => [p.id, p.ronda]));
   const numeros = [...new Set(reales.map((p) => p.ronda))].sort((a, b) => a - b);
@@ -71,8 +97,13 @@ export function armarModelo(partidos: PartidoLlave[]): ModeloOpc {
       const ganador = ganadorPartido(p, partidos);
       const jugado = resultadoValido(p.puntosA, p.puntosB) && ganador !== null;
       const estado: EstadoCruce = jugado ? 'jugado' : idA !== null && idB !== null ? 'listo' : 'esperando';
+      const wo = jugado && !!p.wo;
+      const figura = (id: string | null) => id !== null && aus.has(id) && (!jugado || (wo && (id !== ganador || !jugaron.has(id))));
       orden += 1;
-      return { partido: p, ronda: r, numero: i + 1, deRonda: deRonda.length, orden, idA, idB, ganador, estado };
+      return {
+        partido: p, ronda: r, numero: i + 1, deRonda: deRonda.length, orden, idA, idB, ganador, estado,
+        wo, ausenteA: figura(idA), ausenteB: figura(idB),
+      };
     });
     // Pasa directo: el lugar de la ronda siguiente que no sale de un cruce de ESTA ronda.
     const siguiente = reales.filter((p) => p.ronda === r + 1);
@@ -85,18 +116,29 @@ export function armarModelo(partidos: PartidoLlave[]): ModeloOpc {
       }
     }
     const vivos = deRonda.length * 2 + (pasaDirecto ? 1 : 0);
-    rondas.push({ ronda: r, nombre: nombreRonda(vivos, r), vivos, cruces: lista, jugados: lista.filter((c) => c.estado === 'jugado').length, pasaDirecto });
+    rondas.push({
+      ronda: r, nombre: nombreRonda(vivos, r), vivos, cruces: lista,
+      jugados: lista.filter((c) => c.estado === 'jugado').length, porWo: lista.filter((c) => c.wo).length, pasaDirecto,
+    });
     cruces.push(...lista);
   }
   const jugados = cruces.filter((c) => c.estado === 'jugado').length;
   const rondaActual = rondas.find((r) => r.jugados < r.cruces.length)?.ronda ?? numeros[numeros.length - 1] ?? 1;
   const { campeon, subcampeon } = podio(partidos);
-  return { rondas, cruces, total: cruces.length, jugados, rondaActual, campeon, subcampeon };
+  const final = cruces[cruces.length - 1];
+  return {
+    rondas, cruces, total: cruces.length, jugados, porWo: cruces.filter((c) => c.wo).length, rondaActual, campeon, subcampeon,
+    finalPorWo: campeon !== null && !!final?.wo, ausentes: [...aus],
+  };
 }
 
-/** Próximo cruce para jugar (listo, sin resultado) después de `desdeId` en el orden de juego; da la vuelta. */
+/**
+ * Próximo cruce para jugar (listo, sin resultado) después de `desdeId` en el orden de juego; da la
+ * vuelta. Nunca uno con un ausente (se resuelve solo por W.O.; si todavía no se resolvió, tampoco
+ * se lo propone).
+ */
 export function proximoListo(modelo: ModeloOpc, desdeId: string | null, excluir: string[] = []): Cruce | null {
-  const listos = modelo.cruces.filter((c) => c.estado === 'listo' && !excluir.includes(c.partido.id));
+  const listos = modelo.cruces.filter((c) => c.estado === 'listo' && !c.ausenteA && !c.ausenteB && !excluir.includes(c.partido.id));
   if (listos.length === 0) return null;
   const i = desdeId ? modelo.cruces.findIndex((c) => c.partido.id === desdeId) : -1;
   return listos.find((c) => c.orden - 1 > i) ?? listos[0];
@@ -127,16 +169,23 @@ export function marcaDe(lado: 'a' | 'b' | null): Marca {
   return lado === 'a' ? { puntosA: 1, puntosB: 0 } : { puntosA: 0, puntosB: 1 };
 }
 
-/** Cuántos resultados posteriores se borrarían con esta marca (para pedir confirmación). */
-export function borradosSiMarco(partidos: PartidoLlave[], partidoId: string, lado: 'a' | 'b' | null): number {
-  const m = marcaDe(lado);
-  return borradosSiCorrijo(partidos, partidoId, m.puntosA, m.puntosB);
+/**
+ * Cuántos resultados JUGADOS posteriores se borrarían con esta marca (para pedir confirmación).
+ * Los W.O. automáticos que dependían de él no cuentan: se vuelven a resolver solos.
+ */
+export function borradosSiMarco(partidos: PartidoLlave[], partidoId: string, lado: 'a' | 'b' | null, ausentes: readonly string[] = []): number {
+  const despues = marcar(partidos, partidoId, lado, '', ausentes);
+  return realesBorrados(partidos, despues).filter((p) => p.id !== partidoId).length;
 }
 
-/** Aplica el toque (puro: va dentro del updater de `actualizar`). */
-export function marcar(partidos: PartidoLlave[], partidoId: string, lado: 'a' | 'b' | null, ahora: string): PartidoLlave[] {
+/**
+ * Aplica el toque (puro: va dentro del updater de `actualizar`). Con `ausentes`, después del
+ * toque se resuelven por W.O. los cruces que quedaron listos con un ausente (nunca queda uno
+ * esperando un toque).
+ */
+export function marcar(partidos: PartidoLlave[], partidoId: string, lado: 'a' | 'b' | null, ahora: string, ausentes: readonly string[] = []): PartidoLlave[] {
   const m = marcaDe(lado);
-  return cargarResultadoLlave(partidos, partidoId, m.puntosA, m.puntosB).partidos.map((p) => {
+  const marcados = cargarResultadoLlave(partidos, partidoId, m.puntosA, m.puntosB).partidos.map((p) => {
     if (p.id !== partidoId) return p;
     if (lado === null) {
       const { cargadoEl: _c, ...resto } = p;
@@ -144,6 +193,7 @@ export function marcar(partidos: PartidoLlave[], partidoId: string, lado: 'a' | 
     }
     return p.cargadoEl ? p : { ...p, cargadoEl: ahora };
   });
+  return resolverAusentes(marcados, ausentes);
 }
 
 /**

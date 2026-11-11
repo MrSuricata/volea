@@ -31,7 +31,9 @@ export type Choque = {
 export type ResultadoFusion = { ok: true; torneo: Torneo } | { ok: false; choques: Choque[] };
 
 // Campos del torneo que se fusionan uno por uno (no cambian qué partidos hay ni entre quiénes).
-const CAMPOS_SUELTOS = new Set(['nombre', 'fase', 'visible', 'categoria', 'cuentaParaRanking', 'evento', 'canchas', 'arbitraje']);
+// `ausentes` (OPC: los que no se presentaron) también es suelto, pero se fusiona como conjunto
+// (fusionarAusentes): dos equipos que marcan a distintos ausentes no chocan.
+const CAMPOS_SUELTOS = new Set(['nombre', 'fase', 'visible', 'categoria', 'cuentaParaRanking', 'evento', 'canchas', 'arbitraje', 'ausentes']);
 const LISTAS = ['partidosGrupo', 'partidosLlave'] as const;
 // Campos de un partido que son "el resultado"; todo lo demás del partido es estructura.
 const CAMPOS_RESULTADO = ['puntosA', 'puntosB', 'wo', 'games'] as const;
@@ -65,6 +67,18 @@ export function igualesJson(a: unknown, b: unknown): boolean {
 }
 
 type Partido = PartidoGrupo | PartidoLlave;
+
+// Fusión de tres vías de un conjunto de ids: está si los dos lados lo tienen, o si lo agregó uno
+// (no estaba en la base). Lo que uno sacó y el otro no tocó, sale. Vacío ⇒ sin el campo.
+function fusionarAusentes(base: unknown, local: unknown, remoto: unknown): string[] | undefined {
+  const lista = (x: unknown) => (Array.isArray(x) ? x.filter((v): v is string => typeof v === 'string') : []);
+  const b = new Set(lista(base));
+  const l = new Set(lista(local));
+  const r = new Set(lista(remoto));
+  const todos = [...new Set([...lista(local), ...lista(remoto)])];
+  const salida = todos.filter((x) => (b.has(x) ? l.has(x) && r.has(x) : l.has(x) || r.has(x)));
+  return salida.length > 0 ? salida : undefined;
+}
 
 function resultado(p: Partido | undefined): Record<string, unknown> {
   const r: Record<string, unknown> = {};
@@ -182,6 +196,7 @@ function fusionarSinMemo(base: Torneo, local: Torneo, remoto: Torneo, opciones: 
   const sueltos: Record<string, unknown> = {};
   for (const k of claves) {
     if (!CAMPOS_SUELTOS.has(k)) continue;
+    if (k === 'ausentes') { sueltos[k] = fusionarAusentes(rb[k], rl[k], rr[k]); continue; }
     if (igualesJson(rl[k], rb[k])) sueltos[k] = rr[k];
     else if (igualesJson(rr[k], rb[k]) || igualesJson(rl[k], rr[k]) || preferirLocal) sueltos[k] = rl[k];
     else choques.push({ descripcion: `Cambiaron ${ETIQUETA_CAMPO[k] ?? k} acá y en el otro dispositivo` });

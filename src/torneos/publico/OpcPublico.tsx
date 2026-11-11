@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PartidoLlave, SlotLlave, Torneo } from '../engine/tipos';
 import { nombreDe } from '../ui/util';
 import { armarModelo, describirLugar, proximoListo, type Cruce, type ModeloOpc, type Ronda } from '../ui/opc/modelo';
+import { ausentesDe } from '../ui/opc/ausentes';
 
 // Vista pública del One Point Challenge (/torneos/:id de un torneo individual), pensada para el
 // público que mira desde el celular: arriba un resumen (en qué ronda va, cuántos cruces faltan,
@@ -36,7 +37,9 @@ const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno
 
 export default function OpcPublico({ torneo }: { torneo: Torneo }) {
   const partidos = torneo.partidosLlave as PartidoLlave[];
-  const modelo = useMemo(() => armarModelo(partidos), [partidos]);
+  const ausentes = torneo.ausentes;
+  const parejas = torneo.parejas;
+  const modelo = useMemo(() => armarModelo(partidos, ausentesDe({ ausentes, parejas })), [partidos, ausentes, parejas]);
   const recuerdo = useMemo(() => leer(torneo.id), [torneo.id]);
   const [vista, setVista] = useState<Vista>(recuerdo.vista ?? 'ronda');
   // null = seguir la ronda en juego (se mueve sola con los refrescos hasta que el usuario elige una)
@@ -98,6 +101,11 @@ function Resumen({ torneo, modelo, proximo }: { torneo: Torneo; modelo: ModeloOp
         <div className="opc-pub-trofeo" aria-hidden>🏆</div>
         <p className="opc-pub-rotulo">Campeón</p>
         <h2 className="opc-pub-nombre" data-campeon>{nombre(modelo.campeon)}</h2>
+        {modelo.finalPorWo && modelo.subcampeon && (
+          <p className="opc-pub-wo-final" data-final-wo>
+            Campeón por W.O.: <strong className="opc-pub-nombre">{nombre(modelo.subcampeon)}</strong> no se presentó a la final
+          </p>
+        )}
         {modelo.subcampeon && (
           <p className="opc-pub-sub">
             <span aria-hidden>🥈</span> <span className="opc-pub-sub-rotulo">Subcampeón</span>{' '}
@@ -122,7 +130,7 @@ function Resumen({ torneo, modelo, proximo }: { torneo: Torneo; modelo: ModeloOp
       <p className="opc-pub-detalle">
         {sinEmpezar
           ? `${plural(torneo.parejas.length, 'jugador', 'jugadores')} · ${plural(modelo.total, 'cruce', 'cruces')} a un punto`
-          : `${modelo.jugados} de ${modelo.total} cruces jugados`}
+          : `${modelo.jugados} de ${modelo.total} cruces jugados${modelo.porWo > 0 ? ` (${modelo.porWo} por W.O.)` : ''}`}
       </p>
       <div className="opc-pub-barra" role="progressbar" aria-valuemin={0} aria-valuemax={modelo.total} aria-valuenow={modelo.jugados} aria-label="Cruces jugados">
         <span style={{ width: `${pct}%` }} />
@@ -176,15 +184,26 @@ function PasaDirecto({ torneo, modelo, ronda, compacto = false }: { torneo: Torn
       <span>
         <strong className="opc-pub-nombre">{quien}</strong> pasa directo a la {sig ? sig.nombre.replace(/^Ronda/, 'ronda') : 'ronda siguiente'}
         {!compacto && <> (son impares: no juega la {ronda.nombre.replace(/^Ronda/, 'ronda')})</>}
+        {ronda.pasaDirecto.id && modelo.ausentes.includes(ronda.pasaDirecto.id) && <> · <span className="opc-pub-no-vino">No se presentó</span></>}
       </span>
     </p>
   );
 }
 
+/** "X pasa — Y no se presentó" (o "No se presentó ninguno: sigue X…") de un cruce resuelto por W.O. */
+function textoWo(torneo: Torneo, c: Cruce): string | null {
+  if (!c.wo || !c.ganador || !c.idA || !c.idB) return null;
+  const perdedor = c.ganador === c.idA ? c.idB : c.idA;
+  const n = (id: string) => nombreDe(torneo, id);
+  if (c.ausenteA && c.ausenteB) return `No se presentó ninguno de los dos: sigue ${n(c.ganador)}, que también pierde su próximo cruce por W.O.`;
+  return `${n(c.ganador)} pasa — ${n(perdedor)} no se presentó`;
+}
+
 function CajaCruce({ torneo, modelo, ronda, cruce, proximo }: { torneo: Torneo; modelo: ModeloOpc; ronda: Ronda; cruce: Cruce; proximo: boolean }) {
-  const estado = cruce.estado === 'jugado' ? 'Jugado' : proximo ? 'Próximo' : cruce.estado === 'listo' ? 'Por jugar' : 'Esperando';
+  const estado = cruce.wo ? 'W.O.' : cruce.estado === 'jugado' ? 'Jugado' : proximo ? 'Próximo' : cruce.estado === 'listo' ? 'Por jugar' : 'Esperando';
+  const wo = textoWo(torneo, cruce);
   return (
-    <div className={`opc-pub-cruce ${cruce.estado}${proximo ? ' proximo' : ''}`} data-cruce={cruce.numero}>
+    <div className={`opc-pub-cruce ${cruce.estado}${cruce.wo ? ' wo' : ''}${proximo ? ' proximo' : ''}`} data-cruce={cruce.numero} data-wo={cruce.wo || undefined}>
       <div className="opc-pub-cruce-cabeza">
         <span>Cruce {cruce.numero}</span>
         <span className="opc-pub-chip">{estado}</span>
@@ -194,17 +213,21 @@ function CajaCruce({ torneo, modelo, ronda, cruce, proximo }: { torneo: Torneo; 
         const slot = lado === 'a' ? cruce.partido.a : cruce.partido.b;
         const gano = cruce.estado === 'jugado' && id !== null && cruce.ganador === id;
         const perdio = cruce.estado === 'jugado' && id !== null && cruce.ganador !== id;
+        const ausente = lado === 'a' ? cruce.ausenteA : cruce.ausenteB;
         const directo = vieneDirecto(modelo, ronda, slot);
+        const clase = `opc-pub-lado${gano ? ' gano' : ''}${perdio ? ' perdio' : ''}${ausente ? ' ausente' : ''}${id ? '' : ' a-definir'}`;
         return (
-          <div key={lado} className={`opc-pub-lado${gano ? ' gano' : ''}${perdio ? ' perdio' : ''}${id ? '' : ' a-definir'}`} data-gano={gano || undefined}>
+          <div key={lado} className={clase} data-gano={(gano && !cruce.wo) || undefined} data-ausente={ausente || undefined}>
             <span className="opc-pub-lado-texto">
               <span className="opc-pub-nombre">{id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}</span>
               {directo && <span className="opc-pub-viene">pasó directo de la {directo.nombre.replace(/^Ronda/, 'ronda')}</span>}
+              {ausente && <span className="opc-pub-no-vino">No se presentó</span>}
             </span>
-            {gano && <span className="opc-pub-gano"><span aria-hidden>✓</span> Ganó</span>}
+            {gano && (cruce.wo ? <span className="opc-pub-pasa">Pasa</span> : <span className="opc-pub-gano"><span aria-hidden>✓</span> Ganó</span>)}
           </div>
         );
       })}
+      {wo && <p className="opc-pub-wo">{wo}</p>}
     </div>
   );
 }

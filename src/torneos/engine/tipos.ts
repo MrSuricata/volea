@@ -90,6 +90,9 @@ export type Torneo = {
   formatoLlave?: 'final' | 'semis' | 'cruces' | 'libre';
   // Formato del tanteador de árbitros: uno para la fase de grupos y otro para la llave.
   arbitraje?: { grupos?: FormatoArbitraje; llave?: FormatoArbitraje };
+  // One Point Challenge: parejaIds de los que no se presentaron. Sus cruces listos se resuelven
+  // solos por W.O. a favor del rival (ver ui/opc/ausentes). Ausente o vacío ⇒ como siempre.
+  ausentes?: string[];
 };
 
 export function nuevoId(): string {

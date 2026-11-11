@@ -38,8 +38,17 @@ export function escalonEnLlave(partidos: PartidoLlave[], parejaId: string): Esca
   return escalonPorDistancia(maxRonda - peor);
 }
 
+// ¿Jugó de verdad algún cruce de la llave? (con resultado y sin W.O.)
+function jugoEnLlave(partidos: PartidoLlave[], parejaId: string): boolean {
+  return partidos.some((p) => !p.wo && ganadorPartido(p, partidos) !== null && p.a !== null && p.b !== null
+    && (resolverSlot(p.a, partidos) === parejaId || resolverSlot(p.b, partidos) === parejaId));
+}
+
 export function escalonDePareja(torneo: Torneo, parejaId: string): Escalon {
   if (torneo.partidosLlave && torneo.partidosLlave.length > 0) {
+    // One Point Challenge: el que no se presentó y no jugó ningún cruce de verdad no cobra el
+    // escalón al que lo llevaron los W.O. (p. ej. "pasó" contra otro ausente): participó.
+    if (torneo.ausentes?.includes(parejaId) && !jugoEnLlave(torneo.partidosLlave, parejaId)) return 'PARTICIPO';
     return escalonEnLlave(torneo.partidosLlave, parejaId);
   }
   // sin llave: solo tiene sentido "campeon" en grupo unico terminado

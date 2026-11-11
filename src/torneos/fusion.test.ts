@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PartidoGrupo, PartidoLlave, Torneo } from './engine/tipos';
 import { describirPartido, fusionarTorneo, igualesJson } from './fusion';
+import { armarLlaveRolling } from './engine/llaveIndividual';
+import { conAusente } from './ui/opc/ausentes';
+import { marcar } from './ui/opc/modelo';
 
 // Torneo de prueba: 4 parejas, un grupo de todos contra todos y una llave de semis + final +
 // tercer puesto (s1: P1 vs P4, s2: P2 vs P3, final: ganadores, t3: perdedores).
@@ -317,5 +320,68 @@ describe('describirPartido', () => {
     expect(describirPartido(t, 's2')).toBe('Semifinal: Dos/Dos vs Tres/Tres');
     expect(describirPartido(t, 'f')).toBe('Final: Uno/Uno vs a definir');
     expect(describirPartido(t, 't3')).toBe('Tercer puesto: Cuatro/Cuatro vs a definir');
+  });
+});
+
+// One Point Challenge: `ausentes` (los que no se presentaron) es un dato suelto que se fusiona
+// como conjunto; los W.O. que genera son resultados y se fusionan partido por partido.
+describe('fusionarTorneo: ausentes del One Point Challenge', () => {
+  function opc(): Torneo {
+    const ids = ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8'];
+    return {
+      id: 'opc', nombre: 'OPC', creadoEl: '2026-11-11T10:00:00.000Z', formato: 'individual', fase: 'llave',
+      parejas: ids.map((id) => ({ id, nombre: id.toUpperCase() })), grupos: [], partidosGrupo: [], configLlave: null,
+      partidosLlave: armarLlaveRolling(ids),
+    };
+  }
+  const r1 = (t: Torneo, k: number) => t.partidosLlave!.filter((p) => p.ronda === 1)[k];
+  const tocar = (t: Torneo, k: number): Torneo => ({ ...t, partidosLlave: marcar(t.partidosLlave!, r1(t, k).id, 'a', '2026-11-11T12:00:00.000Z', t.ausentes ?? []) });
+
+  it('ausente marcado acá y resultado cargado en el server: se combinan sin choque de estructura', () => {
+    const base = opc();
+    const local = conAusente(copia(base), 'j1', true);
+    const remoto = tocar(copia(base), 1);
+    const r = fusionarTorneo(base, local, remoto);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.torneo.ausentes).toEqual(['j1']);
+    expect([r1(r.torneo, 0).puntosB, r1(r.torneo, 0).wo]).toEqual([1, true]);
+    expect(r1(r.torneo, 1).puntosA).toBe(1);
+    // y al revés (el ausente vino del server)
+    const r2 = fusionarTorneo(base, remoto, local);
+    expect(r2.ok && r2.torneo.ausentes).toEqual(['j1']);
+  });
+
+  it('dos equipos marcan a distintos ausentes: quedan los dos (y sus W.O.)', () => {
+    const base = opc();
+    const r = fusionarTorneo(base, conAusente(copia(base), 'j1', true), conAusente(copia(base), 'j4', true));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.torneo.ausentes).toEqual(['j1', 'j4']);
+    expect([r1(r.torneo, 0).wo, r1(r.torneo, 1).wo]).toEqual([true, true]);
+  });
+
+  it('uno desmarca (llegó) y el otro carga otro cruce: el ausente sale y el campo desaparece', () => {
+    const base = conAusente(opc(), 'j1', true);
+    const local = conAusente(copia(base), 'j1', false);
+    const remoto = tocar(copia(base), 2);
+    const r = fusionarTorneo(base, local, remoto);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect('ausentes' in r.torneo).toBe(false);
+    expect(r1(r.torneo, 0).puntosA).toBeNull();
+    expect(r1(r.torneo, 2).puntosA).toBe(1);
+  });
+
+  it('el mismo ausente en los dos lados: sin choque', () => {
+    const base = opc();
+    const r = fusionarTorneo(base, tocar(conAusente(copia(base), 'j1', true), 1), conAusente(copia(base), 'j1', true));
+    expect(r.ok && r.torneo.ausentes).toEqual(['j1']);
+  });
+
+  it('acá se marcó ausente y en el otro dispositivo se jugó ese mismo cruce: CHOQUE (no se adivina)', () => {
+    const base = opc();
+    const r = fusionarTorneo(base, conAusente(copia(base), 'j1', true), tocar(copia(base), 0));
+    expect(r.ok).toBe(false);
   });
 });

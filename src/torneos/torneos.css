@@ -406,6 +406,13 @@
 .rk .opc-pub-lado.a-definir { color: var(--texto-suave); font-style: italic; font-weight: 500; font-size: 0.9rem; }
 .rk .opc-pub-gano { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; background: var(--lima); color: var(--sobre-acento); font-size: 0.72rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
 .rk .opc-pub-viene { font-size: 0.75rem; font-weight: 600; font-style: normal; color: #9ccbee; }
+.rk .opc-pub-lado.ausente .opc-pub-nombre { text-decoration: line-through; text-decoration-thickness: 2px; }
+.rk .opc-pub-lado.ausente { color: var(--texto-suave); }
+.rk .opc-pub-no-vino { font-size: 0.75rem; font-weight: 800; font-style: normal; color: var(--rojo); text-transform: uppercase; letter-spacing: 0.05em; }
+.rk .opc-pub-pasa { flex: 0 0 auto; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--lima); color: var(--lima); font-size: 0.72rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+.rk .opc-pub-cruce.wo .opc-pub-chip { color: var(--rojo); border-color: rgba(255, 107, 129, 0.5); }
+.rk .opc-pub-wo { margin: 0; padding: 6px 12px 8px; font-size: 0.8rem; line-height: 1.3; color: var(--texto-suave); border-top: 1px solid var(--borde); }
+.rk .opc-pub-wo-final { margin: 0 0 10px; color: var(--texto-suave); font-size: 0.92rem; }
 
 /* Cuadro completo: columnas angostas para que la siguiente asome, y un degradé + pista en el
    borde mientras haya más para deslizar. */

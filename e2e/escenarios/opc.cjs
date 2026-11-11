@@ -317,6 +317,303 @@ async function opc13(esc) {
   });
 }
 
-const ESCENARIOS = { 'opc-13-jugadores': opc13 };
+// ─── "No se presentó" ───────────────────────────────────────────────────────────────────────
+// El organizador marca ausentes desde la pantalla de control: Ana en la ronda 1 (pasa su rival
+// solo), Diego y después JuanCarlos (los dos del cruce 2: JuanCarlos ya había pasado por el W.O.
+// de Diego, así que pierde su cruce de la ronda 2 apenas se sabe el rival). Se juega hasta la
+// final, se marca ausente a un finalista (campeón por W.O.), se desmarca a Diego (con la cascada
+// que borra cruces jugados: primero se cancela, después se confirma), se vuelve a jugar hasta el
+// campeón y se mira la vista pública.
 
-module.exports = { ESCENARIOS, simular };
+/** Como simular(), con jugadores que no se presentaron (índices): pierden todo cruce; si son los dos, pasa el de arriba. */
+function simularConAusentes(n, ausentes) {
+  let pool = Array.from({ length: n }, (_, i) => i);
+  const rondas = [];
+  let ronda = 1;
+  while (pool.length > 1) {
+    const cruces = [];
+    let k = 0;
+    for (; k + 1 < pool.length; k += 2) {
+      const [a, b] = [pool[k], pool[k + 1]];
+      const wo = ausentes.has(a) || ausentes.has(b);
+      const gana = !wo ? ganaRegla(a, b) : !ausentes.has(a) || ausentes.has(b) ? a : b;
+      cruces.push({ a, b, gana, wo });
+    }
+    const directo = k < pool.length ? pool[k] : null;
+    rondas.push({ ronda, cruces, directo });
+    pool = directo !== null ? [directo, ...cruces.map((c) => c.gana)] : cruces.map((c) => c.gana);
+    ronda += 1;
+  }
+  return { rondas, final: rondas[rondas.length - 1].cruces[0] };
+}
+
+const resueltos = (t) => t.partidosLlave.filter((p) => p.puntosA !== null).length;
+
+/** Un toque sobre el ganador (regla del oráculo). Puede resolver además W.O. que quedaron listos. */
+async function tocarGanadorAus(esc, page, id, idx) {
+  await irAlProximo(page);
+  const c = await cruceEnPantalla(page);
+  esc.exigir(c.nombres.length === 2, 'el cruce en pantalla tiene a los dos jugadores definidos', c);
+  const [i, j] = c.nombres.map(idx);
+  const antes = resueltos(await g.torneoLocal(page, id));
+  await page.locator('section[aria-label="Cruce"]').getByRole('button', { name: `Ganó ${JUGADORES[ganaRegla(i, j)]}`, exact: true }).click();
+  const t = await esperarEstado(page, id, (x) => resueltos(x) > antes, 5000);
+  esc.exigir(resueltos(t) > antes, `el toque en ${c.ronda} · ${c.titulo} guardó un resultado`, c);
+  await esperar(900);
+}
+
+/** El gesto: "¿No se presentó alguien?" → "No se presentó: X" → confirmar. */
+async function marcarAusente(esc, page, nombre, { captura } = {}) {
+  const sec = page.locator('section[aria-label="Cruce"]');
+  await sec.getByRole('button', { name: '¿No se presentó alguien?' }).click();
+  await sec.getByRole('button', { name: `No se presentó: ${nombre}` }).click();
+  const d = page.getByRole('dialog');
+  await d.waitFor();
+  const msg = await d.innerText();
+  esc.verificar(msg.includes(nombre) && /no se presentó/i.test(msg), `la confirmación nombra a ${nombre}`, msg.slice(0, 200));
+  if (captura) await esc.captura(page, captura, { fullPage: false });
+  await d.getByRole('button', { name: 'No se presentó', exact: true }).click();
+  await d.waitFor({ state: 'detached' });
+}
+
+async function abrirCruceDesdeRonda(page, nombreRonda, numero) {
+  await page.getByRole('radio', { name: 'Ronda', exact: true }).click();
+  const sec = page.locator('section[aria-label="Ronda"]');
+  await sec.getByRole('radio', { name: new RegExp(`^${nombreRonda}`) }).click();
+  await sec.locator(`li[data-cruce="${numero}"]`).getByRole('button', { name: /Ver grande/ }).click();
+  await page.locator('section[aria-label="Cruce"]').waitFor();
+}
+
+/** Revisa la llave guardada: nunca un cruce listo con un ausente y los W.O. a favor del presente. */
+function revisarLlave(esc, t, idDe, nombreDe, etiqueta) {
+  const aus = new Set(t.ausentes || []);
+  const ps = t.partidosLlave;
+  const porId = new Map(ps.map((p) => [p.id, p]));
+  const slot = (s) => {
+    if (!s) return null;
+    if (s.tipo === 'seed') return s.parejaId;
+    const p = porId.get(s.partidoId);
+    return p ? ganador(p) : null;
+  };
+  function ganador(p) {
+    const a = slot(p.a); const b = slot(p.b);
+    if (a === null || b === null || p.puntosA === null || p.puntosB === null) return null;
+    return p.puntosA > p.puntosB ? a : b;
+  }
+  const malos = [];
+  for (const p of ps) {
+    const a = slot(p.a); const b = slot(p.b);
+    if (a === null || b === null) continue;
+    const conAus = aus.has(a) || aus.has(b);
+    if (conAus && p.puntosA === null) malos.push(`listo con ausente: ${nombreDe(a)} vs ${nombreDe(b)}`);
+    if (p.wo && aus.has(a) !== aus.has(b) && aus.has(ganador(p))) malos.push(`W.O. a favor del ausente: ${nombreDe(a)} vs ${nombreDe(b)}`);
+  }
+  esc.verificar(malos.length === 0, `${etiqueta}: ningún cruce listo con un ausente y cada W.O. a favor del que vino`, malos);
+  return { ganador, slot };
+}
+
+async function opcAusentes(esc) {
+  const page = await esc.contexto('admin-celular', CELULAR);
+  const nombre = 'One Point Challenge · Ausentes';
+  const idx = (n) => JUGADORES.indexOf(n);
+  let id;
+  let t;
+  const [ANA, BRUNO, JC, DIEGO] = JUGADORES;
+  let idDe = () => null;
+  let nombreDe = () => '?';
+
+  await esc.paso('login, crear el OPC de 13 y armar la llave', async () => {
+    await g.login(page);
+    id = await crearOpc(page, nombre);
+    await page.getByRole('button', { name: /Pegar lista de jugadores/ }).click();
+    await page.getByLabel('Lista de jugadores, uno por línea').fill(JUGADORES.join('\n'));
+    await page.getByRole('button', { name: 'Agregar jugadores' }).click();
+    await esperarEstado(page, id, (x) => x.parejas.length === 13);
+    await page.getByRole('button', { name: 'Seguir: Llave' }).click();
+    await page.getByRole('button', { name: 'Armar llave', exact: true }).click();
+    t = await esperarEstado(page, id, (x) => Array.isArray(x.partidosLlave) && x.partidosLlave.length === 12);
+    esc.exigir(t.partidosLlave.length === 12, '13 jugadores = 12 cruces');
+    const porNombre = new Map(t.parejas.map((p) => [p.nombre, p.id]));
+    const porId = new Map(t.parejas.map((p) => [p.id, p.nombre]));
+    idDe = (n) => porNombre.get(n);
+    nombreDe = (i) => porId.get(i) || '?';
+    const c = await cruceEnPantalla(page);
+    esc.exigir(c.nombres.join() === [ANA, BRUNO].join(), 'el primer cruce es Ana vs Bruno', c);
+  });
+
+  await esc.paso('Ana no se presentó (ronda 1): Bruno pasa solo, por W.O., y la pantalla sigue al próximo', async () => {
+    await marcarAusente(esc, page, ANA, { captura: 'control-confirmar-ausente' });
+    t = await esperarEstado(page, id, (x) => resueltos(x) === 1, 5000);
+    const r1c1 = t.partidosLlave.find((p) => p.ronda === 1 && p.posicion === 0);
+    esc.exigir(JSON.stringify(t.ausentes) === JSON.stringify([idDe(ANA)]), 'Ana queda en la lista de ausentes', t.ausentes);
+    esc.verificar(r1c1.wo === true && r1c1.puntosA === 0 && r1c1.puntosB === 1, 'el cruce 1 quedó 0-1 por W.O. (pasa Bruno)', r1c1);
+    esc.verificar(!('cargadoEl' in r1c1), 'el W.O. no tiene hora de carga (no es un resultado jugado)', r1c1);
+    const aviso = await page.locator('[data-opc-aviso]').innerText().catch(() => '');
+    esc.verificar(/Bruno Benítez pasa por W\.O\./.test(aviso) && /Ana Acosta no se presentó/.test(aviso), 'el aviso de abajo dice quién pasa y quién no vino', aviso);
+    await esc.captura(page, 'control-ana-wo-aviso', { fullPage: false });
+    await esperar(1200);
+    const c = await cruceEnPantalla(page);
+    esc.verificar(c.nombres.join() === [JC, DIEGO].join(), 'pasó solo al cruce 2 (el del W.O. no frena el avance)', c);
+    const barra = await page.locator('.opc-barra').innerText();
+    esc.verificar(/faltan 11 cruces/.test(barra), 'la barra cuenta el W.O. como resuelto: faltan 11', barra);
+    // volver a mirar el cruce del W.O.
+    await page.locator('section[aria-label="Cruce"]').getByRole('button', { name: /Anterior/ }).click();
+    const wo = await page.locator('[data-opc-wo]').innerText();
+    esc.verificar(/Bruno Benítez pasa por W\.O\.: Ana Acosta no se presentó/.test(wo), 'el cruce dice "Bruno pasa por W.O.: Ana no se presentó"', wo);
+    const ana = page.locator('section[aria-label="Cruce"] [data-ausente]');
+    esc.verificar((await ana.count()) === 1 && /No se presentó/i.test(await ana.innerText()), 'Ana se ve tachada con "No se presentó"');
+    const sigue = await page.locator('section[aria-label="Cruce"]').getByRole('button', { name: /^Para jugar|^Sigue/ }).innerText().catch(() => '');
+    esc.verificar(!sigue.includes(ANA), 'el atajo al próximo no propone a Ana', sigue);
+    await esc.revisarPantalla(page, 'control-cruce-wo');
+  });
+
+  await esc.paso('los dos del cruce 2: Diego no vino (pasa JuanCarlos) y JuanCarlos tampoco (pierde su cruce de la ronda 2)', async () => {
+    await page.locator('section[aria-label="Cruce"]').getByRole('button', { name: /Siguiente/ }).click();
+    await marcarAusente(esc, page, DIEGO);
+    t = await esperarEstado(page, id, (x) => resueltos(x) === 2, 5000);
+    await esperar(1000);
+    // JuanCarlos está en el cruce 2 de la ronda 2, esperando al ganador del cruce 3
+    await abrirCruceDesdeRonda(page, 'Ronda 2', 2);
+    const c = await cruceEnPantalla(page);
+    esc.verificar(c.nombres.includes(JC), 'el cruce 2 de la ronda 2 tiene a JuanCarlos (y espera al otro)', c);
+    await marcarAusente(esc, page, JC);
+    t = await esperarEstado(page, id, (x) => (x.ausentes || []).length === 3, 5000);
+    esc.verificar((t.ausentes || []).length === 3, 'quedan 3 ausentes', t.ausentes);
+    const r2c2 = t.partidosLlave.find((p) => p.ronda === 2 && p.posicion === 1);
+    esc.verificar(r2c2.puntosA === null, 'el cruce de JuanCarlos todavía no se resuelve (falta saber el rival)', r2c2);
+    const txt = await page.locator('section[aria-label="Cruce"]').innerText();
+    esc.verificar(/no se presentó: pierde este cruce por W\.O\. apenas se sepa el rival/.test(txt), 'el cruce en espera avisa que JuanCarlos lo pierde por W.O.', txt.slice(0, 400));
+    await esc.revisarPantalla(page, 'control-ausente-esperando');
+    // vista Ronda 1: los W.O. abajo con los jugados, marcados
+    await page.getByRole('radio', { name: 'Ronda', exact: true }).click();
+    await page.locator('section[aria-label="Ronda"]').getByRole('radio', { name: /^Ronda 1/ }).click();
+    const wos = await page.locator('section[aria-label="Ronda"] li[data-wo]').count();
+    esc.verificar(wos === 2, 'en la vista Ronda los dos W.O. se distinguen', wos);
+    const sep = await page.locator('section[aria-label="Ronda"]').getByRole('separator').innerText();
+    esc.verificar(/2 por W\.O\./i.test(sep), 'el separador dice cuántos fueron por W.O.', sep);
+    const panel = await page.locator('section[aria-label="No se presentaron"]').innerText();
+    esc.verificar([ANA, DIEGO, JC].every((n) => panel.includes(n)), 'el panel "No se presentaron" lista a los tres con "Llegó"', panel);
+    await esc.revisarPantalla(page, 'control-ronda-con-wo');
+    await page.getByRole('radio', { name: 'Cuadro', exact: true }).click();
+    await esc.revisarPantalla(page, 'control-cuadro-con-wo');
+    await page.getByRole('radio', { name: 'Cruce', exact: true }).click();
+  });
+
+  await esc.paso('público a mitad: "X pasa — Y no se presentó" y el próximo nunca es un ausente', async () => {
+    await g.esperarSincronizado(page).catch(() => {});
+    const pub = await abrirPublico(esc, 'publico-ausentes-vivo', CELULAR, id);
+    const resumen = await pub.locator('.opc-pub-resumen').innerText();
+    esc.verificar(![ANA, DIEGO, JC].some((n) => resumen.includes(n)), 'el "Próximo" del público no es un ausente', resumen);
+    await pub.getByRole('tab', { name: /^Ronda 1/ }).click();
+    const c1 = await pub.locator('.opc-pub-cruce[data-cruce="1"]').innerText();
+    esc.verificar(c1.includes(`${BRUNO} pasa — ${ANA} no se presentó`), 'cruce 1: "Bruno pasa — Ana no se presentó"', c1);
+    esc.verificar(!/GANÓ/i.test(c1), 'sin "Ganó" en un cruce que no se jugó', c1);
+    await esc.revisarPantalla(pub, 'publico-ausentes-vivo');
+  });
+
+  let campeonWo;
+  await esc.paso('jugar hasta la final; un finalista no se presenta: campeón por W.O.', async () => {
+    const sim = simularConAusentes(13, new Set([ANA, DIEGO, JC].map(idx)));
+    const esFinal = (p, x) => p.ronda === Math.max(...x.partidosLlave.map((q) => q.ronda));
+    for (let vuelta = 0; vuelta < 20; vuelta++) {
+      t = await g.torneoLocal(page, id);
+      if (t.partidosLlave.filter((p) => !esFinal(p, t)).every((p) => p.puntosA !== null)) break;
+      await tocarGanadorAus(esc, page, id, idx);
+    }
+    t = await g.torneoLocal(page, id);
+    const { slot } = revisarLlave(esc, t, idDe, nombreDe, 'antes de la final');
+    const final = t.partidosLlave.find((p) => esFinal(p, t));
+    const finalistas = [slot(final.a), slot(final.b)].map(nombreDe);
+    const esperados = [JUGADORES[sim.final.a], JUGADORES[sim.final.b]];
+    esc.exigir(finalistas.join() === esperados.join(), 'los finalistas son los del cálculo independiente (con los ausentes)', { app: finalistas, oraculo: esperados });
+    const wosApp = t.partidosLlave.filter((p) => p.wo).length;
+    const wosSim = sim.rondas.flatMap((r) => r.cruces).filter((c) => c.wo && c !== sim.final).length;
+    esc.verificar(wosApp === wosSim, 'los W.O. son los del cálculo', { app: wosApp, oraculo: wosSim });
+    // el que ganaría la final no se presenta
+    const noVino = JUGADORES[ganaRegla(sim.final.a, sim.final.b)];
+    campeonWo = finalistas.find((n) => n !== noVino);
+    await irAlProximo(page);
+    const c = await cruceEnPantalla(page);
+    esc.exigir(c.ronda.toUpperCase() === 'FINAL', 'la pantalla está en la final', c);
+    await marcarAusente(esc, page, noVino);
+    await page.locator('section[aria-label="Podio"]').first().waitFor();
+    const podio = await page.locator('section[aria-label="Podio"]').first().innerText();
+    esc.verificar(podio.toUpperCase().includes(campeonWo.toUpperCase()), 'campeón: el otro finalista', { podio, campeonWo });
+    esc.verificar(/Campeón por W\.O\./.test(podio) && podio.includes(`${noVino} no se presentó a la final`), 'el podio dice que la final fue por W.O.', podio);
+    await esc.revisarPantalla(page, 'control-campeon-por-wo');
+  });
+
+  await esc.paso('Llegó Diego (tarde): avisa qué cruces jugados se borran; cancelar no cambia nada; confirmar deshace', async () => {
+    const antes = await g.torneoLocal(page, id);
+    const panel = page.locator('section[aria-label="No se presentaron"]');
+    await panel.getByRole('button', { name: new RegExp(`^Llegó ${DIEGO}`) }).click();
+    let d = page.getByRole('dialog');
+    await d.waitFor();
+    const msg = await d.innerText();
+    esc.verificar(/BORRA \d+ resultados? jugados?/.test(msg), 'avisa cuántos resultados jugados de verdad se borran', msg.slice(0, 400));
+    await esc.captura(page, 'control-desmarcar-cascada', { fullPage: false });
+    await d.getByRole('button', { name: 'Cancelar' }).click();
+    await d.waitFor({ state: 'detached' });
+    await esperar(400);
+    const igual = await g.torneoLocal(page, id);
+    esc.verificar(JSON.stringify(igual.partidosLlave) === JSON.stringify(antes.partidosLlave) && (igual.ausentes || []).includes(idDe(DIEGO)), 'Cancelar no toca nada (Diego sigue ausente)');
+    await panel.getByRole('button', { name: new RegExp(`^Llegó ${DIEGO}`) }).click();
+    d = page.getByRole('dialog');
+    await d.waitFor();
+    await d.getByRole('button', { name: 'Desmarcar y borrar' }).click();
+    t = await esperarEstado(page, id, (x) => !(x.ausentes || []).includes(idDe(DIEGO)), 5000);
+    esc.exigir(!(t.ausentes || []).includes(idDe(DIEGO)), 'Diego ya no está ausente', t.ausentes);
+    const { ganador } = revisarLlave(esc, t, idDe, nombreDe, 'después de desmarcar');
+    const r1c2 = t.partidosLlave.find((p) => p.ronda === 1 && p.posicion === 1);
+    esc.verificar(r1c2.wo === true && nombreDe(ganador(r1c2)) === DIEGO, 'el cruce 2 ahora lo pasa Diego por W.O. (JuanCarlos sigue ausente)', r1c2);
+    esc.verificar(resueltos(t) < 12, 'se borraron los cruces que dependían del W.O. de Diego', resueltos(t));
+    await esc.revisarPantalla(page, 'control-despues-de-desmarcar');
+  });
+
+  await esc.paso('volver a jugar lo borrado hasta el campeón y dar por terminado', async () => {
+    await page.getByRole('radio', { name: 'Cruce', exact: true }).click();
+    for (let vuelta = 0; vuelta < 20; vuelta++) {
+      t = await g.torneoLocal(page, id);
+      if (t.partidosLlave.every((p) => p.puntosA !== null)) break;
+      await tocarGanadorAus(esc, page, id, idx);
+    }
+    t = await g.torneoLocal(page, id);
+    esc.verificar(t.partidosLlave.every((p) => p.puntosA !== null), 'los 12 cruces quedaron resueltos (jugados o por W.O.)');
+    revisarLlave(esc, t, idDe, nombreDe, 'al final');
+    await page.locator('section[aria-label="Podio"]').first().waitFor();
+    campeonWo = (await page.locator('section[aria-label="Podio"] h2').innerText()).trim();
+    esc.verificar(![ANA, JC].some((n) => n.toUpperCase() === campeonWo.toUpperCase()), 'el campeón no es un ausente', campeonWo);
+    await page.getByRole('button', { name: 'Dar por terminado el torneo' }).click();
+    await esperarEstado(page, id, (x) => x.fase === 'terminado', 5000);
+    await g.esperarSincronizado(page).catch(() => {});
+    await esc.revisarPantalla(page, 'control-ausentes-terminado');
+  });
+
+  await esc.paso('vista pública al final: W.O. sin "Ganó", ausentes marcados y campeón', async () => {
+    const pub = await abrirPublico(esc, 'publico-ausentes-final', CELULAR, id);
+    const campeon = (await pub.locator('[data-campeon]').innerText()).trim();
+    esc.verificar(campeon.toUpperCase() === campeonWo.toUpperCase(), 'la web muestra el mismo campeón', { web: campeon, control: campeonWo });
+    const finalWo = await pub.locator('[data-final-wo]').count();
+    const tt = await g.torneoLocal(page, id);
+    const fin = tt.partidosLlave.reduce((m, p) => (p.ronda > m.ronda ? p : m));
+    esc.verificar(finalWo === (fin.wo ? 1 : 0), 'si la final fue por W.O., el podio lo dice', { finalWo, wo: !!fin.wo });
+    await esc.revisarPantalla(pub, 'publico-ausentes-final');
+    await pub.getByRole('tab', { name: /^Ronda 1/ }).click();
+    const panel = pub.getByRole('tabpanel');
+    const c1 = await panel.locator('.opc-pub-cruce[data-cruce="1"]').innerText();
+    esc.verificar(c1.includes(`${BRUNO} pasa — ${ANA} no se presentó`), 'cruce 1: "Bruno pasa — Ana no se presentó"', c1);
+    const c2 = await panel.locator('.opc-pub-cruce[data-cruce="2"]').innerText();
+    esc.verificar(c2.includes(`${DIEGO} pasa — ${JC} no se presentó`), 'cruce 2 (después de desmarcar): "Diego pasa — JuanCarlos no se presentó"', c2);
+    const ganoEnWo = await panel.locator('[data-wo] [data-gano]').count();
+    esc.verificar(ganoEnWo === 0, 'ningún "Ganó" en cruces por W.O.', ganoEnWo);
+    const jugados = await panel.locator('.opc-pub-cruce:not([data-wo]) [data-gano]').count();
+    esc.verificar(jugados === 4, 'los 4 cruces jugados de la ronda 1 sí dicen "Ganó"', jugados);
+    await esc.revisarPantalla(pub, 'publico-ausentes-ronda1');
+    await pub.getByRole('tab', { name: 'Cuadro completo' }).click();
+    await esc.revisarPantalla(pub, 'publico-ausentes-cuadro');
+  });
+}
+
+const ESCENARIOS = { 'opc-13-jugadores': opc13, 'opc-ausentes': opcAusentes };
+
+module.exports = { ESCENARIOS, simular, simularConAusentes };

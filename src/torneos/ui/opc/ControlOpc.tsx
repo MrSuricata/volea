@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronLeft, ChevronRight, CloudOff, ExternalLink, LayoutGrid, List,
-  Loader2, Medal, RotateCcw, RotateCw, SkipForward, Square, Trophy, Undo2,
+  Loader2, Medal, RotateCcw, RotateCw, SkipForward, Square, Trophy, Undo2, UserCheck, UserX,
 } from 'lucide-react';
 import type { PropsPaso } from '../../TorneosApp';
 import type { PartidoLlave, Torneo } from '../../engine/tipos';
@@ -14,6 +14,7 @@ import {
   armarModelo, borradosSiMarco, cruceInicial, describirLugar, marcar, proximoListo,
   type Cruce, type ModeloOpc, type Ronda,
 } from './modelo';
+import { aplicarAusentes, ausentesDe, borradosSiDesmarco, conAusente } from './ausentes';
 import { guardarLugar, leerLugar, type Vista } from './memoria';
 import { useContextoOpc, type EstadoSyncOpc, type InfoSync } from './contexto';
 import { avanceDe } from '../listaGestor';
@@ -26,15 +27,19 @@ import './opc.css';
 const PAUSA_AVANCE_MS = 700; // después de marcar: se ve el ganador y recién ahí pasa al próximo
 
 type Lado = 'a' | 'b';
-type Aviso = { n: number; texto: string; deshacerId: string | null };
+// deshacer: el resultado de un cruce (un toque) o la marca de un ausente (vuelve a "llegó").
+type Aviso = { n: number; texto: string; deshacer: { tipo: 'resultado' | 'ausente'; id: string } | null };
 
 export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   const dialogos = useDialogos();
   const ctx = useContextoOpc();
   const partidos = torneo.partidosLlave as PartidoLlave[];
-  const modelo = useMemo(() => armarModelo(partidos), [partidos]);
+  const ausentes = useMemo(() => ausentesDe({ ausentes: torneo.ausentes, parejas: torneo.parejas }), [torneo.ausentes, torneo.parejas]);
+  const modelo = useMemo(() => armarModelo(partidos, ausentes), [partidos, ausentes]);
   const partidosRef = useRef(partidos);
   partidosRef.current = partidos;
+  const torneoRef = useRef(torneo);
+  torneoRef.current = torneo;
   const terminadoRef = useRef(torneo.fase === 'terminado');
   terminadoRef.current = torneo.fase === 'terminado';
   const nombre = (id: string) => nombreDe(torneo, id);
@@ -59,9 +64,9 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
     if (timerAviso.current !== null) window.clearTimeout(timerAviso.current);
   }, []);
 
-  function avisar(texto: string, deshacerId: string | null, ms: number) {
+  function avisar(texto: string, deshacer: Aviso['deshacer'], ms: number) {
     if (timerAviso.current !== null) window.clearTimeout(timerAviso.current);
-    setAviso({ n: Date.now(), texto, deshacerId });
+    setAviso({ n: Date.now(), texto, deshacer });
     timerAviso.current = window.setTimeout(() => { timerAviso.current = null; setAviso(null); }, ms);
   }
   function cerrarAviso() {
@@ -77,6 +82,14 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   }
 
   useEffect(() => { guardarLugar(torneo.id, { vista, cruceId, ronda }); }, [torneo.id, vista, cruceId, ronda]);
+
+  // Nunca queda un cruce listo con un ausente esperando un toque: cada toque y cada marca ya lo
+  // resuelven en su updater, pero una versión que llega de otro equipo (fusionada) o una llave
+  // rearmada con ausentes puede traer uno. Idempotente: si no hay nada que resolver no escribe.
+  useEffect(() => {
+    if (torneo.fase === 'terminado' || aplicarAusentes(torneo) === torneo) return;
+    actualizar((t) => (t.fase === 'terminado' ? t : aplicarAusentes(t)));
+  }, [torneo, actualizar]);
 
   const cruce = modelo.cruces.find((c) => c.partido.id === cruceId) ?? cruceInicial(modelo, null);
   cruceIdRef.current = cruce?.partido.id ?? null;
@@ -101,11 +114,11 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
 
   function aplicar(partidoId: string, lado: Lado | null) {
     const ahora = new Date().toISOString();
-    actualizar((t) => ({ ...t, partidosLlave: t.partidosLlave ? marcar(t.partidosLlave, partidoId, lado, ahora) : t.partidosLlave }));
+    actualizar((t) => ({ ...t, partidosLlave: t.partidosLlave ? marcar(t.partidosLlave, partidoId, lado, ahora, ausentesDe(t)) : t.partidosLlave }));
   }
 
   async function confirmarCascada(partidoId: string, lado: Lado | null, titulo: string, mensaje: string, textoConfirmar: string): Promise<boolean> {
-    const borrados = borradosSiMarco(partidosRef.current, partidoId, lado);
+    const borrados = borradosSiMarco(partidosRef.current, partidoId, lado, ausentesDe(torneoRef.current));
     const extra = borrados > 0
       ? ` Eso cambia quién avanzó y BORRA ${borrados} resultado${borrados > 1 ? 's' : ''} de cruces posteriores (hay que volver a jugarlos).`
       : '';
@@ -119,8 +132,8 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
     // Si todavía no pasó al cruce siguiente, ya no pasa: se queda en el que se deshizo.
     cortarPausa();
     const actual = armarModelo(partidosRef.current).cruces.find((c) => c.partido.id === partidoId);
-    if (!actual || actual.estado !== 'jugado') return;
-    if (borradosSiMarco(partidosRef.current, partidoId, null) > 0) {
+    if (!actual || actual.estado !== 'jugado' || actual.wo) return;
+    if (borradosSiMarco(partidosRef.current, partidoId, null, ausentesDe(torneoRef.current)) > 0) {
       const ok = await confirmarCascada(partidoId, null, 'Deshacer resultado', `¿Borrar el resultado de ${nombre(actual.idA!)} vs ${nombre(actual.idB!)}?`, 'Borrar');
       if (!ok) return;
     }
@@ -134,6 +147,8 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
     if (pausaRef.current || terminadoRef.current) return;
     const id = lado === 'a' ? c.idA : c.idB;
     if (!id || c.estado === 'esperando') return;
+    // Un cruce con un ausente se resuelve solo (W.O.): se corrige con "Llegó", no tocando nombres.
+    if (c.wo || c.ausenteA || c.ausenteB) return;
     if (c.estado === 'jugado') {
       if (c.ganador === id) return; // ya es el ganador: nada que hacer
       const otro = lado === 'a' ? c.idB! : c.idA!;
@@ -150,8 +165,14 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
     pausaRef.current = c.partido.id;
     aplicar(c.partido.id, lado);
     // cada toque reemplaza el aviso anterior (no se apilan)
-    avisar(`Ganó ${nombre(id)}`, c.partido.id, 5000);
-    setPausa(c.partido.id);
+    avisar(`Ganó ${nombre(id)}`, { tipo: 'resultado', id: c.partido.id }, 5000);
+    pausarYAvanzar(c.partido.id, avanzar);
+  }
+
+  /** La pausa después de resolver un cruce y, en la vista cruce por cruce, el paso al próximo. */
+  function pausarYAvanzar(partidoId: string, avanzar: boolean) {
+    pausaRef.current = partidoId;
+    setPausa(partidoId);
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
@@ -159,12 +180,56 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
       setPausa(null);
       // Solo si sigue mirando el cruce que marcó (si tocó Anterior/Siguiente o abrió otro en
       // la pausa, no se lo mueve), y con la llave de AHORA: en 0,7 s pudo llegar otra versión.
-      if (!avanzar || cruceIdRef.current !== c.partido.id) return;
-      const despues = armarModelo(partidosRef.current);
-      const prox = proximoListo(despues, c.partido.id);
+      if (!avanzar || cruceIdRef.current !== partidoId) return;
+      const t = torneoRef.current;
+      const despues = armarModelo(t.partidosLlave ?? [], ausentesDe(t));
+      const prox = proximoListo(despues, partidoId);
       const destino = prox ?? despues.cruces[despues.cruces.length - 1];
       if (destino) { setCruceId(destino.partido.id); setRonda(destino.ronda); }
     }, PAUSA_AVANCE_MS);
+  }
+
+  /** "No se presentó": con confirmación corta. El rival pasa por W.O. (si ya se sabe quién es). */
+  async function marcarAusente(c: Cruce, lado: Lado, avanzar: boolean) {
+    if (pausaRef.current || terminadoRef.current) return;
+    const id = lado === 'a' ? c.idA : c.idB;
+    const rival = lado === 'a' ? c.idB : c.idA;
+    if (!id || c.estado === 'jugado') return;
+    const ok = await dialogos.confirmar({
+      titulo: 'No se presentó',
+      mensaje: rival
+        ? `¿${nombre(id)} no se presentó? Pasa ${nombre(rival)} por W.O. Si llega tarde, se desmarca con "Llegó".`
+        : `¿${nombre(id)} no se presentó? Pierde por W.O. su cruce apenas se sepa el rival. Si llega tarde, se desmarca con "Llegó".`,
+      textoConfirmar: 'No se presentó',
+    });
+    if (!ok || terminadoRef.current) return;
+    actualizar((t) => conAusente(t, id, true));
+    avisar(rival ? `${nombre(rival)} pasa por W.O.: ${nombre(id)} no se presentó` : `${nombre(id)}: no se presentó`, { tipo: 'ausente', id }, 5000);
+    if (rival) pausarYAvanzar(c.partido.id, avanzar);
+  }
+
+  /** "Llegó": desmarca al ausente. Si deshacer sus W.O. borra cruces jugados de verdad, lo avisa. */
+  async function desmarcarAusente(id: string) {
+    cerrarAviso();
+    if (terminadoRef.current) return;
+    cortarPausa();
+    const borrados = borradosSiDesmarco(torneoRef.current, id);
+    const t = torneoRef.current;
+    const lista = borrados.map((p) => {
+      const c = armarModelo(t.partidosLlave ?? [], ausentesDe(t)).cruces.find((x) => x.partido.id === p.id);
+      return c && c.idA && c.idB ? `${nombre(c.idA)} vs ${nombre(c.idB)}` : 'un cruce';
+    });
+    const ok = await dialogos.confirmar({
+      titulo: `Llegó ${nombre(id)}`,
+      mensaje: borrados.length > 0
+        ? `Se borra su W.O. y eso cambia quién avanzó: BORRA ${borrados.length} resultado${borrados.length > 1 ? 's' : ''} jugado${borrados.length > 1 ? 's' : ''} (${lista.join('; ')}) y hay que volver a jugarlo${borrados.length > 1 ? 's' : ''}. ¿Seguir?`
+        : `¿Desmarcar "No se presentó"? Si perdió por W.O., ese cruce vuelve a estar para jugar.`,
+      textoConfirmar: borrados.length > 0 ? 'Desmarcar y borrar' : 'Desmarcar',
+      peligro: borrados.length > 0,
+    });
+    if (!ok || terminadoRef.current) return;
+    actualizar((x) => conAusente(x, id, false));
+    avisar(`${nombre(id)} ya no figura como ausente`, null, 4000);
   }
 
   async function rearmar() {
@@ -184,7 +249,8 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   async function aJugadores() {
     const ok = await dialogos.confirmar({
       titulo: 'Volver a Jugadores',
-      mensaje: modelo.jugados > 0 ? 'Descarta la llave armada y sus resultados. ¿Seguir?' : 'Descarta la llave armada. ¿Seguir?',
+      mensaje: (modelo.jugados > 0 ? 'Descarta la llave armada y sus resultados. ¿Seguir?' : 'Descarta la llave armada. ¿Seguir?')
+        + ' Si alguien no se presentó, no hace falta: marcalo con "¿No se presentó alguien?" en su cruce y el rival pasa por W.O.',
       textoConfirmar: 'Volver',
       peligro: true,
     });
@@ -201,6 +267,7 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
 
   const terminado = torneo.fase === 'terminado';
   const hayCampeon = modelo.campeon !== null;
+  const onDeshacerAviso = (d: NonNullable<Aviso['deshacer']>) => void (d.tipo === 'ausente' ? desmarcarAusente(d.id) : deshacer(d.id));
 
   return (
     <div ref={raiz} className="opc space-y-4">
@@ -218,6 +285,7 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
         <Podio
           campeon={nombre(modelo.campeon!)}
           subcampeon={modelo.subcampeon ? nombre(modelo.subcampeon) : null}
+          finalPorWo={modelo.finalPorWo}
           terminado={terminado}
           compacto={vista !== 'cruce'}
           onTerminar={() => actualizar((t) => ({ ...t, fase: 'terminado' }))}
@@ -234,13 +302,15 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
           bloqueado={pausa !== null || terminado}
           onTocar={(lado) => void tocar(cruce, lado, true)}
           onDeshacer={() => void deshacer(cruce.partido.id)}
+          onAusente={(lado) => void marcarAusente(cruce, lado, true)}
+          onLlego={(id) => void desmarcarAusente(id)}
           onIr={(c) => { setCruceId(c.partido.id); setRonda(c.ronda); }}
-          aviso={aviso && <AvisoMarca aviso={aviso} onDeshacer={(id) => void deshacer(id)} onCerrar={cerrarAviso} />}
+          aviso={aviso && <AvisoMarca aviso={aviso} onDeshacer={onDeshacerAviso} onCerrar={cerrarAviso} />}
         />
       )}
       {vista !== 'cruce' && aviso && createPortal(
         <div className="opc-aviso-flotante pointer-events-none fixed inset-x-0 z-40 mx-auto max-w-xl px-3">
-          <AvisoMarca aviso={aviso} onDeshacer={(id) => void deshacer(id)} onCerrar={cerrarAviso} />
+          <AvisoMarca aviso={aviso} onDeshacer={onDeshacerAviso} onCerrar={cerrarAviso} />
         </div>,
         document.body,
       )}
@@ -256,6 +326,8 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
         />
       )}
       {vista === 'cuadro' && <VistaCuadro torneo={torneo} modelo={modelo} actual={cruce?.partido.id ?? null} onAbrir={irACruce} />}
+
+      <PanelAusentes torneo={torneo} ausentes={ausentes} bloqueado={terminado} onLlego={(id) => void desmarcarAusente(id)} />
 
       <footer className="mt-8 flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -401,21 +473,26 @@ function BarraEstado({ torneo, modelo, vista, setVista, otros, irATorneo, sync }
 
 // ─── Botón de jugador: el toque que carga el cruce ───────────────────────────
 
-function BotonJugador({ nombre, rol, onClick, disabled, grande = false, etiqueta }: {
+function BotonJugador({ nombre, rol, onClick, disabled, grande = false, etiqueta, ausente = false, wo = false }: {
   nombre: string;
   rol: 'ganador' | 'perdedor' | 'listo' | 'esperando';
   onClick?: () => void;
   disabled?: boolean;
   grande?: boolean;
   etiqueta: string;
+  /** No se presentó: tachado y atenuado, con la etiqueta a la vista. No se toca. */
+  ausente?: boolean;
+  /** El cruce se resolvió por W.O.: el que pasa dice "Pasa · W.O.", no "Ganó". */
+  wo?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled || rol === 'esperando'}
+      disabled={disabled || rol === 'esperando' || ausente || wo}
       aria-label={etiqueta}
-      aria-pressed={rol === 'ganador' ? true : rol === 'perdedor' ? false : undefined}
+      aria-pressed={wo || ausente ? undefined : rol === 'ganador' ? true : rol === 'perdedor' ? false : undefined}
+      data-ausente={ausente || undefined}
       className={cn(
         'opc-toque flex w-full items-center gap-3 rounded-xl border-2 px-4 text-left font-display font-bold leading-tight transition-[background-color,transform] active:scale-[0.98] disabled:active:scale-100',
         grande ? 'min-h-[88px] py-3 text-[22px] md:min-h-[104px] md:text-[28px]' : 'min-h-[60px] py-2 text-[17px]',
@@ -423,14 +500,22 @@ function BotonJugador({ nombre, rol, onClick, disabled, grande = false, etiqueta
         rol === 'ganador' && 'border-navy-900 bg-lime-400 text-navy-900',
         rol === 'perdedor' && 'border-gray-200 bg-gray-100 text-gray-500',
         rol === 'esperando' && 'border-dashed border-gray-300 bg-white text-gray-400',
+        ausente && rol !== 'ganador' && 'border-dashed border-gray-300 bg-gray-100 text-gray-500',
       )}
     >
-      <span className="opc-nombre min-w-0 flex-1">{nombre}</span>
-      {rol === 'ganador' && (
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-navy-900 px-2.5 py-1 text-[12px] font-black uppercase tracking-wide text-lime-400">
-          <Check size={14} strokeWidth={3.5} aria-hidden /> Ganó
-        </span>
-      )}
+      <span className={cn('opc-nombre min-w-0 flex-1', ausente && 'line-through decoration-2')}>{nombre}</span>
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        {ausente && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-700 px-2.5 py-1 text-[12px] font-black uppercase tracking-wide text-white no-underline">
+            <UserX size={14} strokeWidth={3} aria-hidden /> No se presentó
+          </span>
+        )}
+        {rol === 'ganador' && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-navy-900 px-2.5 py-1 text-[12px] font-black uppercase tracking-wide text-lime-400">
+            {wo ? <>Pasa · W.O.</> : <><Check size={14} strokeWidth={3.5} aria-hidden /> Ganó</>}
+          </span>
+        )}
+      </span>
     </button>
   );
 }
@@ -441,9 +526,111 @@ function rolDe(c: Cruce, id: string | null): 'ganador' | 'perdedor' | 'listo' | 
   return c.estado === 'listo' ? 'listo' : 'esperando';
 }
 
+/** Props de BotonJugador para un lado de un cruce (rol, ausente, W.O. y la etiqueta accesible). */
+function ladoDe(torneo: Torneo, c: Cruce, lado: Lado, sufijo = '') {
+  const id = lado === 'a' ? c.idA : c.idB;
+  // en un cruce jugado de verdad (antes de faltar) no se marca: ese lo jugó
+  const ausente = (lado === 'a' ? c.ausenteA : c.ausenteB) && !(c.estado === 'jugado' && !c.wo);
+  const rol = rolDe(c, id);
+  const n = id ? nombreDe(torneo, id) : '';
+  const etiqueta = !id
+    ? 'Todavía no se sabe'
+    : c.wo ? (rol === 'ganador' ? `${n} pasa por W.O.${sufijo}` : `${n} no se presentó${sufijo}`)
+      : ausente ? `${n} no se presentó${sufijo}` : `Ganó ${n}${sufijo}`;
+  return { rol, ausente, wo: c.wo, etiqueta };
+}
+
+/** "Y pasa por W.O.: X no se presentó" (o los dos ausentes). */
+function textoWo(torneo: Torneo, c: Cruce): string {
+  if (!c.ganador || !c.idA || !c.idB) return 'Resuelto por W.O.';
+  const perdedor = c.ganador === c.idA ? c.idB : c.idA;
+  if (c.ausenteA && c.ausenteB) return `No se presentó ninguno: sigue ${nombreDe(torneo, c.ganador)}, que pierde su próximo cruce por W.O.`;
+  return `${nombreDe(torneo, c.ganador)} pasa por W.O.: ${nombreDe(torneo, perdedor)} no se presentó.`;
+}
+
+/** El gesto para marcar un ausente: primero abrir, después elegir a quién (y el diálogo confirma). */
+function MarcarAusente({ torneo, c, onAusente, bloqueado }: { torneo: Torneo; c: Cruce; onAusente: (lado: Lado) => void; bloqueado: boolean }) {
+  const [abierto, setAbierto] = useState(false);
+  const candidatos = (['a', 'b'] as const).filter((l) => (l === 'a' ? c.idA && !c.ausenteA : c.idB && !c.ausenteB));
+  if (candidatos.length === 0 || c.estado === 'jugado') return null;
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        disabled={bloqueado}
+        aria-expanded={false}
+        className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-white/30 px-3 font-display text-[13px] font-bold text-white disabled:opacity-50"
+      >
+        <UserX size={16} aria-hidden /> ¿No se presentó alguien?
+      </button>
+    );
+  }
+  return (
+    <div role="group" aria-label="Quién no se presentó" className="w-full space-y-2 rounded-xl bg-navy-900/60 p-2">
+      <p className="px-1 text-[13px] text-white/80">¿Quién no se presentó? El rival pasa por W.O.</p>
+      {candidatos.map((l) => {
+        const id = (l === 'a' ? c.idA : c.idB)!;
+        return (
+          <button
+            key={l}
+            type="button"
+            disabled={bloqueado}
+            onClick={() => { setAbierto(false); onAusente(l); }}
+            className="opc-toque flex min-h-[48px] w-full items-center gap-2 rounded-lg border-2 border-red-300 bg-white px-3 text-left font-display text-[15px] font-bold text-red-800"
+          >
+            <UserX size={18} className="shrink-0" aria-hidden />
+            <span className="opc-nombre min-w-0 flex-1">No se presentó: {nombreDe(torneo, id)}</span>
+          </button>
+        );
+      })}
+      <button type="button" onClick={() => setAbierto(false)} className="h-11 w-full rounded-lg font-display text-[13px] font-bold text-white/80">Cancelar</button>
+    </div>
+  );
+}
+
+/** Botón "Llegó X" (desmarcar al ausente). */
+function BotonLlego({ torneo, id, onLlego, bloqueado, claro = false }: { torneo: Torneo; id: string; onLlego: (id: string) => void; bloqueado: boolean; claro?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onLlego(id)}
+      disabled={bloqueado}
+      aria-label={`Llegó ${nombreDe(torneo, id)}: desmarcar "No se presentó"`}
+      className={cn(
+        'inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-lg border px-3 py-1 font-display text-[13px] font-bold disabled:opacity-50',
+        claro ? 'border-gray-300 bg-white text-navy-700' : 'border-white/30 text-white',
+      )}
+    >
+      <UserCheck size={16} className="shrink-0" aria-hidden /> <span className="opc-nombre min-w-0 text-left">Llegó {nombreDe(torneo, id)}</span>
+    </button>
+  );
+}
+
+/** Los que no se presentaron, con "Llegó" a mano (en las tres vistas). */
+function PanelAusentes({ torneo, ausentes, bloqueado, onLlego }: { torneo: Torneo; ausentes: string[]; bloqueado: boolean; onLlego: (id: string) => void }) {
+  if (ausentes.length === 0) return null;
+  return (
+    <section aria-label="No se presentaron" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+      <p className="font-display text-[13px] font-bold uppercase tracking-wide text-red-800">
+        No se presentaron · {ausentes.length}
+      </p>
+      <p className="mt-0.5 text-[13px] text-red-900/80">Pierden por W.O. cada cruce que les toca. Si alguno llega, tocá “Llegó”.</p>
+      <ul className="mt-2 grid gap-2">
+        {ausentes.map((id) => (
+          <li key={id} className="flex flex-wrap items-center justify-between gap-2">
+            <span className="opc-nombre min-w-0 flex-1 font-display text-[15px] font-bold text-gray-600 line-through decoration-2">{nombreDe(torneo, id)}</span>
+            <BotonLlego torneo={torneo} id={id} onLlego={onLlego} bloqueado={bloqueado} claro />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 // ─── Vista cruce por cruce ───────────────────────────────────────────────────
 
-function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshacer, onIr, aviso }: {
+function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshacer, onAusente, onLlego, onIr, aviso }: {
   torneo: Torneo;
   modelo: ModeloOpc;
   cruce: Cruce;
@@ -451,6 +638,8 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
   bloqueado: boolean;
   onTocar: (lado: Lado) => void;
   onDeshacer: () => void;
+  onAusente: (lado: Lado) => void;
+  onLlego: (id: string) => void;
   onIr: (c: Cruce) => void;
   /** El aviso "Ganó X · Deshacer": va pegado arriba de Anterior/Siguiente, nunca encima. */
   aviso: ReactNode;
@@ -462,9 +651,13 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
   const proximo = proximoListo(modelo, cruce.partido.id, [cruce.partido.id]);
   const nombre = (id: string | null, slot: PartidoLlave['a']) => (id ? nombreDe(torneo, id) : describirLugar(modelo, slot));
 
-  const estadoTexto = cruce.estado === 'jugado'
-    ? (pausa ? '¡Listo!' : 'Jugado')
-    : cruce.estado === 'listo' ? 'Para jugar' : 'Esperando rivales';
+  const estadoTexto = cruce.wo
+    ? 'Pasa por W.O.'
+    : cruce.estado === 'jugado'
+      ? (pausa ? '¡Listo!' : 'Jugado')
+      : cruce.estado === 'listo' ? 'Para jugar' : 'Esperando rivales';
+  const realJugado = cruce.estado === 'jugado' && !cruce.wo;
+  const ausentesAca = realJugado ? [] : [cruce.ausenteA && cruce.idA, cruce.ausenteB && cruce.idB].filter((x): x is string => !!x);
 
   return (
     <section aria-label="Cruce" className="space-y-3">
@@ -476,7 +669,7 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
           </div>
           <span className={cn(
             'mt-1 shrink-0 rounded-full px-3 py-1 font-display text-[12px] font-bold',
-            cruce.estado === 'jugado' ? 'bg-lime-400 text-navy-900' : cruce.estado === 'listo' ? 'bg-white text-navy-700' : 'bg-white/15 text-white/80',
+            cruce.wo ? 'bg-red-700 text-white' : cruce.estado === 'jugado' ? 'bg-lime-400 text-navy-900' : cruce.estado === 'listo' ? 'bg-white text-navy-700' : 'bg-white/15 text-white/80',
           )}
           >
             {estadoTexto}
@@ -486,25 +679,29 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
           <BotonJugador
             grande
             nombre={nombre(cruce.idA, cruce.partido.a)}
-            rol={rolDe(cruce, cruce.idA)}
+            {...ladoDe(torneo, cruce, 'a')}
             disabled={bloqueado}
             onClick={() => onTocar('a')}
-            etiqueta={cruce.idA ? `Ganó ${nombreDe(torneo, cruce.idA)}` : 'Todavía no se sabe'}
           />
           <p aria-hidden className="text-center font-display text-sm font-black uppercase tracking-[0.3em] text-white/60">vs</p>
           <BotonJugador
             grande
             nombre={nombre(cruce.idB, cruce.partido.b)}
-            rol={rolDe(cruce, cruce.idB)}
+            {...ladoDe(torneo, cruce, 'b')}
             disabled={bloqueado}
             onClick={() => onTocar('b')}
-            etiqueta={cruce.idB ? `Ganó ${nombreDe(torneo, cruce.idB)}` : 'Todavía no se sabe'}
           />
         </div>
-        <div className="mt-3 flex min-h-[44px] flex-wrap items-center justify-between gap-2 text-[14px] text-white/80">
-          {cruce.estado === 'listo' && <p>Tocá el nombre del que ganó el punto.</p>}
-          {cruce.estado === 'esperando' && <p>Se juega cuando se definan los cruces anteriores.</p>}
-          {cruce.estado === 'jugado' && (
+        <div className="mt-3 flex min-h-[44px] flex-wrap items-center justify-between gap-2 text-[14px] text-white/80" key={`pie-${cruce.partido.id}`}>
+          {cruce.wo && <p className="w-full" data-opc-wo>{textoWo(torneo, cruce)}</p>}
+          {!cruce.wo && ausentesAca.length > 0 && cruce.estado !== 'jugado' && (
+            <p className="w-full">{ausentesAca.map((id) => nombreDe(torneo, id)).join(' y ')} no se presentó: pierde este cruce por W.O. apenas se sepa el rival.</p>
+          )}
+          {cruce.estado === 'listo' && ausentesAca.length === 0 && <p>Tocá el nombre del que ganó el punto.</p>}
+          {cruce.estado === 'esperando' && ausentesAca.length === 0 && <p>Se juega cuando se definan los cruces anteriores.</p>}
+          {cruce.estado !== 'jugado' && <MarcarAusente torneo={torneo} c={cruce} onAusente={onAusente} bloqueado={bloqueado} />}
+          {ausentesAca.map((id) => <BotonLlego key={id} torneo={torneo} id={id} onLlego={onLlego} bloqueado={bloqueado} />)}
+          {cruce.estado === 'jugado' && !cruce.wo && (
             <>
               <p className="min-w-0 flex-1">Para corregir, tocá el otro nombre.</p>
               <button
@@ -574,12 +771,13 @@ function PasaDirecto({ torneo, modelo, ronda }: { torneo: Torneo; modelo: Modelo
       <SkipForward size={20} className="mt-0.5 shrink-0" aria-hidden />
       <p className="min-w-0 text-[15px] leading-snug">
         <strong className="opc-nombre font-display font-bold">{quien}</strong> no juega la {ronda.nombre.toLowerCase()}: pasa directo {sig ? `a la ${sig.nombre.toLowerCase()}` : 'a la ronda siguiente'} (son impares).
+        {ronda.pasaDirecto.id && modelo.ausentes.includes(ronda.pasaDirecto.id) && <strong className="font-bold text-red-800"> No se presentó: pierde ese cruce por W.O.</strong>}
       </p>
     </div>
   );
 }
 
-function AvisoMarca({ aviso, onDeshacer, onCerrar }: { aviso: Aviso; onDeshacer: (id: string) => void; onCerrar: () => void }) {
+function AvisoMarca({ aviso, onDeshacer, onCerrar }: { aviso: Aviso; onDeshacer: (d: NonNullable<Aviso['deshacer']>) => void; onCerrar: () => void }) {
   return (
     <div
       key={aviso.n}
@@ -589,11 +787,11 @@ function AvisoMarca({ aviso, onDeshacer, onCerrar }: { aviso: Aviso; onDeshacer:
       className="opc-aviso pointer-events-auto flex min-h-[52px] items-center gap-2 rounded-xl border border-lime-400 bg-navy-900 py-1.5 pl-4 pr-1.5 text-white shadow-lg"
     >
       <CheckCircle2 size={18} className="shrink-0 text-lime-400" aria-hidden />
-      <p className="opc-nombre min-w-0 flex-1 font-display text-[15px] font-bold leading-tight">{aviso.texto}</p>
-      {aviso.deshacerId ? (
+      <p className="opc-nombre min-w-0 flex-1 font-display text-[15px] font-bold leading-tight [overflow-wrap:anywhere]">{aviso.texto}</p>
+      {aviso.deshacer ? (
         <button
           type="button"
-          onClick={() => onDeshacer(aviso.deshacerId!)}
+          onClick={() => onDeshacer(aviso.deshacer!)}
           className="opc-toque inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 font-display text-[14px] font-bold text-navy-900"
         >
           <Undo2 size={16} aria-hidden /> Deshacer
@@ -670,7 +868,7 @@ function VistaRonda({ torneo, modelo, ronda, setRonda, bloqueado, onTocar, onAbr
         <>
           <div role="separator" className="flex items-center gap-3 pt-1 font-display text-[12px] font-bold uppercase tracking-[0.12em] text-gray-500">
             <span className="h-px flex-1 bg-gray-300" aria-hidden />
-            Jugados · {jugados.length}
+            Jugados · {jugados.length}{r.porWo > 0 && <> ({r.porWo} por W.O.)</>}
             <span className="h-px flex-1 bg-gray-300" aria-hidden />
           </div>
           <ol aria-label="Cruces jugados" className="grid gap-3 md:grid-cols-2">
@@ -692,9 +890,12 @@ function TarjetaCruceRonda({ torneo, modelo, c, bloqueado, onTocar, onAbrir }: {
   onAbrir: (c: Cruce) => void;
 }) {
   return (
-    <li data-cruce={c.numero} className={cn('rounded-xl border bg-white p-2', c.estado === 'listo' ? 'border-navy-700' : 'border-gray-200')}>
+    <li data-cruce={c.numero} data-wo={c.wo || undefined} className={cn('rounded-xl border bg-white p-2', c.estado === 'listo' ? 'border-navy-700' : 'border-gray-200')}>
       <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
-        <span className="font-display text-[13px] font-bold uppercase tracking-wide text-gray-500">Cruce {c.numero}</span>
+        <span className="font-display text-[13px] font-bold uppercase tracking-wide text-gray-500">
+          Cruce {c.numero}
+          {c.wo && <span className="ml-2 rounded-full bg-red-700 px-2 py-0.5 text-[11px] text-white">W.O.</span>}
+        </span>
         <button type="button" onClick={() => onAbrir(c)} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 font-display text-[13px] font-bold text-navy-700">
           Ver grande <ChevronRight size={16} aria-hidden />
         </button>
@@ -707,14 +908,14 @@ function TarjetaCruceRonda({ torneo, modelo, c, bloqueado, onTocar, onAbrir }: {
             <BotonJugador
               key={lado}
               nombre={id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}
-              rol={rolDe(c, id)}
+              {...ladoDe(torneo, c, lado, ` (cruce ${c.numero})`)}
               disabled={bloqueado}
               onClick={() => onTocar(c, lado)}
-              etiqueta={id ? `Ganó ${nombreDe(torneo, id)} (cruce ${c.numero})` : 'Todavía no se sabe'}
             />
           );
         })}
       </div>
+      {c.wo && <p className="px-1 pt-1.5 text-[13px] leading-snug text-gray-600">{textoWo(torneo, c)}</p>}
     </li>
   );
 }
@@ -760,6 +961,7 @@ function VistaCuadro({ torneo, modelo, actual, onAbrir }: {
                     const slot = lado === 'a' ? c.partido.a : c.partido.b;
                     const gana = c.estado === 'jugado' && c.ganador === id;
                     const pierde = c.estado === 'jugado' && c.ganador !== id;
+                    const ausente = (lado === 'a' ? c.ausenteA : c.ausenteB) && !(c.estado === 'jugado' && !c.wo);
                     return (
                       <span
                         key={lado}
@@ -767,15 +969,19 @@ function VistaCuadro({ torneo, modelo, actual, onAbrir }: {
                           'flex min-h-[40px] items-center gap-2 px-3 py-1.5 text-[14px] leading-tight',
                           k === 0 && 'border-b border-gray-100',
                           gana && 'bg-lime-400 font-bold text-navy-900',
-                          pierde && 'text-gray-400 line-through',
+                          pierde && 'text-gray-400', pierde && !ausente && 'line-through',
                           !id && 'italic text-gray-400',
                           id && !gana && !pierde && 'font-semibold text-navy-700',
+                          ausente && !gana && 'text-gray-400',
                         )}
                       >
-                        <span className="opc-nombre line-clamp-2 min-w-0 flex-1" title={id ? nombreDe(torneo, id) : undefined}>
-                          {id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}
+                        <span className="opc-nombre min-w-0 flex-1" title={id ? nombreDe(torneo, id) : undefined}>
+                          <span className={cn('line-clamp-2', ausente && 'line-through')}>{id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}</span>
+                          {ausente && <span className="block text-[11px] font-bold uppercase not-italic text-red-700">No se presentó</span>}
                         </span>
-                        {gana && <Check size={16} strokeWidth={3} aria-hidden className="shrink-0" />}
+                        {gana && (c.wo
+                          ? <span className="shrink-0 rounded bg-navy-900 px-1.5 text-[11px] font-black text-lime-400">W.O.</span>
+                          : <Check size={16} strokeWidth={3} aria-hidden className="shrink-0" />)}
                       </span>
                     );
                   })}
@@ -806,9 +1012,11 @@ function VistaCuadro({ torneo, modelo, actual, onAbrir }: {
 
 // ─── Podio ───────────────────────────────────────────────────────────────────
 
-function Podio({ campeon, subcampeon, terminado, compacto, onTerminar, onReabrir }: {
+function Podio({ campeon, subcampeon, finalPorWo, terminado, compacto, onTerminar, onReabrir }: {
   campeon: string;
   subcampeon: string | null;
+  /** La final se resolvió por W.O.: se dice, para que no parezca jugada. */
+  finalPorWo: boolean;
   terminado: boolean;
   /** En las vistas ronda y cuadro: una franja, para que la llave quede a la vista. */
   compacto: boolean;
@@ -822,7 +1030,9 @@ function Podio({ campeon, subcampeon, terminado, compacto, onTerminar, onReabrir
         <p className="min-w-[12rem] flex-1 leading-tight">
           <span className="block font-display text-[11px] font-bold uppercase tracking-[0.2em] text-lime-400">Campeón</span>
           <strong className="opc-nombre font-display text-lg font-black uppercase">{campeon}</strong>
-          {subcampeon && <span className="block text-[13px] text-white/75">Subcampeón: <span className="opc-nombre font-semibold text-white">{subcampeon}</span></span>}
+          {finalPorWo && subcampeon
+            ? <span className="block text-[13px] text-white/75">Por W.O.: <span className="opc-nombre font-semibold text-white">{subcampeon}</span> no se presentó a la final</span>
+            : subcampeon && <span className="block text-[13px] text-white/75">Subcampeón: <span className="opc-nombre font-semibold text-white">{subcampeon}</span></span>}
         </p>
         {terminado
           ? <button type="button" onClick={onReabrir} className="h-11 shrink-0 rounded-lg px-2 font-display text-[13px] font-bold text-white/80 underline-offset-4 hover:underline">Reabrir</button>
@@ -836,6 +1046,11 @@ function Podio({ campeon, subcampeon, terminado, compacto, onTerminar, onReabrir
       <Trophy size={48} className="relative mx-auto text-lime-400" aria-hidden />
       <p className="relative mt-2 font-display text-[12px] font-bold uppercase tracking-[0.3em] text-lime-400">Campeón</p>
       <h2 className="opc-nombre relative mt-1 font-display text-3xl font-black uppercase leading-tight md:text-4xl">{campeon}</h2>
+      {finalPorWo && subcampeon && (
+        <p className="relative mt-2 text-[14px] text-white/80" data-final-wo>
+          Campeón por W.O.: <strong className="opc-nombre font-bold text-white">{subcampeon}</strong> no se presentó a la final.
+        </p>
+      )}
       {subcampeon && (
         <p className="relative mt-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-[15px] text-white/90">
           <Medal size={18} aria-hidden className="text-gray-300" />
