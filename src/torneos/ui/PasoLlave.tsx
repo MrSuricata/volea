@@ -10,7 +10,7 @@ import { armarLlaveRolling } from '../engine/llaveIndividual';
 import { crearRng, mezclar } from '../engine/rng';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { armarCopas, gruposCompletos, tablaGeneral } from '../engine/copas';
-import { armarLlaveFormato, formatoDe } from '../engine/formatoLlave';
+import { armarLlaveFormato, formatoEfectivo, llaveDesactualizada, modoArmado } from '../engine/formatoLlave';
 import { editarSlot, moverEnRonda, origenesPosibles } from '../engine/editarLlave';
 import SelectorFormato from './SelectorFormato';
 import { ordenDeJuego } from '../engine/canchas';
@@ -119,13 +119,18 @@ function ConfigurarLlaveIndividual({ torneo, actualizar }: PropsPaso) {
 
 function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
   const dialogos = useDialogos();
-  const opciones = opcionesClasificacion(torneo.grupos).slice(0, 4);
+  const opciones = opcionesClasificacion(torneo.grupos);
   const [elegida, setElegida] = useState(0);
+  // Las 4 primeras (las más justas) a la vista; el resto detrás de "Ver más", pero todas elegibles.
+  const [todas, setTodas] = useState(false);
+  const VISIBLES = 4;
   const [tercerPuesto, setTercerPuesto] = useState(false);
   // extras elegidos a mano (parejaIds); null = automático por métricas
   const [extrasManuales, setExtrasManuales] = useState<string[] | null>(null);
   const esGrupoUnico = torneo.grupos.length === 1;
-  const americano = (!!torneo.sinLlave || !!torneo.americanoIndividual) && esGrupoUnico;
+  // Misma resolución del formato que En vivo (formatoEfectivo): el mismo torneo da la misma llave.
+  const modo = modoArmado(torneo);
+  const americano = modo === 'tabla';
 
   const opcion = opciones[elegida] as (typeof opciones)[number] | undefined;
 
@@ -169,12 +174,10 @@ function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
     actualizar((t) => ({ ...t, fase: 'terminado' }));
   }
 
-  if (torneo.copas && !esGrupoUnico) {
+  if (modo === 'copas') {
     return <ConfigurarCopas torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} />;
   }
-
-  const formato = formatoDe(torneo);
-  if (formato === 'final' || formato === 'semis' || formato === 'cruces' || formato === 'seis') {
+  if (modo === 'fijo') {
     return <ArmarConFormato torneo={torneo} actualizar={actualizar} />;
   }
 
@@ -208,6 +211,7 @@ function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
         <div role="radiogroup" aria-label="Cómo se arma la llave" className="grid gap-2">
           {opciones.map((o, i) => {
             const activa = elegida === i;
+            if (!todas && i >= VISIBLES && !activa) return null;
             return (
               <label
                 key={`${o.porGrupo}-${o.mejoresExtra}`}
@@ -225,6 +229,17 @@ function ConfigurarLlave({ torneo, actualizar, agregarTorneos }: PropsPaso) {
             );
           })}
         </div>
+        {opciones.length > VISIBLES && (
+          <button
+            type="button"
+            onClick={() => setTodas((x) => !x)}
+            aria-expanded={todas}
+            className="mt-2 inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold text-navy-700 hover:underline"
+          >
+            <ChevronDown size={16} aria-hidden className={cn('transition-transform', todas && 'rotate-180')} />
+            {todas ? 'Ver menos opciones' : `Ver ${opciones.length - VISIBLES} opciones más`}
+          </button>
+        )}
         <div className="mt-3 border-t border-gray-100 pt-1">
           <Interruptor
             activo={tercerPuesto && !!opcion && opcion.tamanoLlave >= 4}
@@ -426,6 +441,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
   const [modo, setModo] = useState<'ronda' | 'cuadro' | null>(null);
   const modoVisible = modo ?? (esAncho ? 'cuadro' : 'ronda');
   const [corrigiendo, setCorrigiendo] = useState(false);
+  const desactualizada = !individual && llaveDesactualizada(torneo);
 
   // Corregir a mano: quién juega cada lado de un cruce sin resultado, y el orden del dibujo.
   function describir(p: PartidoLlave): string {
@@ -596,6 +612,13 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
         />
       )}
 
+      {desactualizada && (
+        <Nota>
+          Esta llave ya no coincide con la que saldría hoy con las tablas de grupo: se corrigieron resultados
+          después de armarla (o se cambiaron cruces a mano). No se rearma sola; si corresponde, usá "Rearmar llave".
+        </Nota>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display text-base font-bold uppercase tracking-wide text-navy-700">Llave</h3>
         <Segmentado
@@ -654,7 +677,7 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
       )}
 
       {!individual && torneo.configLlave && (
-        <ResumenClasificacion torneo={torneo} config={torneo.configLlave} partidosLlave={partidos} />
+        <ResumenClasificacion torneo={torneo} config={torneo.configLlave} desactualizada={desactualizada} />
       )}
 
       <PiePaso
@@ -681,24 +704,15 @@ function VerLlave({ torneo, actualizar }: PropsPaso) {
 }
 
 // Resumen consultable de la clasificación con la llave ya armada: quién pasó y por qué,
-// la comparación de los "mejores extra", y un aviso si las posiciones actuales de los grupos
-// ya no coinciden con los clasificados que se usaron para armar la llave.
-function ResumenClasificacion({ torneo, config, partidosLlave }: {
+// la comparación de los "mejores extra", y la marca de desactualizada (llaveDesactualizada:
+// compara las siembras armadas con las que saldrían hoy, también si solo cambió el orden).
+function ResumenClasificacion({ torneo, config, desactualizada }: {
   torneo: Torneo;
   config: ConfigLlave;
-  partidosLlave: PartidoLlave[];
+  desactualizada: boolean;
 }) {
   const [abierto, setAbierto] = useState(false);
   const clasifActuales = calcularClasificados(torneo.grupos, torneo.partidosGrupo, config);
-  const seedsArmados = new Set(
-    partidosLlave
-      .filter((p) => p.ronda === 1)
-      .flatMap((p) => [p.a, p.b])
-      .filter((s): s is Extract<SlotLlave, { tipo: 'seed' }> => s !== null && s.tipo === 'seed')
-      .map((s) => s.parejaId),
-  );
-  const desactualizada =
-    clasifActuales.length !== seedsArmados.size || clasifActuales.some((c) => !seedsArmados.has(c.parejaId));
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white">
@@ -717,7 +731,7 @@ function ResumenClasificacion({ torneo, config, partidosLlave }: {
         <div className="space-y-3 border-t border-gray-100 px-4 py-4">
           {desactualizada && (
             <Nota>
-              Las posiciones actuales de los grupos ya no coinciden con los clasificados de esta llave
+              Las posiciones actuales de los grupos ya no coinciden con los cruces de esta llave
               (corregiste resultados después de armarla). Si corresponde, usá "Rearmar llave".
             </Nota>
           )}
@@ -882,7 +896,8 @@ function ArmarConFormato({ torneo, actualizar }: PropsPaso) {
   };
   function armar() {
     if (!llave) return;
-    actualizar((t) => ({ ...t, partidosLlave: llave, configLlave: formatoDe(t) === 'cruces' ? { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false } : null }));
+    // igual que En vivo (ProgramacionPage): cruces guarda su configuración de clasificación
+    actualizar((t) => ({ ...t, partidosLlave: llave, configLlave: formatoEfectivo(t) === 'cruces' ? { porGrupo: 2, mejoresExtra: 0, tercerPuesto: false } : null }));
   }
   return (
     <section className="space-y-4">
@@ -890,7 +905,9 @@ function ArmarConFormato({ torneo, actualizar }: PropsPaso) {
         <SelectorFormato torneo={torneo} actualizar={actualizar} />
       </Tarjeta>
       <Tarjeta titulo="Así sale la llave">
-        {error ? <Nota tono="alerta">{error}. Cuando esté todo cargado se ve el cruce.</Nota> : llave && (
+        {error ? <Nota tono="alerta">{error}. Cuando esté todo cargado se ve el cruce.</Nota> : !llave ? (
+          <Nota tono="alerta">Este formato no arma una llave con estos grupos: elegí otro formato arriba.</Nota>
+        ) : (
           <ol className="divide-y divide-gray-100 rounded-lg border border-gray-200">
             {[...llave].sort((a, b) => a.ronda - b.ronda || a.posicion - b.posicion).map((p) => (
               <li key={p.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[15px] text-navy-700">

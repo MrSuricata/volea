@@ -1,5 +1,5 @@
 import type { ConfigLlave, Grupo, PartidoGrupo } from './tipos';
-import { resultadoDe } from './tipos';
+import { puntosDePartido, resultadoDe } from './tipos';
 import { calcularTabla } from './tabla';
 
 export type OpcionClasificacion = {
@@ -77,12 +77,13 @@ export function metricasPareja(parejaId: string, partidos: PartidoGrupo[]): Metr
   let pj = 0, pg = 0, pf = 0, pc = 0;
   for (const p of partidos) {
     const r = resultadoDe(p);
-    if (!r) continue;
+    const pts = puntosDePartido(p);
+    if (!r || !pts) continue;
     if (p.aId !== parejaId && p.bId !== parejaId) continue;
     pj += 1;
-    const [propios, rival] = p.aId === parejaId ? [r.a, r.b] : [r.b, r.a];
-    pf += propios; pc += rival;
-    if (propios > rival) pg += 1;
+    const esA = p.aId === parejaId;
+    pf += esA ? pts.a : pts.b; pc += esA ? pts.b : pts.a;
+    if (esA ? r.a > r.b : r.b > r.a) pg += 1;
   }
   const totalPuntos = pf + pc;
   return {

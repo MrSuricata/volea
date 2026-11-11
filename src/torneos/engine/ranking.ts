@@ -1,7 +1,7 @@
 import type { ConfigPuntos, Escalon, PartidoLlave, Torneo, Jugador } from './tipos';
 import { ESCALONES } from './tipos';
 import { campeonDe, ganadorPartido, resolverSlot } from './llave';
-import { calcularTabla } from './tabla';
+import { calcularTabla, calcularTablaIndividual } from './tabla';
 
 export function puntosDe(escalon: Escalon, categoria: 'A' | 'B', config: ConfigPuntos): number {
   const idx = ESCALONES.indexOf(escalon);
@@ -62,13 +62,36 @@ export type AporteRanking = {
   categoria: 'A' | 'B';
   escalon: Escalon;
   puntos: number;
-  descartadoPorEvento?: boolean; // otro torneo del mismo evento paga mas: este no suma (se muestra igual en el detalle)
+  descartadoPorEvento?: boolean; // otro torneo del mismo evento (o del mismo cuadro con copas) paga mas: este no suma (se muestra igual en el detalle)
 };
 export type FilaRanking = { jugadorId: string; nombre: string; puntos: number; torneosJugados: number; aportes: AporteRanking[] };
+
+// Quién cobra qué en un torneo: un escalón por jugador.
+function escalonesDeJugadores(t: Torneo): { jugadorId: string; nombre: string; escalon: Escalon }[] {
+  // Americano individual sin llave: la tabla es por jugador (cada uno juega con varias duplas);
+  // por dupla le pagaría una vez por cada compañero.
+  if (t.americanoIndividual && !(t.partidosLlave && t.partidosLlave.length > 0)) {
+    return calcularTablaIndividual(t.parejas, t.partidosGrupo).map((f) => ({
+      jugadorId: f.jugadorId, nombre: f.nombre,
+      escalon: f.posicion === 1 ? 'CAMPEON' : f.posicion === 2 ? 'FINALISTA' : 'PARTICIPO',
+    }));
+  }
+  const out: { jugadorId: string; nombre: string; escalon: Escalon }[] = [];
+  for (const pareja of t.parejas) {
+    const ids = pareja.jugadorIds;
+    if (!ids || ids.length === 0) continue;
+    const escalon = escalonDePareja(t, pareja.id);
+    for (const jid of ids) out.push({ jugadorId: jid, nombre: pareja.nombre, escalon });
+  }
+  return out;
+}
 
 // Torneos que aportan, ordenados por puntos. filtro por creadoEl (ISO, comparacion lexicografica).
 // Reglas de suma: en individuales, PARTICIPO no paga (solo pagan las instancias de llave);
 // y entre torneos de PAREJAS que comparten `evento`, al jugador le cuenta solo el mejor.
+// Copas sin evento: el cuadro de grupos y sus Copas de Oro/Plata (copaDe) son UN torneo para el
+// ranking: al jugador le cuenta solo su mejor escalón entre ellos (el de la copa si la copa paga;
+// si no, el "participó" del cuadro), igual que si compartieran evento.
 export function calcularRanking(
   torneos: Torneo[],
   jugadores: Jugador[],
@@ -77,8 +100,11 @@ export function calcularRanking(
 ): FilaRanking[] {
   const nombreDe = new Map(jugadores.map((j) => [j.id, j.nombre]));
   const porJugador = new Map<string, FilaRanking>();
-  // evento por torneo, solo para parejas (los individuales quedan siempre fuera del "max por evento")
-  const eventoDe = new Map<string, string>();
+  // cuadros de los que salieron copas (aunque se les haya sacado la bandera `copas` después)
+  const cuadrosConCopas = new Set(torneos.map((t) => t.copaDe).filter((x): x is string => typeof x === 'string'));
+  // "familia" por torneo: los de la misma familia pagan una sola vez por jugador (el mejor).
+  // Solo parejas (los individuales quedan siempre fuera del "max por evento").
+  const familiaDe = new Map<string, string>();
   for (const t of torneos) {
     if (!torneoAporta(t)) continue;
     if (filtro?.desde && t.creadoEl < filtro.desde) continue;
@@ -89,22 +115,19 @@ export function calcularRanking(
     // de mayusculas no puede duplicar puntos en silencio. typeof: un import editado a mano con
     // evento no-string se ignora en vez de tirar la pantalla abajo. La UI muestra el texto crudo.
     const evento = individual || typeof t.evento !== 'string' ? undefined : t.evento.trim().toLowerCase() || undefined;
-    if (evento) eventoDe.set(t.id, evento);
-    for (const pareja of t.parejas) {
-      const ids = pareja.jugadorIds;
-      if (!ids || ids.length === 0) continue;
-      const escalon = escalonDePareja(t, pareja.id);
+    const copa = individual ? undefined : typeof t.copaDe === 'string' ? t.copaDe : cuadrosConCopas.has(t.id) ? t.id : undefined;
+    if (evento) familiaDe.set(t.id, `evento:${evento}`);
+    else if (copa) familiaDe.set(t.id, `copas:${copa}`);
+    for (const { jugadorId: jid, nombre, escalon } of escalonesDeJugadores(t)) {
       const puntos = individual && escalon === 'PARTICIPO' ? 0 : puntosDe(escalon, categoria, config);
-      for (const jid of ids) {
-        let fila = porJugador.get(jid);
-        if (!fila) {
-          fila = { jugadorId: jid, nombre: nombreDe.get(jid) ?? pareja.nombre, puntos: 0, torneosJugados: 0, aportes: [] };
-          porJugador.set(jid, fila);
-        }
-        // copia por jugador: descartadoPorEvento se decide fila por fila (los companieros
-        // de pareja pueden tener eventos distintos entre si por sus OTROS torneos)
-        fila.aportes.push({ torneoId: t.id, torneoNombre: t.nombre, categoria, escalon, puntos });
+      let fila = porJugador.get(jid);
+      if (!fila) {
+        fila = { jugadorId: jid, nombre: nombreDe.get(jid) ?? nombre, puntos: 0, torneosJugados: 0, aportes: [] };
+        porJugador.set(jid, fila);
       }
+      // copia por jugador: descartadoPorEvento se decide fila por fila (los companieros
+      // de pareja pueden tener eventos distintos entre si por sus OTROS torneos)
+      fila.aportes.push({ torneoId: t.id, torneoNombre: t.nombre, categoria, escalon, puntos });
     }
   }
   const filas = [...porJugador.values()];
@@ -112,7 +135,7 @@ export function calcularRanking(
     // max por evento: de los aportes de parejas que comparten evento, cuenta solo el mejor
     const mejorPorEvento = new Map<string, AporteRanking>();
     for (const a of f.aportes) {
-      const evento = eventoDe.get(a.torneoId);
+      const evento = familiaDe.get(a.torneoId);
       if (!evento) continue;
       const actual = mejorPorEvento.get(evento);
       // empate de puntos (ej. campeon B = finalista A con el default): queda el mejor escalon,
@@ -123,7 +146,7 @@ export function calcularRanking(
       if (gana) mejorPorEvento.set(evento, a);
     }
     for (const a of f.aportes) {
-      const evento = eventoDe.get(a.torneoId);
+      const evento = familiaDe.get(a.torneoId);
       if (evento && mejorPorEvento.get(evento) !== a) a.descartadoPorEvento = true;
     }
     f.puntos = f.aportes.reduce((s, a) => s + (a.descartadoPorEvento ? 0 : a.puntos), 0);
