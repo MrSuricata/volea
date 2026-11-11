@@ -775,7 +775,8 @@ function TopBar() {
         href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1 text-lime-400 hover:text-lime-300 transition-colors"
+        // -my/py: el área de toque crece hasta ~36px de alto sin agrandar la franja (antes 79x16).
+        className="-my-2.5 -mr-2 flex items-center gap-1 px-2 py-2.5 text-lime-400 hover:text-lime-300 transition-colors"
       >
         <Instagram size={14} />
         <span>@{INSTAGRAM_HANDLE}</span>
@@ -841,7 +842,7 @@ function Navbar() {
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
         {/* Logo */}
         <Link to="/" className="flex-shrink-0">
-          <img src="/logo-white.png" alt="VOLEA" className="h-12 md:h-14 drop-shadow-lg" onError={handleImgError} />
+          <img src="/logo-white.png" alt="VOLEA" width={560} height={139} className="h-12 w-auto md:h-14 drop-shadow-lg" onError={handleImgError} />
         </Link>
 
         {/* Desktop nav */}
@@ -896,7 +897,8 @@ function Navbar() {
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <div className="absolute left-0 top-0 h-full w-72 bg-navy-800 slide-in-left">
             <div className="flex items-center justify-between p-4 border-b border-navy-600">
-              <img src="/logo.png" alt="VOLEA" className="h-8" onError={handleImgError} />
+              {/* logo blanco: el /logo.png (letras azules) sobre navy-800 no se leía */}
+              <img src="/logo-white.png" alt="VOLEA" width={560} height={139} className="h-8 w-auto" onError={handleImgError} />
               <button onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" className="-m-2.5 p-2.5 text-white hover:text-lime-400">
                 <X size={24} />
               </button>
@@ -4018,7 +4020,9 @@ function FloatingWhatsApp() {
   const { pathname } = useLocation();
   // Checkout: tapaba "Enviar pedido" y es el mismo canal. Pago y TV (/copa, /programacion):
   // no aporta. En la ficha sube para no pisar la barra fija de "Agregar".
-  if (/^\/(checkout|pago|copa|programacion|admin)(\/|$)/.test(pathname)) return null;
+  // Torneos, ranking, clasificación, árbitro e inscripción: tapaba la última columna de las
+  // tablas y del cuadro, el marcador y los campos del formulario (ahí la acción es otra).
+  if (/^\/(checkout|pago|copa|programacion|admin|torneos|ranking|clasificacion|arbitro|inscripcion)(\/|$)/.test(pathname)) return null;
   const enFicha = pathname.startsWith('/producto/');
   return (
     <a
@@ -4116,6 +4120,10 @@ function BarraAdmin() {
 
 function Footer() {
   const { categories, products } = useStore();
+  // Sin categorías con productos (cargando, o tienda vacía) la columna quedaba con el título solo.
+  const categoriasFooter = categoriasConProductos(categories, products);
+  // Blanco de toque de ~36px por link (antes 18px de alto, pegados).
+  const linkFooter = 'inline-block py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm';
 
   return (
     <footer className="relative text-white">
@@ -4137,7 +4145,7 @@ function Footer() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-10 md:gap-10">
           {/* Logo */}
           <div className="col-span-2 lg:col-span-1">
-            <img src="/logo-white.png" alt="VOLEA" className="h-10 mb-4" onError={(e) => {
+            <img src="/logo-white.png" alt="VOLEA" width={560} height={139} loading="lazy" className="h-10 w-auto mb-4" onError={(e) => {
               e.currentTarget.style.display = 'none';
               const span = document.createElement('span');
               span.className = 'font-display text-3xl font-black text-lime-400';
@@ -4155,7 +4163,7 @@ function Footer() {
           {/* Quick Links */}
           <div>
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Navegá</h3>
-            <ul className="space-y-2">
+            <ul>
               {[
                 { to: '/', label: 'Inicio' },
                 { to: '/tienda', label: 'Tienda' },
@@ -4167,7 +4175,7 @@ function Footer() {
                 { to: '/contacto', label: 'Contacto' },
               ].map(link => (
                 <li key={link.to}>
-                  <Link to={link.to} className="text-gray-400 hover:text-lime-400 transition-colors text-sm">
+                  <Link to={link.to} className={linkFooter}>
                     {link.label}
                   </Link>
                 </li>
@@ -4176,14 +4184,15 @@ function Footer() {
           </div>
 
           {/* Categories */}
+          {categoriasFooter.length > 0 && (
           <div>
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Categorías</h3>
-            <ul className="space-y-2">
-              {categoriasConProductos(categories, products).map(cat => (
+            <ul>
+              {categoriasFooter.map(cat => (
                 <li key={cat.id}>
                   <Link
                     to={`/tienda?category=${encodeURIComponent(cat.id)}`}
-                    className="text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                    className={linkFooter}
                   >
                     {cat.name}
                   </Link>
@@ -4191,17 +4200,18 @@ function Footer() {
               ))}
             </ul>
           </div>
+          )}
 
           {/* Contact */}
           <div className="col-span-2 md:col-span-1">
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Contacto</h3>
-            <ul className="space-y-3">
+            <ul className="space-y-1">
               <li>
                 <a
                   href={`https://wa.me/${WHATSAPP_NUMBER}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                  className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
                 >
                   <Phone size={16} /> {WHATSAPP_DISPLAY}
                 </a>
@@ -4211,14 +4221,14 @@ function Footer() {
                   href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                  className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
                 >
                   <Instagram size={16} /> @{INSTAGRAM_HANDLE}
                 </a>
               </li>
               {EMAIL_CONTACTO && (
                 <li>
-                  <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm">
+                  <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm">
                     <Mail size={16} /> {EMAIL_CONTACTO}
                   </a>
                 </li>
@@ -4229,16 +4239,16 @@ function Footer() {
 
         {/* Bottom */}
         <div className="border-t border-navy-600 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-gray-500 text-sm">
+          <p className="text-gray-400 text-sm">
             &copy; 2026 VOLEA. La primera marca de pickleball de Uruguay.
           </p>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1">
             <a
               href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Instagram de VOLEA"
-              className="text-gray-400 hover:text-lime-400 transition-colors"
+              className="p-3 text-gray-400 hover:text-lime-400 transition-colors"
             >
               <Instagram size={20} />
             </a>
@@ -4247,7 +4257,7 @@ function Footer() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label="WhatsApp de VOLEA"
-              className="text-gray-400 hover:text-lime-400 transition-colors"
+              className="p-3 text-gray-400 hover:text-lime-400 transition-colors"
             >
               <MessageCircle size={20} />
             </a>
