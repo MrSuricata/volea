@@ -9,8 +9,9 @@ ninguna base remota: todo pedido a `scftuxrtflfowohiewsc.supabase.co` se resuelv
 ```bash
 node e2e/run.cjs                 # todo (~31 escenarios, ~8 min)
 node e2e/run.cjs --listar        # lista de escenarios
-node e2e/run.cjs gestor          # grupo: gestor | gestor-celular | arbitro | publico | sin-base
+node e2e/run.cjs gestor          # grupo: gestor | gestor-celular | arbitro | publico | sin-base | opc
 node e2e/run.cjs arbitro-sin-red # uno suelto
+E2E_BASE=http://127.0.0.1:5335 node e2e/run.cjs opc   # otro puerto (dev server y filtro de la base falsa)
 ```
 
 El runner levanta Vite en `127.0.0.1:5311` (con `e2e/vite.e2e.config.mjs`, que no vigila `.claude/`)
@@ -27,7 +28,9 @@ la URL de Supabase está fija en `src/services/supabaseClient.ts` y la app no le
 - `lib/gestor.cjs`, `lib/arbitro.cjs` — cómo se maneja cada pantalla; `lib/oraculo.cjs` — qué tiene que
   dar (gana siempre la pareja más fuerte; tablas, clasificados, tabla general y llaves calculadas aparte;
   tanteo rally/side out escrito aparte del motor de la app).
-- `escenarios/` — gestor (8 formatos × una rueda / ida y vuelta, + 3 en celular), árbitro, público, sin base.
+- `escenarios/` — gestor (8 formatos × una rueda / ida y vuelta, + 3 en celular), árbitro, público, sin base,
+  One Point Challenge (`opc.cjs`: 13 jugadores desde el celular, corrección con cascada, campeón contra una
+  simulación propia de la llave rolling y vista pública).
 
 ## Aproximaciones de la base falsa (pueden esconder bugs reales)
 
