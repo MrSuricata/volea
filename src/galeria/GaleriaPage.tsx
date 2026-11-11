@@ -47,12 +47,12 @@ function AlbumCard({ album }: { album: GalleryAlbum }) {
       )}
       <div className="p-5 flex flex-col flex-1">
         {album.eventDate && (
-          <p className="text-xs text-gray-400 mb-2">{formatearFecha(album.eventDate)}</p>
+          <p className="text-xs text-gray-500 mb-2">{formatearFecha(album.eventDate)}</p>
         )}
         <h2 className="font-display text-lg font-bold text-navy-700 mb-2 group-hover:text-navy-500 transition-colors flex-1">
           {album.title}
         </h2>
-        <span className="font-display text-sm font-semibold text-lime-600 group-hover:underline inline-flex items-center gap-1">
+        <span className="font-display text-sm font-semibold text-lime-800 group-hover:underline inline-flex items-center gap-1">
           Ver álbum <ExternalLink size={14} />
         </span>
       </div>
@@ -88,12 +88,9 @@ export default function GaleriaPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <p className="font-display text-sm font-bold uppercase tracking-widest text-lime-600 mb-2">
-        TORNEOS VOLEA
-      </p>
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700">Galería</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
-      <p className="text-gray-600 max-w-2xl -mt-4 mb-10">
+      <p className="eyebrow-pagina">Torneos VOLEA</p>
+      <h1 className="titulo-pagina mt-2 mb-4">Galería</h1>
+      <p className="text-gray-600 max-w-2xl mb-10">
         Las fotos de cada torneo viven en Google Drive o Google Photos — acá está el índice.
         Elegí un álbum para abrirlo en una pestaña nueva.
       </p>

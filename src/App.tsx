@@ -2660,8 +2660,8 @@ function EventsPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Eventos y torneos</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Agenda VOLEA</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Eventos y torneos</h1>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-10">
@@ -2674,7 +2674,8 @@ function EventsPage() {
           <button
             key={f.key}
             onClick={() => setFilter(f.key)}
-            className={`px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+            aria-pressed={filter === f.key}
+            className={`min-h-[44px] px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
               filter === f.key ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
@@ -2683,11 +2684,39 @@ function EventsPage() {
         ))}
       </div>
 
+      {/* Sin nada próximo, la página era solo una lista de eventos en gris y ninguna salida:
+          ahora dice qué pasa y a dónde ir (resultados, ranking, Instagram para enterarse). */}
+      {upcoming.length === 0 && past.length > 0 && (
+        <div className="mb-12 rounded-2xl bg-navy-700 p-6 text-white md:flex md:items-center md:justify-between md:gap-8 md:p-8">
+          <div>
+            <p className="font-display text-xl font-black uppercase leading-tight md:text-2xl">
+              Por ahora no hay {({ tournament: 'torneos', clinic: 'clínicas', social: 'encuentros' } as Record<string, string>)[filter] ?? 'eventos'} en agenda
+            </p>
+            <p className="mt-2 max-w-xl text-sm text-white/70">
+              Mientras se arma la próxima fecha, mirá cómo salieron los últimos torneos y el ranking. Los anunciamos primero en Instagram.
+            </p>
+          </div>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row md:mt-0 md:shrink-0">
+            <Link to="/torneos" className="inline-flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display text-sm font-bold text-navy-900 transition-colors hover:bg-lime-300">
+              <Trophy size={16} /> Ver resultados
+            </Link>
+            <a
+              href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/30 px-5 py-3 font-display text-sm font-bold text-white transition-colors hover:border-lime-400 hover:text-lime-400"
+            >
+              <Instagram size={16} /> @{INSTAGRAM_HANDLE}
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Upcoming */}
       {upcoming.length > 0 && (
         <div className="mb-12">
           <h2 className="font-display text-2xl font-bold text-navy-700 mb-6 flex items-center gap-2">
-            <CalendarDays size={24} /> Próximos Eventos
+            <CalendarDays size={24} /> Próximos eventos
           </h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {upcoming.map(evt => (
@@ -2776,9 +2805,14 @@ function EventsPage() {
       {/* Past */}
       {past.length > 0 && (
         <div>
-          <h2 className="font-display text-2xl font-bold text-gray-400 mb-6 flex items-center gap-2">
-            <CalendarDays size={24} /> Eventos Pasados
-          </h2>
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+            <h2 className="font-display text-2xl font-bold text-gray-500 flex items-center gap-2">
+              <CalendarDays size={24} /> Eventos pasados
+            </h2>
+            <Link to="/torneos" className="inline-flex items-center gap-1.5 py-2 font-display text-sm font-bold text-navy-700 hover:text-lime-800">
+              Resultados de los torneos <ArrowRight size={15} />
+            </Link>
+          </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 opacity-70">
             {past.map(evt => (
               <div key={evt.id} className="bg-white rounded-xl overflow-hidden shadow-md border border-gray-100">
@@ -2816,9 +2850,18 @@ function EventsPage() {
       )}
 
       {filtered.length === 0 && (datosListos || events.length > 0) && (
-        <div className="text-center py-20 text-gray-400">
-          <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4" />
+        <div className="text-center py-20 text-gray-500">
+          <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4 text-gray-400" />
           <p className="font-display text-lg">Por ahora no hay eventos agendados</p>
+          <p className="mt-2 text-sm">Los anunciamos primero en Instagram.</p>
+          <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link to="/torneos" className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-5 py-3 font-display text-sm font-bold text-white hover:bg-navy-600">
+              <Trophy size={16} /> Ver resultados de torneos
+            </Link>
+            <a href={`https://instagram.com/${INSTAGRAM_HANDLE}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-5 py-3 font-display text-sm font-bold text-navy-700 hover:bg-gray-50">
+              <Instagram size={16} /> Seguinos en Instagram
+            </a>
+          </div>
         </div>
       )}
     </div>
@@ -2920,9 +2963,9 @@ function MapPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Clubes y canchas</h1>
-      <p className="text-gray-500 mb-2">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Dónde jugar</p>
+      <h1 className="titulo-pagina mt-2 mb-3">Clubes y canchas</h1>
+      <p className="text-gray-500 mb-8">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
 
       {/* Country filter */}
       <div className="flex flex-wrap gap-2 mb-8">
@@ -3033,8 +3076,8 @@ function ContactPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Contacto</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Hablemos</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Contacto</h1>
 
       <div className="grid md:grid-cols-2 gap-12">
         {/* Contact Info */}
@@ -3102,8 +3145,10 @@ function ContactPage() {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre</label>
+              <label htmlFor="ct-nombre" className="block text-sm font-semibold text-navy-700 mb-1">Nombre</label>
               <input
+                id="ct-nombre"
+                autoComplete="name"
                 type="text"
                 required
                 value={form.name}
@@ -3112,8 +3157,10 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Email</label>
+              <label htmlFor="ct-email" className="block text-sm font-semibold text-navy-700 mb-1">Email</label>
               <input
+                id="ct-email"
+                autoComplete="email"
                 type="email"
                 required
                 value={form.email}
@@ -3122,8 +3169,11 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono</label>
+              <label htmlFor="ct-telefono" className="block text-sm font-semibold text-navy-700 mb-1">Teléfono <span className="font-normal text-gray-500">(opcional)</span></label>
               <input
+                id="ct-telefono"
+                autoComplete="tel"
+                inputMode="tel"
                 type="tel"
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
@@ -3131,8 +3181,9 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Mensaje</label>
+              <label htmlFor="ct-mensaje" className="block text-sm font-semibold text-navy-700 mb-1">Mensaje</label>
               <textarea
+                id="ct-mensaje"
                 required
                 rows={4}
                 value={form.message}
@@ -3286,7 +3337,8 @@ function InscripcionPage() {
   if (!evt.inscripcionesAbiertas || eventoTerminado || cierrePasado) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
-        <h1 className="font-display text-2xl font-bold text-navy-700 mb-2">{evt.name}</h1>
+        <p className="eyebrow-pagina">{eventoTerminado ? 'Evento finalizado' : 'Inscripciones cerradas'}</p>
+        <h1 className="titulo-pagina mt-2 mb-3 md:text-4xl">{evt.name}</h1>
         <p className="text-gray-600 mb-6">
           {eventoTerminado
             ? 'Este torneo ya se jugó: las inscripciones están cerradas.'
@@ -3303,6 +3355,17 @@ function InscripcionPage() {
             <MessageCircle size={18} /> Consultar por WhatsApp
           </a>
         )}
+        {/* Antes, sin WhatsApp cargado, la página quedaba sin ninguna salida. */}
+        <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          {eventoTerminado && (
+            <Link to="/torneos" className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-6 py-3 font-display font-bold text-white transition-colors hover:bg-navy-600">
+              <Trophy size={18} /> Ver los resultados
+            </Link>
+          )}
+          <Link to="/eventos" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-6 py-3 font-display font-bold text-navy-700 transition-colors hover:bg-gray-50">
+            <CalendarDays size={18} /> Próximos eventos
+          </Link>
+        </div>
       </div>
     );
   }
@@ -3351,8 +3414,9 @@ function InscripcionPage() {
 
   return (
     <div className="fade-in max-w-3xl mx-auto px-4 py-12">
-      <Link to="/eventos" className="text-sm text-gray-400 hover:text-navy-700">← Eventos</Link>
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2 mb-1">Inscripción — {evt.name}</h1>
+      <Link to="/eventos" className="-my-2 inline-block py-2 text-sm text-gray-500 hover:text-navy-700">← Eventos</Link>
+      <p className="eyebrow-pagina mt-4 flex">Inscripción</p>
+      <h1 className="titulo-pagina mt-2 mb-2 md:text-4xl">{evt.name}</h1>
       <p className="text-gray-500 mb-1">
         {rangoLargo(evt.date, evt.endDate)} · {evt.location}{evt.city ? `, ${evt.city}` : ''}
       </p>
@@ -3366,18 +3430,18 @@ function InscripcionPage() {
           <Users size={14} /> Ya hay {inscriptos} {inscriptos === 1 ? 'inscripto' : 'inscriptos'}
         </p>
       )}
-      <div className="w-16 h-1 bg-lime-400 mb-8 mt-2" />
+      <div aria-hidden className="mb-8" />
 
       <form onSubmit={enviar} className="space-y-5">
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-nombre" className={labelCls}>Nombre y apellido *</label>
-            <input id="insc-nombre" type="text" required value={form.nombre}
+            <input id="insc-nombre" type="text" required autoComplete="name" value={form.nombre}
               onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} />
           </div>
           <div>
             <label htmlFor="insc-celular" className={labelCls}>Celular (WhatsApp) *</label>
-            <input id="insc-celular" type="tel" required placeholder="099 123 456" value={form.celular}
+            <input id="insc-celular" type="tel" inputMode="tel" autoComplete="tel" required placeholder="099 123 456" value={form.celular}
               onChange={e => setForm({ ...form, celular: e.target.value })} className={inputCls} />
           </div>
         </div>
@@ -3408,7 +3472,7 @@ function InscripcionPage() {
                     onClick={() => toggleCat(c)}
                     aria-pressed={cats.includes(c)}
                     disabled={!cats.includes(c) && topeAlcanzado}
-                    className={`rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-200 ${
+                    className={`min-h-[44px] rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-200 ${
                       cats.includes(c)
                         ? 'border-navy-700 bg-navy-700 text-white'
                         : 'border-gray-200 text-navy-700 hover:border-navy-700'
@@ -3418,7 +3482,7 @@ function InscripcionPage() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">
+              <p className="mt-1.5 text-xs text-gray-500">
                 Tocá todas las categorías en las que jugás{maxCats ? ` (hasta ${maxCats})` : ''}.
                 {topeAlcanzado ? ' Ya elegiste el máximo: destildá una para cambiarla.' : ''}
               </p>
@@ -3456,21 +3520,21 @@ function InscripcionPage() {
                   className={inputCls} />
               </div>
             ))}
-            <p className="text-xs text-gray-400">Dejá vacío el que todavía no tenés confirmado.</p>
+            <p className="text-xs text-gray-500">Dejá vacío el que todavía no tenés confirmado.</p>
           </div>
         )}
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-email" className={labelCls}>Email</label>
-            <input id="insc-email" type="email" value={form.email}
+            <input id="insc-email" type="email" autoComplete="email" value={form.email}
               onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} />
           </div>
           <div>
             <label htmlFor="insc-dupr" className={labelCls}>Tu DUPR ID <span className="font-normal text-gray-400">(opcional)</span></label>
-            <input id="insc-dupr" type="text" placeholder="Ej: 7XZ4V2" value={form.duprId}
+            <input id="insc-dupr" type="text" autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="Ej: 7XZ4V2" value={form.duprId}
               onChange={e => setForm({ ...form, duprId: e.target.value })} className={inputCls} />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500">
               ¿No tenés? Creá tu cuenta gratis en{' '}
               <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
               y tus partidos contarán para tu rating mundial.
@@ -3744,8 +3808,8 @@ function CheckoutPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Finalizar pedido</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Tu pedido</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Finalizar pedido</h1>
 
       <div className="grid lg:grid-cols-2 gap-12">
         {/* Order Summary */}
