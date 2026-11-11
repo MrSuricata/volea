@@ -16,35 +16,80 @@ export function ordenSeeds(tamano: number): number[] {
   return orden;
 }
 
+// Máximo emparejamiento (Kuhn) entre filas y columnas con aristas permitidas. Tamaños chicos (≤ 16).
+function maxEmparejamiento(filas: number, columnas: number, permitido: (f: number, c: number) => boolean): number {
+  const duenio: (number | null)[] = Array(columnas).fill(null);
+  const intentar = (f: number, visto: boolean[]): boolean => {
+    for (let c = 0; c < columnas; c++) {
+      if (visto[c] || !permitido(f, c)) continue;
+      visto[c] = true;
+      if (duenio[c] === null || intentar(duenio[c]!, visto)) { duenio[c] = f; return true; }
+    }
+    return false;
+  };
+  let total = 0;
+  for (let f = 0; f < filas; f++) if (intentar(f, Array(columnas).fill(false))) total += 1;
+  return total;
+}
+
+/**
+ * Primera ronda sin cruces del mismo grupo cuando se puede, tocando lo mínimo el orden por siembra.
+ * `orden` = número de seed por posición del dibujo (null = bye). Los partidos con bye no se tocan y
+ * en cada partido el mejor sembrado ("de arriba") queda fijo: solo se reparten los de abajo.
+ * Se recorre de mejor a peor sembrado de arriba: cada uno se queda con su rival original si con eso
+ * todavía se puede llegar al máximo posible de cruces sin mismo grupo; si no, con el rival de siembra
+ * más cercana a la original que lo permita. Así, si existe una asignación sin mismo grupo, sale esa;
+ * si no existe, se minimizan los cruces repetidos.
+ */
+function evitarMismoGrupo(orden: (number | null)[], seeds: SeedInfo[]): (number | null)[] {
+  const grupo = (s: number) => seeds[s - 1].grupoId;
+  const partidos: { pos: number; arriba: number; abajo: number }[] = [];
+  for (let i = 0; i < orden.length / 2; i++) {
+    const x = orden[2 * i];
+    const y = orden[2 * i + 1];
+    if (x === null || y === null) continue;
+    partidos.push({ pos: i, arriba: Math.min(x, y), abajo: Math.max(x, y) });
+  }
+  if (partidos.every((p) => grupo(p.arriba) !== grupo(p.abajo))) return orden;
+  partidos.sort((p, q) => p.arriba - q.arriba);
+  const libres = partidos.map((p) => p.abajo);
+  const bien = (arriba: number, abajo: number) => grupo(arriba) !== grupo(abajo);
+  const alcanzable = (desde: number, cols: number[]) =>
+    maxEmparejamiento(partidos.length - desde, cols.length, (f, c) => bien(partidos[desde + f].arriba, cols[c]));
+  const objetivo = alcanzable(0, libres);
+  let logrados = 0;
+  const elegido = new Map<number, number>();
+  partidos.forEach((p, k) => {
+    // candidatos por cercanía a la siembra original (a igual distancia, el más débil: el que le tocaba)
+    const candidatos = [...libres].sort((u, v) => Math.abs(u - p.abajo) - Math.abs(v - p.abajo) || v - u);
+    for (const c of candidatos) {
+      const resto = libres.filter((x) => x !== c);
+      const suma = (bien(p.arriba, c) ? 1 : 0) + alcanzable(k + 1, resto);
+      if (logrados + suma === objetivo) {
+        elegido.set(p.pos, c);
+        if (bien(p.arriba, c)) logrados += 1;
+        libres.splice(libres.indexOf(c), 1);
+        return;
+      }
+    }
+  });
+  const nuevo = [...orden];
+  for (const p of partidos) {
+    nuevo[2 * p.pos] = p.arriba;
+    nuevo[2 * p.pos + 1] = elegido.get(p.pos)!;
+  }
+  return nuevo;
+}
+
 export function armarLlave(seeds: SeedInfo[], tercerPuesto: boolean): PartidoLlave[] {
   const total = seeds.length;
   let tamano = 2;
   while (tamano < total) tamano *= 2;
 
   // ubicar seeds en posiciones de bracket; los números que exceden el total son byes (null)
-  const porPosicion: (SeedInfo | null)[] = ordenSeeds(tamano).map((s) => (s <= total ? seeds[s - 1] : null));
-
-  // swap anti mismo-grupo en primera ronda: una pasada, solo entre "segundos slots"
-  // de partidos adyacentes, nunca tocando byes (los byes son de los mejores seeds)
+  const numeros = evitarMismoGrupo(ordenSeeds(tamano).map((s) => (s <= total ? s : null)), seeds);
+  const porPosicion: (SeedInfo | null)[] = numeros.map((s) => (s === null ? null : seeds[s - 1]));
   const cantPartidos = tamano / 2;
-  for (let i = 0; i < cantPartidos; i++) {
-    const a = porPosicion[2 * i];
-    const b = porPosicion[2 * i + 1];
-    if (!a || !b || a.grupoId !== b.grupoId) continue;
-    for (const j of [i - 1, i + 1]) {
-      if (j < 0 || j >= cantPartidos) continue;
-      const c = porPosicion[2 * j];
-      const d = porPosicion[2 * j + 1];
-      if (!c || !d) continue;
-      const resuelve = d.grupoId !== a.grupoId;
-      const noRompe = b.grupoId !== c.grupoId;
-      if (resuelve && noRompe) {
-        porPosicion[2 * i + 1] = d;
-        porPosicion[2 * j + 1] = b;
-        break;
-      }
-    }
-  }
 
   const partidos: PartidoLlave[] = [];
   let rondaActual: PartidoLlave[] = [];

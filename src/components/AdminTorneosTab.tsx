@@ -71,7 +71,7 @@ function PildoraSync({ estado, refrescando, alRefrescar }: { estado: EstadoSync;
 }
 
 export function AdminTorneosTab({ avisar }: { avisar: (mensaje: string) => void }) {
-  const { estado, setEstado, estadoSync, conflictos, resolverConflicto, refrescar } = useSyncTorneos(avisar);
+  const { estado, setEstado, estadoSync, conflictos, detallesConflicto, resolverConflicto, refrescar } = useSyncTorneos(avisar);
   const [refrescando, setRefrescando] = useState(false);
 
   async function onRefrescar() {
@@ -88,13 +88,22 @@ export function AdminTorneosTab({ avisar }: { avisar: (mensaje: string) => void 
       <PildoraSync estado={estadoSync} refrescando={refrescando} alRefrescar={() => void onRefrescar()} />
       {conflictos.map((id) => {
         const t = estado.torneos.find((x) => x.id === id);
+        const choques = detallesConflicto[id] ?? [];
         return (
           <div key={id} role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
             <p className="flex items-start gap-2 text-sm text-amber-900">
               <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700" aria-hidden />
               <span>
-                <strong className="font-bold">{t?.nombre ?? id}</strong>: hay una versión distinta en el server y vos tenés cambios sin subir acá. ¿Con cuál te quedás?
+                <strong className="font-bold">{t?.nombre ?? id}</strong>: desde otro dispositivo (otra tablet o el celular de un árbitro) se cargó algo que choca con lo que tenés sin subir acá. Lo que no choca ya se combinó solo.
               </span>
+            </p>
+            {choques.length > 0 && (
+              <ul className="mt-2 list-disc space-y-0.5 pl-9 text-sm text-amber-900">
+                {choques.map((c) => <li key={c}>{c}</li>)}
+              </ul>
+            )}
+            <p className="mt-2 pl-7 text-xs text-amber-900/80">
+              <strong>Mi versión</strong>: quedan tus datos en lo que choca (y se suma lo demás que cargaron en el otro dispositivo). <strong>La del server</strong>: se descartan tus cambios sin subir de este torneo.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Boton onClick={() => void resolverConflicto(id, 'local')}>Mi versión</Boton>
@@ -104,7 +113,7 @@ export function AdminTorneosTab({ avisar }: { avisar: (mensaje: string) => void 
         );
       })}
       <div className="rk rk--admin">
-        <TorneosApp estado={estado} setEstado={setEstado} />
+        <TorneosApp estado={estado} setEstado={setEstado} sync={{ estado: estadoSync, refrescar: () => void onRefrescar(), refrescando }} />
       </div>
     </div>
   );

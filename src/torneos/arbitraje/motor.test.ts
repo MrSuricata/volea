@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada } from './motor';
+import { esMarcadorValido, estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada } from './motor';
 import type { FormatoArbitraje } from '../engine/tipos';
 
 const SO11: FormatoArbitraje = { tipo: 'sideout', a: 11, mejorDe: 1 };
@@ -135,5 +135,91 @@ describe('formato elegido al empezar', () => {
     const e = estadoDe(f, true, jug);
     expect(e.terminado).toBe(true);
     expect(resultadoFinal(f, e)).toEqual({ puntosA: 0, puntosB: 15 });
+  });
+});
+
+describe('quién saca y de qué lado, jugada por jugada (side out en dobles)', () => {
+  // A arranca sacando; en cada pareja el jugador 0 arranca a la derecha.
+  // [jugada, saca, servidor, quién tiene la pelota, quién está a la derecha en A y en B, canto]
+  const pasos: [Jugada, 'A' | 'B', 1 | 2, 0 | 1, 0 | 1, 0 | 1, string][] = [
+    [ini('A'), 'A', 2, 0, 0, 0, '0-0-2'], // 0-0-2: saca el de la derecha de A
+    [r('A'), 'A', 2, 0, 1, 0, '1-0-2'], // suma A: el que sacó cruza a la izquierda y sigue sacando
+    [r('B'), 'B', 1, 0, 1, 0, '0-1-1'], // pierde el servidor 2: side out, saca el de la derecha de B
+    [r('B'), 'B', 1, 0, 1, 1, '1-1-1'], // suma B: B0 cruza a la izquierda y sigue
+    [r('A'), 'B', 2, 1, 1, 1, '1-1-2'], // pierde el servidor 1: pasa al compañero (B1)
+    [r('B'), 'B', 2, 1, 1, 0, '2-1-2'], // suma B con B1: B1 cruza
+    [r('A'), 'A', 1, 1, 1, 0, '1-2-1'], // side out: saca el de la derecha de A, que ahora es A1 (A tiene 1, impar)
+    [r('B'), 'A', 2, 0, 1, 0, '1-2-2'], // pierde A1: saca A0
+    [r('A'), 'A', 2, 0, 0, 0, '2-2-2'], // suma A con A0
+  ];
+  it.each(pasos.map((p, i) => [i, ...p] as const))('jugada %i', (i, _j, saca, servidor, sirve, derA, derB, canto) => {
+    const e = estadoDe(SO11, true, pasos.slice(0, i + 1).map((p) => p[0]));
+    expect({ saca: e.saca, servidor: e.servidor, sirve: e.sirve, derecha: e.derecha, canto: e.canto })
+      .toEqual({ saca, servidor, sirve, derecha: { A: derA, B: derB }, canto });
+  });
+
+  it('en cada equipo, el que arrancó a la derecha está a la derecha con puntaje par; el primer servidor de cada turno es el de la derecha', () => {
+    const jug: Jugada[] = [ini('A')];
+    for (let i = 0; i < 60; i++) {
+      const antes = estadoDe(SO11, true, jug);
+      jug.push(r(i % 3 === 0 ? 'B' : 'A'));
+      const e = estadoDe(SO11, true, jug);
+      if (e.terminado) break;
+      expect(e.derecha.A === 0).toBe(e.puntos.a % 2 === 0);
+      expect(e.derecha.B === 0).toBe(e.puntos.b % 2 === 0);
+      if (e.saca !== antes.saca) expect({ servidor: e.servidor, sirve: e.sirve }).toEqual({ servidor: 1, sirve: e.derecha[e.saca] });
+    }
+  });
+});
+
+describe('deshacer cruzando games', () => {
+  it('deshacer el punto que cerró el game vuelve al game anterior con sus tiempos', () => {
+    const g1: Jugada[] = [ini('A'), ...rallies('A', 5), { t: 'tiempo', equipo: 'B' }, ...rallies('A', 6)];
+    const cerrado = estadoDe(RA11x3, true, g1);
+    expect(cerrado).toMatchObject({ game: 2, gamesA: 1, saca: 'B', puntos: { a: 0, b: 0 }, tiempos: { A: 0, B: 0 } });
+    const deshecho = estadoDe(RA11x3, true, g1.slice(0, -1));
+    expect(deshecho).toMatchObject({ game: 1, gamesA: 0, games: [], saca: 'A', puntos: { a: 10, b: 0 }, tiempos: { A: 0, B: 1 }, finDeGame: false });
+  });
+
+  it('deshacer el primer punto del game 2 deja el game 2 en 0-0 con el saque del otro equipo', () => {
+    const g1 = [ini('A'), ...rallies('A', 11)];
+    const e = estadoDe(RA11x3, true, [...g1, r('B'), r('B')].slice(0, -2));
+    expect(e).toMatchObject({ game: 2, saca: 'B', puntos: { a: 0, b: 0 }, finDeGame: true });
+  });
+
+  it('deshacer el punto que cerró el partido lo reabre', () => {
+    const jug = [ini('A'), ...rallies('A', 11), ...rallies('A', 11)];
+    expect(estadoDe(RA11x3, true, jug).terminado).toBe(true);
+    const e = estadoDe(RA11x3, true, jug.slice(0, -1));
+    expect(e).toMatchObject({ terminado: false, ganador: null, game: 2, gamesA: 1, puntos: { a: 10, b: 0 } });
+  });
+});
+
+describe('game 3 a 21', () => {
+  const RA21x3: FormatoArbitraje = { tipo: 'rally', a: 21, mejorDe: 3 };
+  const hasta3 = [ini('A'), ...rallies('A', 21), ...rallies('B', 21)];
+  it('cambio de lado a 11 en el tercero (una sola vez) y 3 tiempos', () => {
+    expect(estadoDe(RA21x3, true, [...hasta3, ...rallies('A', 10)]).cambiarLado).toBe(false);
+    const a11 = [...hasta3, ...rallies('A', 11)];
+    const e = estadoDe(RA21x3, true, a11);
+    expect(e).toMatchObject({ game: 3, cambiarLado: true, puntos: { a: 11, b: 0 }, maxTiempos: 3 });
+    expect(estadoDe(RA21x3, true, [...a11, r('B')]).cambiarLado).toBe(false);
+    expect(estadoDe(RA21x3, true, [...a11, ...rallies('B', 11)]).cambiarLado).toBe(false);
+  });
+  it('en los games 1 y 2 no hay cambio a mitad', () => {
+    expect(estadoDe(RA21x3, true, [ini('A'), ...rallies('A', 11)]).cambiarLado).toBe(false);
+  });
+  it('el tercero lo saca el que no sacó primero el segundo', () => {
+    expect(estadoDe(RA21x3, true, hasta3).saca).toBe('A');
+  });
+});
+
+describe('marcador válido para dibujar', () => {
+  it('acepta el resumen del motor y rechaza lo roto', () => {
+    expect(esMarcadorValido(resumen(estadoDe(RA15, true, [ini('A'), r('A')])))).toBe(true);
+    expect(esMarcadorValido({ puntos: { a: 1, b: 0 }, saca: 'A' })).toBe(false); // sin games
+    expect(esMarcadorValido(null)).toBe(false);
+    expect(esMarcadorValido({ puntos: { a: 1, b: 0 }, games: [null], gamesA: 0, gamesB: 0, game: 1, saca: 'A' })).toBe(false);
+    expect(esMarcadorValido({ puntos: { a: '1', b: 0 }, games: [], gamesA: 0, gamesB: 0, game: 1, saca: 'A' })).toBe(false);
   });
 });

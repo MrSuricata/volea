@@ -4,6 +4,7 @@ import type { ConfigPuntos, Escalon, Jugador, Torneo } from '../engine/tipos';
 import { calcularRanking } from '../engine/ranking';
 import { listarJugadoresPublicos, listarTorneosPublicos, obtenerConfigPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
+import NavPublica from './NavPublica';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 
@@ -56,6 +57,7 @@ export default function RankingPage() {
   return (
     <div className="rk">
       <main className="contenedor">
+        <NavPublica activa="ranking" />
         <header className="cabecera">
           <h1><span className="marca">RANKING</span> VOLEA</h1>
           <div className="acciones">

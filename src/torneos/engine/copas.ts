@@ -3,7 +3,7 @@
 // Cada copa es un torneo aparte (solo llave), así En vivo, el gestor y la página pública lo
 // tratan como cualquier cuadro.
 import type { PartidoGrupo, PartidoLlave, SlotLlave, Torneo } from './tipos';
-import { nuevoId, resultadoDe } from './tipos';
+import { nuevoId, puntosDePartido, resultadoDe } from './tipos';
 import { calcularTabla } from './tabla';
 import { armarLlave } from './llave';
 
@@ -26,11 +26,13 @@ function stats(parejaId: string, partidos: PartidoGrupo[], excluir: Set<string>)
     const rival = p.aId === parejaId ? p.bId : p.aId;
     if (excluir.has(rival)) continue;
     const r = resultadoDe(p);
-    if (!r) continue;
-    const propios = p.aId === parejaId ? r.a : r.b;
-    const ajenos = p.aId === parejaId ? r.b : r.a;
+    const pts = puntosDePartido(p);
+    if (!r || !pts) continue;
+    const esA = p.aId === parejaId;
+    const propios = esA ? pts.a : pts.b;
+    const ajenos = esA ? pts.b : pts.a;
     s.pj += 1; s.pf += propios; s.dif += propios - ajenos;
-    if (propios > ajenos) s.pg += 1;
+    if (esA ? r.a > r.b : r.b > r.a) s.pg += 1;
   }
   return s;
 }
@@ -139,8 +141,14 @@ export function armarLlaveSeis(t: Torneo): PartidoLlave[] {
   if (!gruposCompletos(t)) throw new Error('Quedan partidos de grupo sin resultado');
   const g = tablaGeneral(t);
   const [p1, p2, p3] = g.filter((f) => f.posicion === 1).map((f) => f.parejaId);
-  const [s1, s2, s3] = g.filter((f) => f.posicion === 2).map((f) => f.parejaId);
-  if (!p3 || !s3) throw new Error('Faltan primeros o segundos de grupo');
+  const segundos = g.filter((f) => f.posicion === 2);
+  if (!p3 || segundos.length < 3) throw new Error('Faltan primeros o segundos de grupo');
+  // Si el peor segundo es del grupo del 3er primero, repetirían el partido de grupo: se cambia por
+  // el 2º mejor segundo (el más cercano en la siembra). Los tres segundos son de grupos distintos,
+  // así que el otro cuarto (mejor segundo vs el que baja) tampoco queda del mismo grupo.
+  const grupoP3 = g.find((f) => f.parejaId === p3)!.grupoId;
+  if (segundos[2].grupoId === grupoP3) [segundos[1], segundos[2]] = [segundos[2], segundos[1]];
+  const [s1, s2, s3] = segundos.map((f) => f.parejaId);
   const seed = (parejaId: string): SlotLlave => ({ tipo: 'seed', parejaId });
   const gan = (partidoId: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId });
   const base = { puntosA: null, puntosB: null, esTercerPuesto: false };

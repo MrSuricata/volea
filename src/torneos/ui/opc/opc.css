@@ -1,0 +1,67 @@
+/* Pantalla de control del One Point Challenge (ControlOpc). */
+
+/* Toques: sin la demora del doble toque para zoom ni el resaltado gris de iOS; el scroll
+   vertical sigue funcionando (pan-y), y un toque que arrastra no dispara el click. */
+.opc .opc-toque {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Nombres largos: cortan entre palabras y, si una palabra sola no entra, adentro de ella
+   (nunca puntos suspensivos en el nombre del que hay que llamar a la cancha). */
+.opc .opc-nombre {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* Cuadro: deslizar de costado de a una ronda. */
+.opc .opc-carril {
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.opc .opc-columna {
+  scroll-snap-align: start;
+}
+
+/* Podio: un destello suave detrás del trofeo. */
+.opc .opc-destello {
+  position: absolute;
+  inset: -40% -20% auto;
+  height: 120%;
+  background: radial-gradient(closest-side, rgba(204, 255, 0, 0.22), transparent 70%);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .opc .opc-podio .opc-destello { animation: opc-latido 2.4s ease-in-out infinite; }
+}
+@keyframes opc-latido {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+/* Con la pantalla de control abierta el estado del guardado está en su barra de arriba: la
+   píldora flotante del gestor (AdminTorneosTab, portal a <body>) se esconde para no tapar
+   los botones de abajo. Si cambia su etiqueta, simplemente vuelve a verse. */
+body.opc-control-abierto > button[aria-label$='Refrescar desde el server'] {
+  display: none;
+}
+
+/* Abajo, encima de la barra de accesos del panel (64px + zona segura en el celular; en la compu
+   no hay barra): Anterior/Siguiente con el aviso del último toque arriba de ellos (vista cruce)
+   y el aviso flotante en las otras vistas. */
+.opc .opc-pie-cruce { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+.opc-aviso-flotante { bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 10px); }
+@media (min-width: 1024px) {
+  .opc .opc-pie-cruce { bottom: 0; }
+  .opc-aviso-flotante { bottom: 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .opc-aviso { animation: opc-aviso-entra 0.18s ease-out; }
+}
+@keyframes opc-aviso-entra {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

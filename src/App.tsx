@@ -4452,7 +4452,8 @@ function Marco({ children }: { children: React.ReactNode }) {
       <TopBar />
       <Navbar />
       <CartDrawer />
-      <main className="flex-1">{children}</main>
+      {/* Páginas públicas de torneos: el azul de .rk llena también lo que sobra de alto hasta el pie. */}
+      <main className="flex-1" style={/^\/(torneos|ranking|programacion)(\/|$)/.test(pathname) ? { background: '#001f3f' } : undefined}>{children}</main>
       <Footer />
       <FloatingWhatsApp />
       <BarraAdmin />

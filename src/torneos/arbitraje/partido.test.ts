@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Torneo } from '../engine/tipos';
-import { esDobles, formatoDe, ladosDelPartido, partidosArbitrables } from './partido';
+import { esDobles, formatoDe, jugadoresDe, ladosDelPartido, nombreCorto, nombreJugador, partidosArbitrables, resultadoEnCuadro } from './partido';
 
 const torneo = (c: Partial<Torneo> = {}): Torneo => ({
   id: 't', nombre: 'MIXTO A', creadoEl: '2026-10-27', fase: 'llave',
@@ -48,5 +48,41 @@ describe('partido arbitrado', () => {
   it('lista los partidos para la hoja: sin byes y en orden de juego', () => {
     const ids = partidosArbitrables(torneo()).map((p) => p.partidoId);
     expect(ids).toEqual(['m1', 's1', 's2', 'f']);
+  });
+});
+
+describe('separar la pareja en jugadores', () => {
+  it('reconoce los separadores de uso común', () => {
+    expect(jugadoresDe('Ana Pérez y Luis Gómez')).toEqual(['Ana Pérez', 'Luis Gómez']);
+    expect(jugadoresDe('Ana / Luis')).toEqual(['Ana', 'Luis']);
+    expect(jugadoresDe('Ana Pérez - Luis Gómez')).toEqual(['Ana Pérez', 'Luis Gómez']);
+    expect(jugadoresDe('João e Maria')).toEqual(['João', 'Maria']);
+    expect(jugadoresDe('Ana & Luis')).toEqual(['Ana', 'Luis']);
+  });
+  it('un guion sin espacios es parte del nombre', () => {
+    expect(jugadoresDe('Ana-María Ruiz')).toEqual(['Ana-María Ruiz']);
+  });
+  it('si no se puede separar, nunca queda un nombre vacío', () => {
+    expect(nombreJugador(jugadoresDe('LOS TIGRES'), 0)).toBe('Jugador 1');
+    expect(nombreJugador(jugadoresDe('LOS TIGRES'), 1)).toBe('Jugador 2');
+    expect(nombreJugador([], 1)).toBe('Jugador 2');
+    expect(nombreJugador(['Ana', 'Luis'], 1)).toBe('Luis');
+  });
+});
+
+describe('resultado en el cuadro', () => {
+  it('lo encuentra en grupos y en la llave; null si no hay', () => {
+    expect(resultadoEnCuadro(torneo(), 's1')).toEqual({ puntosA: 15, puntosB: 9 });
+    expect(resultadoEnCuadro(torneo(), 'm1')).toBeNull();
+    expect(resultadoEnCuadro(torneo(), 'no-existe')).toBeNull();
+  });
+});
+
+describe('nombre corto del equipo (botón de Tiempo)', () => {
+  it('primer nombre del primer jugador, o la primera palabra que no es artículo', () => {
+    expect(nombreCorto('Ana Pérez y Luis Gómez')).toBe('Ana');
+    expect(nombreCorto('João Silva e Maria Souza')).toBe('João');
+    expect(nombreCorto('LOS TIGRES DEL NORTE')).toBe('TIGRES');
+    expect(nombreCorto('Equipo A')).toBe('Equipo');
   });
 });

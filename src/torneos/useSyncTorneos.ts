@@ -3,7 +3,9 @@ import { supabase } from '../services/supabaseClient';
 import { conLimite } from '../utils/arranque';
 import type { EstadoTorneos } from './TorneosApp';
 import type { Torneo } from './engine/tipos';
-import { mergeTorneos } from './sync';
+import { aplicarEdicion, aplicarRemotosFrescos, filaDeTorneo, mergeTorneos, mismoInstante, subirTorneo } from './sync';
+import type { EntradaRemota, FilaTorneo, OperacionesTorneo } from './sync';
+import { fusionarTorneo } from './fusion';
 import { CLAVE_CACHE } from './cacheTorneos';
 import type { Cache } from './cacheTorneos';
 
@@ -38,7 +40,35 @@ function conTechoSync<T extends { data?: unknown; error: unknown }>(
 }
 
 function cacheVacia(): Cache {
-  return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false, conflictos: [] };
+  return { estado: { torneos: [], jugadores: [] }, base: {}, sucios: [], borrados: [], jugadoresBase: [], jugadoresSucios: false, configSucia: false, conflictos: [], baseDatos: {}, conflictosDetalle: {} };
+}
+
+// Relectura automatica (ademas de Realtime): cada cuanto se pregunta al server, con la pestaña
+// visible, si cambio algun torneo. Es un select de `id, updated_at` (bytes), y solo si algo
+// cambio se baja todo. Realtime trae los cambios al instante; esto cubre un canal caido.
+const CHEQUEO_MS = 20000;
+
+// Mientras el foco esta en una caja de texto (un resultado a medio tipear) no se relee: el
+// borrador vive en el componente y una relectura no lo pisa, pero tampoco hay apuro — se relee
+// apenas se suelta la caja (Enter / salir de la fila, que ademas guarda).
+function editandoTexto(): boolean {
+  if (typeof document === 'undefined') return false;
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement)) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
+}
+
+function operacionesSupabase(sb: NonNullable<typeof supabase>): OperacionesTorneo {
+  return {
+    actualizarSi: (fila: FilaTorneo, base: string) => {
+      const { id, ...resto } = fila;
+      return conTechoSync(sb.from('rk_torneos').update(resto).eq('id', id).eq('updated_at', base).select('updated_at')) as PromiseLike<{ data: { updated_at: string }[] | null; error: unknown }>;
+    },
+    insertar: (fila: FilaTorneo) =>
+      conTechoSync(sb.from('rk_torneos').insert(fila).select('updated_at')) as PromiseLike<{ data: { updated_at: string }[] | null; error: unknown }>,
+    leer: (id: string) =>
+      conTechoSync(sb.from('rk_torneos').select('data, updated_at').eq('id', id).maybeSingle()) as PromiseLike<{ data: { data: Torneo; updated_at: string } | null; error: unknown }>,
+  };
 }
 
 function leerCache(): Cache {
@@ -56,6 +86,10 @@ function leerCache(): Cache {
           jugadoresSucios: c.jugadoresSucios ?? false,
           configSucia: c.configSucia ?? false,
           conflictos: c.conflictos ?? [],
+          // caches de antes de la fusion por partido no traen esto: sus torneos sucios caen al
+          // comportamiento seguro de siempre (conflicto si el server avanzo), nunca a pisar
+          baseDatos: c.baseDatos && typeof c.baseDatos === 'object' ? c.baseDatos : {},
+          conflictosDetalle: c.conflictosDetalle && typeof c.conflictosDetalle === 'object' ? c.conflictosDetalle : {},
         };
       }
     }
@@ -87,6 +121,17 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   const avisosPorClave = useRef<Set<string>>(new Set()); // evita repetir el mismo aviso de dato invalido para siempre
   const ultimoAvisoGeneral = useRef(0); // rate-limit general (ms epoch de time del ultimo aviso "generico")
   const ultimoPushFallo = useRef(false); // ultimo intento de push (o su ausencia de supabase): fallo? lo deriva el effect
+  // Pull y push NO se solapan: un pull que lee el server mientras el push escribe veria su propia
+  // escritura como "el server avanzo" y podria fusionar contra si mismo (choque falso si se edito
+  // de nuevo el mismo partido). Lo pedido mientras el otro corre queda encolado (una vez).
+  const pullEnVuelo = useRef(false);
+  const pullPendiente = useRef(false);
+  const pullRef = useRef<() => Promise<void>>(async () => {}); // push() encola un pull sin depender de su identidad
+  const chequeoEnVuelo = useRef(false);
+  // updated_at del server que este equipo ya vio por torneo (ultimo pull o push propio): el
+  // chequeo liviano y Realtime comparan contra esto para no bajar todo por un eco de lo propio.
+  const ultimoVisto = useRef<Record<string, string>>({ ...cache.base });
+  const fusionesSeguidas = useRef(0); // tope de re-push tras fusionar, para no ciclar si el server no para de moverse
 
   // Aviso rate-limitado: con `clave` se reporta UNA sola vez por clave (para siempre, hasta
   // reload); sin `clave` es un aviso "generico" limitado a 1 cada 60s para no floodear toasts
@@ -143,9 +188,10 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
 
   // ---- PUSH: sube sucios + borrados + jugadores + config, con guard de reentrada ----
   const push = useCallback(async () => {
-    if (enVuelo.current) { pedidoReentrada.current = true; return; }
+    if (enVuelo.current || pullEnVuelo.current) { pedidoReentrada.current = true; return; }
     if (!supabase) { ultimoPushFallo.current = true; setEstadoSync('sinConexion'); return; }
     enVuelo.current = true;
+    let repetirPorFusion = false;
     try {
       ultimoPushFallo.current = false; // optimista: se marca true mas abajo si algo falla en este intento
       const c = cacheRef.current;
@@ -176,50 +222,36 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       const ahora = new Date().toISOString();
       const baseDelta: Record<string, string> = {};
       const idsSubidos = new Set<string>();
+      const frescos: EntradaRemota[] = []; // el server avanzo: versiones a fusionar
       let huboErrorGeneral = false;
+      const snapshotBase = c.base;
 
-      // ---- torneos: validar (poison-pill) y subir; batch primero, fila por fila si falla ----
-      const validos: Torneo[] = [];
+      // ---- torneos: validar (poison-pill) y subir de a uno, condicionado a la base ----
+      // (antes: un upsert en lote que pisaba lo que el server tuviera; ver subirTorneo en sync.ts)
+      const op = operacionesSupabase(supabase);
       for (const [id, t] of snapshotTorneos) {
-        if (esTorneoValido(t)) {
-          validos.push(t);
-        } else {
+        if (!esTorneoValido(t)) {
           avisarLimitado(`El torneo "${t.nombre || id}" tiene datos incompletos y no se pudo sincronizar. Revisalo o borralo.`, `poison:${id}`);
+          continue;
         }
-      }
-      if (validos.length > 0) {
-        const filas = validos.map((t) => ({
-          id: t.id,
-          nombre: t.nombre,
-          fase: t.fase,
-          categoria: t.categoria ?? null,
-          visible: t.visible !== false,
-          cuenta_ranking: t.cuentaParaRanking !== false,
-          data: t,
-          creado_el: t.creadoEl,
-          updated_at: ahora,
-        }));
-        const { error } = await conTechoSync(supabase.from('rk_torneos').upsert(filas));
-        if (!error) {
-          for (const f of filas) { baseDelta[f.id] = ahora; idsSubidos.add(f.id); }
+        const r = await subirTorneo(op, filaDeTorneo(t, ahora), snapshotBase[id]);
+        if (r.tipo === 'ok') {
+          baseDelta[id] = r.updatedAt;
+          idsSubidos.add(id);
+          ultimoVisto.current[id] = r.updatedAt;
+        } else if (r.tipo === 'avanzado') {
+          // otro dispositivo (arbitro, otra tablet, En vivo) escribio desde nuestra base: no se
+          // pisa; se fusiona abajo y, si no choca, se vuelve a empujar con la base nueva
+          frescos.push(r.remoto);
         } else {
-          // reintento fila por fila; se excluye (y avisa) la que vuelva a fallar
-          for (const f of filas) {
-            const { error: e2 } = await conTechoSync(supabase.from('rk_torneos').upsert([f]));
-            if (!e2) {
-              baseDelta[f.id] = ahora;
-              idsSubidos.add(f.id);
-            } else {
-              // sin esto, un torneo que nunca logra subir (p.ej. sin conexion) deja
-              // ultimoPushFallo en false: el effect de persistencia ve `sucios` no vacio
-              // y muestra 'pendiente' (Sincronizando...) para siempre en vez de 'sinConexion'
-              // (Sin conexion - trabajando local), el estado real. Mismo tratamiento que
-              // ya reciben los fallos de borrados/jugadores/config mas abajo.
-              huboErrorGeneral = true;
-              console.error('[torneos sync] fila de torneo fallo', f.id, e2);
-              avisarLimitado(`No se pudo sincronizar el torneo "${f.nombre}".`, `fila:${f.id}`);
-            }
-          }
+          // sin esto, un torneo que nunca logra subir (p.ej. sin conexion) deja
+          // ultimoPushFallo en false: el effect de persistencia ve `sucios` no vacio
+          // y muestra 'pendiente' (Sincronizando...) para siempre en vez de 'sinConexion'
+          // (Sin conexion - trabajando local), el estado real. Mismo tratamiento que
+          // ya reciben los fallos de borrados/jugadores/config mas abajo.
+          huboErrorGeneral = true;
+          console.error('[torneos sync] fila de torneo fallo', id, r.error);
+          avisarLimitado(`No se pudo sincronizar el torneo "${t.nombre}".`, `fila:${id}`);
         }
       }
 
@@ -292,18 +324,28 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
         const baseSinBorrados = { ...prev.base };
         for (const id of borradosOk) delete baseSinBorrados[id];
         const nuevaBase = { ...baseSinBorrados, ...baseDelta };
+        // copia base: lo subido y confirmado ES el server ahora. Si se volvio a editar mientras
+        // viajaba (sigue sucio) la copia pasa a ser lo que se subio; si quedo limpio, no hace falta.
+        const nuevaBaseDatos = { ...prev.baseDatos };
+        for (const id of borradosOk) delete nuevaBaseDatos[id];
+        for (const id of idsSubidos) {
+          if (suciosRestantes.includes(id)) nuevaBaseDatos[id] = snapshotTorneos.get(id)!;
+          else delete nuevaBaseDatos[id];
+        }
         const jugadoresSuciosRestante = jugadoresOk && prev.estado.jugadores === snapshotJugadores ? false : prev.jugadoresSucios;
         const configSuciaRestante = configOk && prev.estado.configPuntos === snapshotConfig ? false : prev.configSucia;
         const jugadoresBaseNueva = jugadoresOk ? snapshotJugadores.map((j) => j.id) : prev.jugadoresBase;
-        return {
+        const tras = {
           ...prev,
           base: nuevaBase,
+          baseDatos: nuevaBaseDatos,
           sucios: suciosRestantes,
           borrados: borradosRestantes,
           jugadoresSucios: jugadoresSuciosRestante,
           configSucia: configSuciaRestante,
           jugadoresBase: jugadoresBaseNueva,
         };
+        return aplicarRemotosFrescos(tras, frescos).cache;
       };
 
       // Persistencia directa: corre SIEMPRE (montado o no), calculada sobre cacheRef.current
@@ -320,6 +362,21 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       // navegador exactamente en esa ventana microscopica podria perder esa UNA edicion.
       const cachePersistido = reconciliarPostPush(cacheRef.current);
       cacheRef.current = cachePersistido;
+      // conflictos que encontro este push: el espejo se adelanta ya (como en pull) para que el
+      // re-push encadenado de abajo no suba un torneo en conflicto
+      conflictosRef.current = new Set(cachePersistido.conflictos);
+      for (const f of frescos) ultimoVisto.current[f.torneo.id] = f.updatedAt;
+      const refusionados = frescos
+        .map((f) => f.torneo.id)
+        .filter((id) => cachePersistido.sucios.includes(id) && !cachePersistido.conflictos.includes(id));
+      if (refusionados.length > 0 && fusionesSeguidas.current < 3) {
+        // fusionado contra la version nueva del server: subirlo ya (con la base nueva). El tope
+        // evita un ciclo si el server se mueve sin parar; el reintento de 30s sigue igual.
+        fusionesSeguidas.current += 1;
+        repetirPorFusion = true;
+      } else if (frescos.length === 0) {
+        fusionesSeguidas.current = 0;
+      }
       try {
         localStorage.setItem(CLAVE_CACHE, JSON.stringify(cachePersistido));
       } catch (e) {
@@ -346,7 +403,12 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       avisarLimitado('No se pudo sincronizar con la nube. Tus cambios quedan guardados en este navegador y se reintenta solo.');
     } finally {
       enVuelo.current = false;
-      if (pedidoReentrada.current) {
+      if (pullPendiente.current) {
+        // un pull pedido mientras subiamos: va primero (al terminar empuja lo que quede)
+        pullPendiente.current = false;
+        pedidoReentrada.current = false;
+        void pullRef.current();
+      } else if (pedidoReentrada.current || repetirPorFusion) {
         pedidoReentrada.current = false;
         void push();
       }
@@ -356,6 +418,9 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
   // ---- PULL: baja todo y mergea ----
   const pull = useCallback(async () => {
     if (!supabase) { setEstadoSync('sinConexion'); return; }
+    if (pullEnVuelo.current || enVuelo.current) { pullPendiente.current = true; return; }
+    pullEnVuelo.current = true;
+    let ok = false;
     try {
       const [rt, rj, rc] = await Promise.all([
         conTechoSync(supabase.from('rk_torneos').select('id, data, updated_at')),
@@ -378,15 +443,21 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
           sucios: new Set(prev.sucios),
           borrados: new Set(prev.borrados),
           base: prev.base,
+          baseDatos: prev.baseDatos,
         });
+        const limpios = new Set(m.limpios);
         const jugadores = prev.jugadoresSucios ? prev.estado.jugadores : jugadoresDelServer;
         const configPuntos = prev.configSucia ? prev.estado.configPuntos : ((rc.data?.data as EstadoTorneos['configPuntos']) ?? prev.estado.configPuntos);
         return {
           ...prev,
           estado: { torneos: m.torneos, jugadores, configPuntos },
           base: m.base,
+          baseDatos: m.baseDatos,
+          // fusionados que quedaron iguales al server: ya no hay nada que subir
+          sucios: limpios.size > 0 ? prev.sucios.filter((id) => !limpios.has(id)) : prev.sucios,
           jugadoresBase: jugadoresDelServer.map((j) => j.id), // siempre la verdad del server
           conflictos: m.conflictos,
+          conflictosDetalle: m.detalles,
         };
       };
       // Mirror sincronico ANTES de push() (linea de abajo, mismo tick): push() se dispara sin
@@ -402,48 +473,33 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       const cacheNuevo = aplicarPull(cacheRef.current);
       cacheRef.current = cacheNuevo;
       conflictosRef.current = new Set(cacheNuevo.conflictos);
+      const visto: Record<string, string> = {};
+      for (const r of remotos) visto[r.torneo.id] = r.updatedAt;
+      ultimoVisto.current = visto;
       setCache(aplicarPull);
       setEstadoSync((s) => (s === 'sinConexion' ? 'pendiente' : s));
-      void push(); // si habia sucios, empujarlos ahora
+      ok = true;
     } catch (err) {
       console.error('[torneos sync] pull fallo', err);
       setEstadoSync('sinConexion');
+    } finally {
+      pullEnVuelo.current = false;
+    }
+    if (pullPendiente.current) {
+      pullPendiente.current = false;
+      void pullRef.current();
+    } else if (ok || pedidoReentrada.current) {
+      pedidoReentrada.current = false;
+      void push(); // si habia sucios, empujarlos ahora
     }
   }, [push]);
+  pullRef.current = pull;
 
   // ---- setEstado del gestor: escribe cache + marca sucios/borrados + agenda push ----
   const setEstado = useCallback((cambio: (e: EstadoTorneos) => EstadoTorneos) => {
-    setCache((prev) => {
-      const estadoNuevo = cambio(prev.estado);
-      const suciosNuevos = new Set(prev.sucios);
-      const borradosNuevos = new Set(prev.borrados);
-      const baseNueva = { ...prev.base };
-      const antesPorId = new Map(prev.estado.torneos.map((t) => [t.id, t]));
-      const idsAhora = new Set(estadoNuevo.torneos.map((t) => t.id));
-      for (const t of estadoNuevo.torneos) {
-        if (antesPorId.get(t.id) !== t) suciosNuevos.add(t.id); // referencia cambio: contenido editado
-        borradosNuevos.delete(t.id); // reaparecio (p.ej. reimport de un id previamente borrado): ya no es tombstone
-      }
-      for (const t of prev.estado.torneos) {
-        if (!idsAhora.has(t.id)) {
-          // desaparecio: es un borrado, no un "sucio" con contenido (no hay contenido que subir)
-          suciosNuevos.delete(t.id);
-          borradosNuevos.add(t.id);
-          delete baseNueva[t.id];
-        }
-      }
-      // estadoSync no se toca aca: el effect de persistencia lo deriva de `cache` apenas
-      // este setCache haga efecto (siempre queda algo sucio recien editado => 'pendiente').
-      return {
-        ...prev,
-        estado: estadoNuevo,
-        sucios: [...suciosNuevos],
-        borrados: [...borradosNuevos],
-        base: baseNueva,
-        jugadoresSucios: prev.jugadoresSucios || estadoNuevo.jugadores !== prev.estado.jugadores,
-        configSucia: prev.configSucia || estadoNuevo.configPuntos !== prev.estado.configPuntos,
-      };
-    });
+    // estadoSync no se toca aca: el effect de persistencia lo deriva de `cache` apenas
+    // este setCache haga efecto (siempre queda algo sucio recien editado => 'pendiente').
+    setCache((prev) => aplicarEdicion(prev, cambio(prev.estado)));
     if (timerPush.current !== null) window.clearTimeout(timerPush.current);
     timerPush.current = window.setTimeout(() => {
       // Limpiar la ref ANTES de empujar: asi timerPush.current !== null significa "hay un
@@ -454,31 +510,110 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     }, 1500);
   }, [push]);
 
-  // ---- resolver conflicto: 'local' re-empuja lo mio; 'server' trae lo del server ----
-  // `conflictos` vive en el cache: se edita via setCache, nunca con un setConflictos/ref
-  // directo aca (ese es el trabajo exclusivo del effect de persistencia, que corre
-  // garantizado despues de que este setCache haga efecto).
+  // ---- resolver conflicto ----
+  // 'local' ("Mi versión"): se trae la version del server y se FUSIONA prefiriendo lo de aca en
+  //   lo que choca (lo que el otro equipo cargo en otros partidos se conserva). Si el choque es
+  //   de estructura (cuadro rearmado, parejas, …) gana el torneo de aca entero. La base pasa a ser
+  //   la del server, asi el push condicionado sube encima de ESA version (y si el server se movio
+  //   de nuevo en el medio, se vuelve a fusionar o a avisar: nunca se pisa a ciegas).
+  // 'server' ("La del server"): se descartan los cambios de aca sin subir de ese torneo.
+  // `conflictos` vive en el cache: se edita via setCache (y el mismo calculo sobre cacheRef, para
+  // que el push encadenado ya lo vea fuera de conflicto - patron de pull/push).
   const resolverConflicto = useCallback(async (id: string, eleccion: 'local' | 'server') => {
-    if (eleccion === 'local') {
-      setCache((prev) => ({
-        ...prev,
-        conflictos: prev.conflictos.filter((x) => x !== id),
-        sucios: prev.sucios.includes(id) ? prev.sucios : [...prev.sucios, id],
-      }));
-      void push(); // una vez que el effect propague esto a conflictosRef, el push lo incluye y pisa al server
-      return;
-    }
     if (!supabase) return;
     const { data, error } = await conTechoSync(supabase.from('rk_torneos').select('data, updated_at').eq('id', id).maybeSingle());
-    if (error || !data) { avisarLimitado('No se pudo traer la versión del server.'); return; }
-    setCache((prev) => ({
-      ...prev,
-      estado: { ...prev.estado, torneos: prev.estado.torneos.map((t) => (t.id === id ? (data.data as Torneo) : t)) },
-      base: { ...prev.base, [id]: data.updated_at as string },
-      sucios: prev.sucios.filter((x) => x !== id),
-      conflictos: prev.conflictos.filter((x) => x !== id),
-    }));
+    if (error) { avisarLimitado('No se pudo traer la versión del server. Probá de nuevo.'); return; }
+    const fila = data as { data: Torneo; updated_at: string } | null;
+    let cambio: (prev: Cache) => Cache;
+    if (eleccion === 'local') {
+      cambio = (prev) => {
+        const local = prev.estado.torneos.find((t) => t.id === id);
+        let elegido = local;
+        const copia = prev.baseDatos[id];
+        if (local && fila && copia) {
+          const f = fusionarTorneo(copia, local, fila.data, { preferir: 'local' });
+          if (f.ok) elegido = f.torneo;
+        }
+        const base = { ...prev.base };
+        const baseDatos = { ...prev.baseDatos };
+        if (fila) { base[id] = fila.updated_at; baseDatos[id] = fila.data; } else { delete base[id]; delete baseDatos[id]; }
+        const detalle = { ...prev.conflictosDetalle };
+        delete detalle[id];
+        return {
+          ...prev,
+          estado: { ...prev.estado, torneos: prev.estado.torneos.map((t) => (t.id === id && elegido ? elegido : t)) },
+          base,
+          baseDatos,
+          conflictos: prev.conflictos.filter((x) => x !== id),
+          conflictosDetalle: detalle,
+          sucios: prev.sucios.includes(id) ? prev.sucios : [...prev.sucios, id],
+        };
+      };
+    } else {
+      if (!fila) { avisarLimitado('Ese torneo ya no está en el server.'); return; }
+      cambio = (prev) => {
+        const baseDatos = { ...prev.baseDatos };
+        delete baseDatos[id];
+        const detalle = { ...prev.conflictosDetalle };
+        delete detalle[id];
+        return {
+          ...prev,
+          estado: { ...prev.estado, torneos: prev.estado.torneos.map((t) => (t.id === id ? fila.data : t)) },
+          base: { ...prev.base, [id]: fila.updated_at },
+          baseDatos,
+          sucios: prev.sucios.filter((x) => x !== id),
+          conflictos: prev.conflictos.filter((x) => x !== id),
+          conflictosDetalle: detalle,
+        };
+      };
+    }
+    const nuevo = cambio(cacheRef.current);
+    cacheRef.current = nuevo;
+    conflictosRef.current = new Set(nuevo.conflictos);
+    if (fila) ultimoVisto.current[id] = fila.updated_at;
+    setCache(cambio);
+    if (eleccion === 'local') void push();
   }, [avisarLimitado, push]);
+
+  // ---- enterarse solo de lo que cargan otros (arbitros, otra tablet, En vivo) ----
+  // Antes el gestor solo releia al abrir y al volver la conexion: no veia nada de los demas
+  // hasta tocar la pildora. Ahora: Realtime sobre rk_torneos (mismo patron que En vivo), un
+  // chequeo liviano periodico con la pestaña visible, y otro al volver la pestaña al frente.
+  // Nunca dos pulls a la vez (pull() se encola), ni mientras se esta tipeando un resultado.
+  const esperandoFoco = useRef(false);
+  const pullAutomatico = useCallback(() => {
+    if (editandoTexto()) {
+      if (esperandoFoco.current) return;
+      esperandoFoco.current = true;
+      const alSoltar = () => {
+        document.removeEventListener('focusout', alSoltar);
+        // el blur de la caja guarda el resultado (setEstado): se relee un toque despues
+        window.setTimeout(() => { esperandoFoco.current = false; pullAutomatico(); }, 300);
+      };
+      document.addEventListener('focusout', alSoltar);
+      return;
+    }
+    void pullRef.current();
+  }, []);
+
+  // ¿Cambio algo en el server desde lo que ya vimos? Solo `id, updated_at` (liviano).
+  const chequearCambios = useCallback(async () => {
+    if (!supabase || chequeoEnVuelo.current || pullEnVuelo.current || enVuelo.current) return;
+    chequeoEnVuelo.current = true;
+    try {
+      const { data, error } = await conTechoSync(supabase.from('rk_torneos').select('id, updated_at'));
+      if (error || !data) return;
+      const filas = data as { id: string; updated_at: string }[];
+      const visto = ultimoVisto.current;
+      const borrados = new Set(cacheRef.current.borrados);
+      const enServer = new Set(filas.map((f) => f.id));
+      const cambio = filas.some((f) => !borrados.has(f.id) && !mismoInstante(visto[f.id], f.updated_at))
+        || Object.keys(visto).some((id) => !enServer.has(id) && !borrados.has(id));
+      if (cambio) pullAutomatico();
+    } finally {
+      chequeoEnVuelo.current = false;
+    }
+  }, [pullAutomatico]);
 
   // ---- arranque + reconexion + reintento periodico + limpieza al desmontar ----
   useEffect(() => {
@@ -489,9 +624,45 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
       const c = cacheRef.current;
       if (c.sucios.length > 0 || c.borrados.length > 0 || c.jugadoresSucios || c.configSucia) void push();
     }, 30000);
+    const chequeo = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void chequearCambios();
+    }, CHEQUEO_MS);
+    const alVolver = () => { if (document.visibilityState === 'visible') void chequearCambios(); };
+    document.addEventListener('visibilitychange', alVolver);
+
+    // Realtime: el aviso trae la fila nueva. Se junta lo que llega (400 ms) y al disparar se
+    // descarta lo que ya vimos: el eco de nuestro propio push suele llegar ANTES que la respuesta
+    // HTTP del push, asi que se espera a que no haya push/pull en vuelo para comparar contra
+    // `ultimoVisto` ya actualizado. Si el canal no anda, queda el chequeo periodico.
+    const sb = supabase;
+    let timerRt: number | undefined;
+    const avisados = new Map<string, string | undefined>(); // id -> updated_at avisado (undefined: borrado o sin dato)
+    const procesarAvisos = () => {
+      if (enVuelo.current || pullEnVuelo.current) { timerRt = window.setTimeout(procesarAvisos, 400); return; }
+      const nuevos = [...avisados].some(([id, ts]) => ts === undefined || !mismoInstante(ultimoVisto.current[id], ts));
+      avisados.clear();
+      if (nuevos) pullAutomatico();
+    };
+    const canal = sb
+      ? sb.channel('gestor-torneos')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rk_torneos' }, (payload: { new?: unknown; old?: unknown }) => {
+          const n = (payload.new ?? {}) as { id?: string; updated_at?: string };
+          const o = (payload.old ?? {}) as { id?: string };
+          const id = n.id ?? o.id ?? '?';
+          avisados.set(id, n.id ? n.updated_at : undefined);
+          window.clearTimeout(timerRt);
+          timerRt = window.setTimeout(procesarAvisos, 400);
+        })
+        .subscribe()
+      : null;
+
     return () => {
       window.removeEventListener('online', onOnline);
       window.clearInterval(intervalo);
+      window.clearInterval(chequeo);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.clearTimeout(timerRt);
+      if (sb && canal) void sb.removeChannel(canal);
       if (timerPush.current !== null) {
         // Flush en vez de solo cancelar: si no, una edicion recien debounceada se queda
         // esperando un remount que puede no llegar nunca (el admin no tiene por que volver
@@ -507,5 +678,13 @@ export function useSyncTorneos(avisarError: (mensaje: string) => void) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { estado: cache.estado, setEstado, estadoSync, conflictos, resolverConflicto, refrescar: pull };
+  return {
+    estado: cache.estado,
+    setEstado,
+    estadoSync,
+    conflictos,
+    detallesConflicto: cache.conflictosDetalle,
+    resolverConflicto,
+    refrescar: pull,
+  };
 }

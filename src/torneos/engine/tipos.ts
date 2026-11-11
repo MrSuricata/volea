@@ -87,9 +87,12 @@ export type Torneo = {
   // otros dos segundos en cuartos (ver engine/copas armarLlaveSeis).
   llave6?: boolean;
   // Formato de llave elegido desde la web (los de banderas viejas: copas, llave6, sinLlave).
-  formatoLlave?: 'final' | 'semis' | 'cruces';
+  formatoLlave?: 'final' | 'semis' | 'cruces' | 'libre';
   // Formato del tanteador de árbitros: uno para la fase de grupos y otro para la llave.
   arbitraje?: { grupos?: FormatoArbitraje; llave?: FormatoArbitraje };
+  // One Point Challenge: parejaIds de los que no se presentaron. Sus cruces listos se resuelven
+  // solos por W.O. a favor del rival (ver ui/opc/ausentes). Ausente o vacío ⇒ como siempre.
+  ausentes?: string[];
 };
 
 export function nuevoId(): string {
@@ -107,6 +110,20 @@ export function resultadoValido(puntosA: number | null, puntosB: number | null):
 export function resultadoDe(p: { puntosA: number | null; puntosB: number | null }): { a: number; b: number } | null {
   if (!resultadoValido(p.puntosA, p.puntosB)) return null;
   return { a: p.puntosA as number, b: p.puntosB as number };
+}
+
+// Puntos jugados de un partido con resultado válido (o null si no cuenta), para puntos a favor,
+// en contra y diferencia. Quién GANÓ sale siempre de puntosA/puntosB (resultadoDe); los puntos, de
+// la suma de `games` cuando el partido fue a games (mejor de 3: puntosA/puntosB son games
+// ganados, 2-1, y sumarlos como puntos mezclaría ±1 con ±10 en la misma tabla).
+// Única fuente para tabla, tabla individual, clasificación y copas.
+export function puntosDePartido(p: { puntosA: number | null; puntosB: number | null; games?: { a: number; b: number }[] }): { a: number; b: number } | null {
+  const r = resultadoDe(p);
+  if (!r) return null;
+  const g = p.games;
+  const valido = (x: unknown) => typeof x === 'number' && Number.isInteger(x) && x >= 0;
+  if (!Array.isArray(g) || g.length === 0 || !g.every((x) => x && valido(x.a) && valido(x.b))) return r;
+  return { a: g.reduce((s, x) => s + x.a, 0), b: g.reduce((s, x) => s + x.b, 0) };
 }
 
 // Marca o desmarca un partido como W.O. Al desmarcar se QUITA la clave (no queda `wo: false`): así el

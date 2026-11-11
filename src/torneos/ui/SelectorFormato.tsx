@@ -1,6 +1,7 @@
 import type { Torneo } from '../engine/tipos';
 import type { FormatoLlave } from '../engine/formatoLlave';
-import { conFormato, formatoDe, formatosPosibles } from '../engine/formatoLlave';
+import { conFormato, formatoDe, formatoGuardado, formatosPosibles } from '../engine/formatoLlave';
+import { Nota } from './piezas';
 import { Campo, Entrada, Selector } from '../../admin/ui';
 
 // Formato de la llave del cuadro. Se puede elegir antes de empezar o al terminar los grupos;
@@ -10,8 +11,11 @@ export default function SelectorFormato({ torneo, actualizar }: {
   actualizar: (cambio: (t: Torneo) => Torneo) => void;
 }) {
   const opciones = formatosPosibles(torneo);
+  // formatoDe ya resuelve un formato guardado que dejó de ser posible como 'auto'.
   const actual = formatoDe(torneo);
   const valor = opciones.some((o) => o.valor === actual) ? actual : 'auto';
+  const guardado = formatoGuardado(torneo);
+  const caducado = guardado !== actual && torneo.grupos.length > 0;
   const ayuda = opciones.find((o) => o.valor === valor)?.ayuda;
   const llaveArmada = !!torneo.partidosLlave && torneo.partidosLlave.length > 0;
   return (
@@ -31,6 +35,11 @@ export default function SelectorFormato({ torneo, actualizar }: {
           {opciones.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
         </Selector>
       </Campo>
+      {caducado && (
+        <Nota className="sm:col-span-2">
+          El formato que estaba elegido ya no es posible con {torneo.grupos.length === 1 ? 'un grupo' : `${torneo.grupos.length} grupos`}: se usa "{opciones.find((o) => o.valor === valor)?.texto}". Podés elegir otro.
+        </Nota>
+      )}
       {valor === 'copas' && (
         <Campo etiqueta="Duplas a la Copa de Oro" ayuda={`El resto (${torneo.parejas.length - (torneo.copas?.oro ?? 0)}) va a la Copa de Plata.`}>
           <Entrada

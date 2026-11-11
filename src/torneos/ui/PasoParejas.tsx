@@ -9,6 +9,7 @@ import { useDialogos } from './dialogos';
 import { AreaTexto, Boton, BotonIcono, Entrada, Tarjeta } from '../../admin/ui';
 import { cn } from '../../lib/cn';
 import { PiePaso } from './piezas';
+import { limpiarListaJugadores } from './opc/modelo';
 
 // Deshacer "Sacar": vuelve a poner la pareja donde estaba (mismo lugar en la lista y en
 // su grupo, si Brian había vuelto atrás desde Grupos). Puro, como pide el contrato.
@@ -35,7 +36,8 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
   const [sueltos, setSueltos] = useState('');
 
   function agregarSueltos() {
-    const nombres = sueltos.split('\n').map((s) => s.trim()).filter(Boolean);
+    // sin la numeración/viñetas de las listas copiadas de WhatsApp ("1. Ana", "- Beto")
+    const nombres = limpiarListaJugadores(sueltos);
     if (nombres.length === 0) return;
     actualizar((t) => ({
       ...t,
@@ -102,7 +104,7 @@ export default function PasoParejas({ torneo, actualizar }: PropsPaso) {
   const unidad = individual ? 'jugador' : 'pareja';
   // 2 parejas alcanzan: un grupo de 2 es una final directa (categorías chicas).
   const minimo = 2;
-  const lineasPegadas = sueltos.split('\n').map((s) => s.trim()).filter(Boolean).length;
+  const lineasPegadas = limpiarListaJugadores(sueltos).length;
 
   return (
     <section className="space-y-4">

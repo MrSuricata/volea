@@ -1,6 +1,6 @@
 // Marcadores de los partidos con árbitro, en vivo (Realtime + refresco cada 20 s por las dudas).
 import { createContext, useContext, useEffect, useState } from 'react';
-import type { Marcador } from './motor';
+import { esMarcadorValido, type Marcador } from './motor';
 import { marcadoresEnJuego, suscribirMarcadores } from './servicio';
 
 export const claveMarcador = (torneoId: string, partidoId: string) => `${torneoId}:${partidoId}`;
@@ -16,7 +16,7 @@ export function useMarcadores(): Map<string, Marcador> {
     let vivo = true;
     const pedir = async () => {
       const lista = await marcadoresEnJuego();
-      if (vivo) setMapa(new Map(lista.filter((m) => m.marcador).map((m) => [claveMarcador(m.torneoId, m.partidoId), m.marcador as Marcador])));
+      if (vivo) setMapa(new Map(lista.filter((m) => esMarcadorValido(m.marcador)).map((m) => [claveMarcador(m.torneoId, m.partidoId), m.marcador as Marcador])));
     };
     void pedir();
     const cortar = suscribirMarcadores(() => void pedir());
@@ -27,7 +27,9 @@ export function useMarcadores(): Map<string, Marcador> {
 }
 
 /** Marcador chico: "G2 · 8-5" con el que saca marcado. lados = qué lado es "A" y cuál "B" en el texto. */
-export function MarcadorVivo({ m, tamano = 1 }: { m: Marcador; tamano?: number }) {
+// m puede venir roto de la base (fila vieja o escrita a mano): en ese caso no se dibuja nada.
+export function MarcadorVivo({ m, tamano = 1 }: { m: Marcador | null | undefined; tamano?: number }) {
+  if (!esMarcadorValido(m)) return null;
   const games = m.games.length > 0 || m.game > 1 ? `${m.gamesA}-${m.gamesB} · ` : '';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4em', fontWeight: 900, fontVariantNumeric: 'tabular-nums', fontSize: `${tamano}em` }}>

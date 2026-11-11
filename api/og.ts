@@ -28,6 +28,7 @@ const fotoTarjeta = (url: string) =>
 const PAGINAS: Record<string, { titulo: string; descripcion: string }> = {
   tienda: { titulo: 'Tienda — Indumentaria de pickleball | VOLEA', descripcion: 'Remeras, polos, shorts, vestidos y accesorios técnicos de pickleball, diseñados en Uruguay.' },
   torneos: { titulo: 'Torneos VOLEA', descripcion: 'Resultados, llaves y campeones de los torneos de pickleball que organiza VOLEA en Uruguay.' },
+  programacion: { titulo: 'Programación en vivo | VOLEA', descripcion: 'Hora y cancha de cada partido, resultados y campeones del torneo en curso, en vivo.' },
   ranking: { titulo: 'Ranking VOLEA', descripcion: 'El ranking de pickleball de VOLEA: puntos y torneos jugados de cada jugador.' },
   eventos: { titulo: 'Eventos y torneos de pickleball | VOLEA', descripcion: 'Próximos torneos, clínicas y eventos de pickleball en Uruguay.' },
   blog: { titulo: 'Blog | VOLEA', descripcion: 'Novedades del pickleball en Uruguay y de la comunidad VOLEA.' },
@@ -56,7 +57,34 @@ async function consultar<T>(ruta: string): Promise<T[] | null> {
 
 type Producto = { id: string; name: string; description: string | null; price: number; images: string[] | null; stock_by_size: Record<string, number> | null };
 type Post = { slug: string; title: string; excerpt: string | null; cover_url: string | null; published_at: string | null; updated_at: string | null };
+type PartidoOg = { id: string; ronda: number; a: { tipo: string; parejaId?: string; partidoId?: string } | null; b: { tipo: string; parejaId?: string; partidoId?: string } | null; puntosA: number | null; puntosB: number | null; esTercerPuesto?: boolean };
+type TorneoOg = { nombre: string; fase: string; evento?: string; parejas?: { id: string; nombre: string }[]; partidosLlave?: PartidoOg[] | null };
 type Evento = { id: string; name: string; date: string; end_date: string | null; location: string | null; city: string | null; description: string | null; image_url: string | null };
+
+// Campeón de un torneo terminado: quien ganó la final de la llave (sin tercer puesto). Sin llave
+// (americano, liga) no se declara: la tarjeta lleva solo el nombre.
+function campeonOg(t: TorneoOg): string | null {
+  const llave = t.partidosLlave ?? [];
+  const finales = llave.filter((p) => !p.esTercerPuesto);
+  if (finales.length === 0) return null;
+  const maxRonda = Math.max(...finales.map((p) => p.ronda));
+  const final = finales.find((p) => p.ronda === maxRonda);
+  const idDe = (slot: PartidoOg['a'], hondo = 0): string | null => {
+    if (!slot || hondo > 8) return null;
+    if (slot.tipo === 'seed') return slot.parejaId ?? null;
+    if (slot.tipo === 'ganadorDe') {
+      const prev = llave.find((p) => p.id === slot.partidoId);
+      return prev ? ganadorOg(prev, hondo + 1) : null;
+    }
+    return null;
+  };
+  const ganadorOg = (p: PartidoOg, hondo = 0): string | null => {
+    if (p.puntosA === null || p.puntosB === null || p.puntosA === p.puntosB) return null;
+    return idDe(p.puntosA > p.puntosB ? p.a : p.b, hondo);
+  };
+  const id = final ? ganadorOg(final) : null;
+  return id ? t.parejas?.find((x) => x.id === id)?.nombre ?? null : null;
+}
 
 async function metaDe(tipo: string, id: string, slug: string, pagina: string): Promise<Meta | null | 'no-existe'> {
   if (tipo === 'producto') {
@@ -158,6 +186,23 @@ async function metaDe(tipo: string, id: string, slug: string, pagina: string): P
         ...(e.image_url ? { image: e.image_url } : {}),
         organizer: { '@type': 'Organization', name: 'VOLEA', url: SITE },
       },
+    };
+  }
+
+  if (tipo === 'torneo') {
+    const filas = await consultar<{ data: TorneoOg | null }>(`rk_torneos?id=eq.${encodeURIComponent(id)}&select=data`);
+    if (!filas) return null;
+    const t = filas[0]?.data;
+    if (!t) return 'no-existe';
+    const campeon = t.fase === 'terminado' ? campeonOg(t) : null;
+    return {
+      titulo: `${t.nombre} | VOLEA`,
+      descripcion: campeon
+        ? `Campeón: ${campeon}. Resultados, grupos y llave de ${t.nombre}${t.evento ? ` (${t.evento})` : ''}.`
+        : `Resultados en vivo, grupos y llave de ${t.nombre}${t.evento ? ` (${t.evento})` : ''}. VOLEA pickleball Uruguay.`,
+      imagen: IMAGEN_BASE,
+      ruta: `/torneos/${encodeURIComponent(id)}`,
+      tipo: 'website',
     };
   }
 

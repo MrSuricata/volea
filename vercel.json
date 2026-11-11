@@ -62,7 +62,18 @@
       "destination": "/api/og?tipo=evento&id=:id"
     },
     {
-      "source": "/:p(tienda|torneos|ranking|eventos|blog|galeria|mapa|contacto)",
+      "source": "/torneos/:id",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(bot|Bot|BOT|facebookexternalhit|WhatsApp|Slack|Pinterest|Embedly|Google-|crawler|spider).*"
+        }
+      ],
+      "destination": "/api/og?tipo=torneo&id=:id"
+    },
+    {
+      "source": "/:p(tienda|torneos|programacion|ranking|eventos|blog|galeria|mapa|contacto)",
       "has": [
         {
           "type": "header",

@@ -1,5 +1,5 @@
 import type { Pareja, PartidoGrupo } from './tipos';
-import { resultadoDe } from './tipos';
+import { puntosDePartido, resultadoDe } from './tipos';
 
 export type FilaTabla = {
   parejaId: string;
@@ -26,9 +26,10 @@ function statsBase(parejaIds: string[], partidos: PartidoGrupo[]): Map<string, S
     const a = map.get(p.aId);
     const b = map.get(p.bId);
     if (!a || !b) continue;
+    const pts = puntosDePartido(p)!; // puntos jugados (suma de games si fue a games)
     a.pj += 1; b.pj += 1;
-    a.pf += r.a; a.pc += r.b;
-    b.pf += r.b; b.pc += r.a;
+    a.pf += pts.a; a.pc += pts.b;
+    b.pf += pts.b; b.pc += pts.a;
     if (r.a > r.b) { a.pg += 1; b.pp += 1; } else { b.pg += 1; a.pp += 1; }
     a.dif = a.pf - a.pc;
     b.dif = b.pf - b.pc;
@@ -55,7 +56,7 @@ function difEntre(subset: string[], partidos: PartidoGrupo[]): Map<string, numbe
   const set = new Set(subset);
   const dif = new Map<string, number>(subset.map((id) => [id, 0]));
   for (const p of partidos) {
-    const r = resultadoDe(p);
+    const r = puntosDePartido(p);
     if (!r) continue;
     if (!set.has(p.aId) || !set.has(p.bId)) continue;
     dif.set(p.aId, dif.get(p.aId)! + r.a - r.b);
@@ -176,14 +177,15 @@ export function calcularTablaIndividual(parejas: Pareja[], partidos: PartidoGrup
   for (const p of parejas) for (const [id, nombre] of nombresDePareja(p)) fila(id, nombre);
   for (const p of partidos) {
     const r = resultadoDe(p);
+    const pts = puntosDePartido(p);
     const a = porPareja.get(p.aId);
     const b = porPareja.get(p.bId);
-    if (!r || !a || !b) continue;
-    for (const [lado, propios, rivales] of [[a, r.a, r.b], [b, r.b, r.a]] as const) {
+    if (!r || !pts || !a || !b) continue;
+    for (const [lado, propios, rivales, gano] of [[a, pts.a, pts.b, r.a > r.b], [b, pts.b, pts.a, r.b > r.a]] as const) {
       for (const [id, nombre] of nombresDePareja(lado)) {
         const f = fila(id, nombre);
         f.pj += 1; f.pf += propios; f.pc += rivales; f.dif = f.pf - f.pc;
-        if (propios > rivales) f.pg += 1; else f.pp += 1;
+        if (gano) f.pg += 1; else f.pp += 1;
       }
     }
   }
