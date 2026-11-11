@@ -16,6 +16,25 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // React y Supabase en chunks propios: no cambian entre deploys, así que el
+        // navegador los reusa de la caché aunque cambie la app (antes todo iba en un
+        // index de ~745 kB que se volvía a bajar entero con cada deploy). Se cargan igual
+        // de entrada (los dos hacen falta para el primer dibujado): no es carga diferida.
+        // framer-motion y lucide NO van acá a propósito: las features de motion bajan
+        // aparte (lib/animaciones) y los íconos van repartidos en los chunks de cada página;
+        // juntarlos los metería en la carga inicial.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/.test(id)) return 'vendor-react';
+          if (/[\\/]node_modules[\\/]@supabase[\\/]/.test(id)) return 'vendor-supabase';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: 3001,
     open: false,
