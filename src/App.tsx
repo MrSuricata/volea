@@ -4386,7 +4386,8 @@ function CopaVivoRoute() {
 function TorneoDetalleRoute() {
   const [nombre, setNombre] = useState<string | undefined>(undefined);
   usePageMeta({
-    title: nombre ?? 'Torneo',
+    // Hasta que llega el nombre: algo que diga qué es la página (antes "Torneo | VOLEA").
+    title: nombre ?? 'Resultados del torneo',
     description: 'Resultados en vivo del torneo: grupos, llave y podio. VOLEA pickleball Uruguay.',
   });
   return (

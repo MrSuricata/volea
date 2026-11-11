@@ -86,7 +86,7 @@ export default function CopaVivoPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-navy-900 px-4 py-6 text-white sm:px-8">
+    <div className="min-h-screen bg-navy-700 px-4 py-6 text-white sm:px-8">
       <div className="mx-auto max-w-6xl">
         {/* cabezal */}
         <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-lime-400 pb-3">
@@ -163,7 +163,7 @@ export default function CopaVivoPage() {
               const s = marcadorActual(p);
               const sg = setsGanados(p);
               return (
-                <div key={p.id} className="rounded-2xl border-2 border-lime-400 bg-navy-800 p-4 sm:p-6">
+                <div key={p.id} className="rounded-2xl border-2 border-lime-400 bg-navy-600 p-4 sm:p-6">
                   <div className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-widest text-navy-200">
                     <span>
                       {p.fase === 'llave' && <span className="mr-1.5 rounded bg-lime-400 px-1.5 py-0.5 font-display font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
@@ -195,11 +195,11 @@ export default function CopaVivoPage() {
             <h2 className="mb-2 font-display text-lg font-black tracking-wide text-lime-400 sm:text-xl">ÚLTIMOS RESULTADOS</h2>
             <div className="grid gap-1.5 sm:grid-cols-2">
               {finales.slice(0, 8).map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-800 px-3 py-2.5">
+                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-navy-500 bg-navy-600 px-3 py-2.5">
                   <div className="min-w-0 text-base font-bold sm:text-lg">
                     {p.fase === 'llave' && <span className="mb-1 inline-block rounded bg-lime-400 px-1.5 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
                     <Nombres p={p} lado="A" resaltar={p.ganador === 'A'} />
-                    <p className="my-0.5 text-xs font-semibold text-navy-400">vs</p>
+                    <p className="my-0.5 text-xs font-semibold text-navy-300">vs</p>
                     <Nombres p={p} lado="B" resaltar={p.ganador === 'B'} />
                   </div>
                   <span className="whitespace-nowrap font-display text-lg font-bold sm:text-xl">{resumenSets(p)}</span>
@@ -215,14 +215,14 @@ export default function CopaVivoPage() {
             <div key={titulo}>
               <h2 className="mb-2 font-display text-lg font-black tracking-wide text-lime-400 sm:text-xl">{titulo}</h2>
               {filas.length === 0 ? (
-                <p className="rounded-xl border border-navy-700 bg-navy-800 p-4 text-sm text-navy-300">
+                <p className="rounded-xl border border-navy-500 bg-navy-600 p-4 text-sm text-navy-300">
                   Todavía sin partidos terminados.
                 </p>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-navy-700 bg-navy-800">
+                <div className="overflow-x-auto rounded-xl border border-navy-500 bg-navy-600">
                   <table className="w-full text-sm sm:text-base" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     <thead>
-                      <tr className="border-b border-navy-700 text-left text-[10px] font-bold uppercase tracking-wider text-navy-300 sm:text-xs">
+                      <tr className="border-b border-navy-500 text-left text-[10px] font-bold uppercase tracking-wider text-navy-300 sm:text-xs">
                         <th className="px-3 py-2">#</th>
                         <th className="py-2">{unidad}</th>
                         <th className="px-2 py-2 text-center">PJ</th>
@@ -232,7 +232,7 @@ export default function CopaVivoPage() {
                     </thead>
                     <tbody>
                       {filas.map((f, i) => (
-                        <tr key={f.nombre} className={`border-b border-navy-700/50 last:border-0 ${i === 0 ? 'bg-lime-400/15 font-bold' : i === 1 ? 'bg-white/5 font-semibold' : ''}`}>
+                        <tr key={f.nombre} className={`border-b border-navy-500/50 last:border-0 ${i === 0 ? 'bg-lime-400/15 font-bold' : i === 1 ? 'bg-white/5 font-semibold' : ''}`}>
                           <td className="px-3 py-2">{i === 0 ? '🥇' : i === 1 ? '🥈' : i + 1}</td>
                           <td className="py-2">{f.nombre}</td>
                           <td className="px-2 py-2 text-center">{f.pj}</td>
@@ -270,17 +270,17 @@ export default function CopaVivoPage() {
                       <div
                         key={p.id}
                         className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm ${
-                          vivo ? 'border-lime-400 bg-navy-800'
-                          : p.estado === 'final' ? 'border-navy-700 bg-navy-800/50 text-navy-200'
-                          : 'border-navy-700 bg-navy-800'
+                          vivo ? 'border-lime-400 bg-navy-600'
+                          : p.estado === 'final' ? 'border-navy-500 bg-navy-600/50 text-navy-200'
+                          : 'border-navy-500 bg-navy-600'
                         }`}
                       >
                         <div className="flex min-w-0 gap-2.5">
-                          <span className="pt-0.5 font-display text-sm font-bold text-navy-400">{i + 1}</span>
+                          <span className="pt-0.5 font-display text-sm font-bold text-navy-300">{i + 1}</span>
                           <div className="min-w-0 text-base font-semibold sm:text-lg">
                             {p.fase === 'llave' && <span className="mb-1 inline-block rounded bg-lime-400 px-1.5 py-0.5 font-display text-[10px] font-black text-navy-900">{p.titulo || 'LLAVE'}</span>}
                             <Nombres p={p} lado="A" resaltar={p.ganador === 'A'} />
-                            <p className="my-0.5 text-xs font-semibold text-navy-400">vs</p>
+                            <p className="my-0.5 text-xs font-semibold text-navy-300">vs</p>
                             <Nombres p={p} lado="B" resaltar={p.ganador === 'B'} />
                           </div>
                         </div>
@@ -288,7 +288,7 @@ export default function CopaVivoPage() {
                           {p.estado === 'final' ? <span className="text-navy-100">✓ {resumenSets(p)}</span>
                             : vivo && s ? <span className="text-lime-400">EN VIVO {s.a}-{s.b}</span>
                             : p.llamadoAt ? <span className="animate-pulse text-lime-400">🔔 EN CANCHA</span>
-                            : <span className="text-navy-400">por jugar</span>}
+                            : <span className="text-navy-300">por jugar</span>}
                         </div>
                       </div>
                     );
@@ -302,7 +302,7 @@ export default function CopaVivoPage() {
         </>
         )}
 
-        <p className="mt-8 text-center text-[11px] text-navy-400">
+        <p className="mt-8 text-center text-[11px] text-navy-300">
           Se actualiza solo · VOLEA · Agarrá y jugá
         </p>
       </div>

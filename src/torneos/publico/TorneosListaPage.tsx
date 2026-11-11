@@ -120,7 +120,9 @@ export default function TorneosListaPage() {
           type="text"
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar categoría o jugador… (ej: mixto b, femenino, tu nombre)"
+          // Corto: en el celular el ejemplo largo quedaba cortado a la mitad ("… mixto b, fe").
+          enterKeyHint="search"
+          placeholder="Buscá tu nombre o categoría…"
           aria-label="Buscar torneo por categoría o jugador"
           style={{ width: '100%', marginBottom: 16 }}
         />
