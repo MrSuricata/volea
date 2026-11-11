@@ -13,6 +13,8 @@ import PasoParejas from './ui/PasoParejas';
 import PasoGrupos from './ui/PasoGrupos';
 import PasoFaseGrupos from './ui/PasoFaseGrupos';
 import PasoLlave from './ui/PasoLlave';
+import ControlOpc from './ui/opc/ControlOpc';
+import { ProveedorOpc, type InfoSync } from './ui/opc/contexto';
 import PantallaRanking from './ui/PantallaRanking';
 import PantallaJugadores from './ui/PantallaJugadores';
 import PantallaConfigPuntos from './ui/ConfigPuntos';
@@ -43,7 +45,13 @@ const TONO_FASE: Record<Torneo['fase'], TonoInsignia> = {
 
 const ETIQUETA_FORMATO: Record<string, string> = { grupos: 'Grupos + llave', individual: 'One Point Challenge' };
 
-type Props = { estado: EstadoTorneos; setEstado: (cambio: (e: EstadoTorneos) => EstadoTorneos) => void; extraCabecera?: ReactNode };
+type Props = {
+  estado: EstadoTorneos;
+  setEstado: (cambio: (e: EstadoTorneos) => EstadoTorneos) => void;
+  extraCabecera?: ReactNode;
+  /** Estado de la sincronización (lo muestra la pantalla de control del OPC). */
+  sync?: InfoSync;
+};
 
 export default function TorneosApp(props: Props) {
   return (
@@ -53,7 +61,7 @@ export default function TorneosApp(props: Props) {
   );
 }
 
-function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
+function TorneosInterno({ estado, setEstado, extraCabecera, sync }: Props) {
   const dialogos = useDialogos();
   const [torneoActivoId, setTorneoActivoId] = useState<string | null>(null);
   const [vista, setVista] = useState<'home' | 'ranking' | 'jugadores' | 'config'>('home');
@@ -324,6 +332,7 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
 
   const esIndividual = (torneo.formato ?? 'grupos') === 'individual';
   return (
+    <ProveedorOpc valor={{ torneos: estado.torneos, irATorneo: setTorneoActivoId, sync }}>
     <main className="contenedor">
       <Boton variante="fantasma" icono={<ArrowLeft size={18} />} onClick={() => setTorneoActivoId(null)} className="-ml-3 mb-1">
         Torneos
@@ -349,6 +358,7 @@ function TorneosInterno({ estado, setEstado, extraCabecera }: Props) {
         copasArmadas={estado.torneos.some((x) => x.copaDe === torneo.id)}
       />
     </main>
+    </ProveedorOpc>
   );
 }
 
@@ -566,7 +576,9 @@ function Wizard({ torneo, actualizar, agregarTorneos, copasArmadas }: PropsPaso)
         {faseVisible === 'parejas' && <PasoParejas torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'grupos' && <PasoGrupos torneo={torneo} actualizar={actualizar} />}
         {faseVisible === 'faseGrupos' && <PasoFaseGrupos torneo={torneo} actualizar={actualizar} />}
-        {faseVisible === 'llave' && <PasoLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} copasArmadas={copasArmadas} />}
+        {/* OPC con la llave armada: pantalla de control de cancha (un toque por cruce). key: cada llave con su estado. */}
+        {faseVisible === 'llave' && individual && torneo.partidosLlave && <ControlOpc key={torneo.id} torneo={torneo} actualizar={actualizar} />}
+        {faseVisible === 'llave' && !(individual && torneo.partidosLlave) && <PasoLlave torneo={torneo} actualizar={actualizar} agregarTorneos={agregarTorneos} copasArmadas={copasArmadas} />}
       </section>
     </>
   );

@@ -104,7 +104,7 @@ export function AdminTorneosTab({ avisar }: { avisar: (mensaje: string) => void 
         );
       })}
       <div className="rk rk--admin">
-        <TorneosApp estado={estado} setEstado={setEstado} />
+        <TorneosApp estado={estado} setEstado={setEstado} sync={{ estado: estadoSync, refrescar: () => void onRefrescar(), refrescando }} />
       </div>
     </div>
   );
