@@ -123,8 +123,8 @@ async function enVivo(esc, { nombre, evento, programacionEsperada }) {
     await movil.goto(`${BASE}/torneos/${id}`);
     await movil.getByText('EN VIVO', { exact: true }).first().waitFor({ timeout: 15000 }).catch(() => {});
     while (!(await cel.getByRole('button', { name: 'Terminar partido' }).count())) await ar.punto(cel, 'saca');
-    await cel.getByRole('button', { name: 'Terminar partido' }).click();
-    await cel.getByRole('button', { name: /^Confirmar/ }).click();
+    await ar.terminar(cel);
+    await ar.confirmar(cel);
     await cel.getByText('Resultado cargado ✓').waitFor();
     const t0 = Date.now();
     let sigue = true;
@@ -162,7 +162,8 @@ async function torneoOculto(esc) {
   });
   await esc.paso('el árbitro de un torneo oculto ve los nombres', async () => {
     await ar.entrar(cel, hoja.filas[0].codigo);
-    await cel.getByText('¿Quién saca primero?').waitFor({ timeout: 10000 });
+    // con la base v36 la pantalla no consigue los nombres y frena el arranque ("No se pudo leer el cuadro")
+    await cel.getByText('¿Quién saca primero?').or(cel.getByText('No se pudo leer el cuadro del torneo')).first().waitFor({ timeout: 10000 });
     const txt = await cel.locator('main').last().innerText();
     esc.verificar(txt.toUpperCase().includes(hoja.filas[0].a.toUpperCase()), 'la pantalla del árbitro nombra a las parejas', `muestra: ${txt.slice(0, 160).replace(/\n/g, ' | ')} — leerTorneo() lee rk_torneos como anónimo y RLS esconde los torneos ocultos`);
     await esc.revisarPantalla(cel, 'oculto-arbitro');

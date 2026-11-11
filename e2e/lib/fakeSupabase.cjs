@@ -9,13 +9,17 @@
 //   · PostgREST: select/insert/upsert/update/delete con los filtros eq/neq/in/gt/gte/lt/lte/is,
 //     maybeSingle/single (Accept object+json), Prefer return=representation, count=exact (HEAD).
 //   · RLS aproximada (ver POLITICAS): rk_torneos anon solo visible=true, escritura solo equipo, etc.
-//   · RPC: is_admin_email, arbitro_entrar, arbitro_marcar, arbitro_terminar (versión v36),
-//     admin_codigos_torneo — traducción línea por línea del SQL de
-//     supabase/migraciones_propuestas/v35_arbitraje.sql y v36_arbitraje_formato_por_partido.sql.
+//   · RPC: is_admin_email, arbitro_entrar, arbitro_marcar, arbitro_terminar, admin_codigos_torneo en
+//     DOS modos (opciones.modo o E2E_ARBITRAJE; por defecto 'v37'):
+//       'v36' — traducción línea por línea de v35_arbitraje.sql + v36_arbitraje_formato_por_partido.sql
+//               (lo que hay en producción hasta aplicar la v37);
+//       'v37' — traducción de v37_arbitraje_blindaje.sql (lib/arbitrajeV37.cjs), con admin_codigos_renovar.
 //   · Realtime (Phoenix vsn 2.0.0, el que usa realtime-js 2.99): join con ids de postgres_changes,
 //     heartbeat y push de INSERT/UPDATE/DELETE en las tablas que cambian.
 //
 // Lo que NO es fiel está listado en e2e/README.md (sección "Aproximaciones").
+
+const { instalarV37 } = require('./arbitrajeV37.cjs');
 
 const PROYECTO = 'scftuxrtflfowohiewsc';
 const HOST = `${PROYECTO}.supabase.co`;
@@ -59,6 +63,10 @@ class FakeSupabase {
     this.tablas = new Map();
     for (const t of Object.keys(CLAVES)) this.tablas.set(t, []);
     this.tablas.set('arbitraje_intentos', []);
+    this.tablas.set('arbitraje_codigos_baja', []);
+    this.tablas.set('arbitraje_origenes_ok', []);
+    this.modo = opciones.modo ?? process.env.E2E_ARBITRAJE ?? 'v37';
+    if (!['v36', 'v37'].includes(this.modo)) throw new Error(`modo de base desconocido: ${this.modo} (v36 | v37)`);
     for (const a of this.admins) this.tablas.get('admins').push({ email: a.email, name: a.name, role: a.role, activo: a.activo });
     // Canchas del tablero de En vivo (rk_en_cancha) como las tiene producción para el evento.
     this.tablas.get('rk_en_cancha').push(
@@ -73,6 +81,7 @@ class FakeSupabase {
     this.siguienteIdBinding = 1000;
     this.rpcCaida = new Set(); // nombres de RPC que se fuerzan a fallar (500)
     this.demoraMs = 0;
+    this.perderRespuesta = null; // nombre de RPC cuya próxima respuesta se pierde (el cambio sí se aplica)
     // Contextos "sin señal": Playwright no aplica setOffline a los pedidos que se resuelven con
     // route.fulfill, así que el corte de red se simula acá (abort = falla de red de verdad).
     this.cortados = new Set();
@@ -82,7 +91,7 @@ class FakeSupabase {
 
   async instalar(context, etiqueta = 'ctx') {
     context.__etiquetaFake = etiqueta;
-    await context.route((url) => !/^https?:\/\/(127\.0\.0\.1|localhost):5311\//.test(url.href) && !url.href.startsWith('data:') && !url.href.startsWith('blob:'), async (route) => {
+    await context.route((url) => !/^https?:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url.href) && !url.href.startsWith('data:') && !url.href.startsWith('blob:'), async (route) => {
       const req = route.request();
       const u = new URL(req.url());
       if (this.cortados.has(etiqueta)) {
@@ -96,6 +105,12 @@ class FakeSupabase {
       try {
         const r = await this.atender(req, etiqueta);
         if (this.demoraMs) await new Promise((res) => setTimeout(res, this.demoraMs));
+        // La base procesó el pedido pero la respuesta no llega al teléfono (una vez).
+        if (this.perderRespuesta && u.pathname === `/rest/v1/rpc/${this.perderRespuesta}`) {
+          this.perderRespuesta = null;
+          this.registrar({ metodo: req.method(), ruta: u.pathname, rol: '-', status: 'RESPUESTA PERDIDA (simulada)', ctx: etiqueta });
+          return route.abort('connectionreset');
+        }
         await route.fulfill(r);
       } catch (e) {
         this.registrar({ metodo: req.method(), ruta: u.pathname, rol: '-', status: `EXCEPCION ${e && e.message}`, ctx: etiqueta });
@@ -229,6 +244,8 @@ class FakeSupabase {
         return { leer: () => true, escribir: false }; // v35: solo por RPC
       case 'arbitraje_codigos':
       case 'arbitraje_intentos':
+      case 'arbitraje_codigos_baja':
+      case 'arbitraje_origenes_ok':
         return { leer: () => false, escribir: false, sinGrant: true }; // REVOKE ALL
       case 'admins':
         return { leer: (f) => !!yo.email && f.email === yo.email, escribir: false };
@@ -407,6 +424,20 @@ class FakeSupabase {
   rpc(nombre, args, yo, etiqueta) {
     args = args || {};
     if (this.rpcCaida.has(nombre)) return this.json(500, { code: 'XX000', message: `caída forzada de ${nombre}` });
+    if (this.modo === 'v37') {
+      switch (nombre) {
+        case 'arbitro_entrar': return this.json(200, this.v37Entrar(args, etiqueta));
+        case 'arbitro_marcar': return this.json(200, this.v37Marcar(args, etiqueta));
+        case 'arbitro_terminar': return this.json(200, this.v37Terminar(args, etiqueta));
+        case 'admin_codigos_torneo':
+          if (yo.rol !== 'authenticated') return this.json(401, { code: '42501', message: 'permission denied for function admin_codigos_torneo' });
+          return this.json(200, this.v37AdminCodigos(args, yo));
+        case 'admin_codigos_renovar':
+          if (yo.rol !== 'authenticated') return this.json(401, { code: '42501', message: 'permission denied for function admin_codigos_renovar' });
+          return this.json(200, this.v37AdminRenovar(args, yo));
+        default: break;
+      }
+    }
     switch (nombre) {
       case 'is_admin_email': {
         const a = this.tablas.get('admins').find((x) => x.email === String(args.p_email || '').trim().toLowerCase());
@@ -603,6 +634,23 @@ class FakeSupabase {
   torneos() { return this.filas('rk_torneos').map((f) => clonar(f.data)); }
   codigos(torneoId) { return this.filas('arbitraje_codigos').filter((c) => !torneoId || c.torneo_id === torneoId).map((c) => ({ ...c })); }
   partidoArbitrado(torneoId, partidoId) { return clonar(this.partidoArb(torneoId, partidoId)); }
+  intentos() { return this.filas('arbitraje_intentos').map((i) => ({ ...i })); }
+  llamadas(rpc, ctx) { return this.log.filter((x) => x.ruta === `/rest/v1/rpc/${rpc}` && (!ctx || x.ctx === ctx)).length; }
+
+  /** La mesa de control carga a mano un resultado (como guardarResultado de En vivo: escribe rk_torneos). */
+  cargarEnMesa(torneoId, partidoId, puntosA, puntosB) {
+    const fila = this.filas('rk_torneos').find((t) => t.id === torneoId);
+    const vieja = { ...fila };
+    const data = clonar(fila.data);
+    for (const l of ['partidosGrupo', 'partidosLlave']) {
+      const p = (data[l] || []).find((x) => x.id === partidoId);
+      if (p) Object.assign(p, { puntosA, puntosB, cargadoEl: new Date(this.ahoraMs()).toISOString() });
+    }
+    fila.data = data; fila.updated_at = this.ahoraMs();
+    this.difundir('rk_torneos', [{ tipo: 'UPDATE', nueva: fila, vieja }]);
+  }
 }
+
+instalarV37(FakeSupabase);
 
 module.exports = { FakeSupabase, HOST, PROYECTO };

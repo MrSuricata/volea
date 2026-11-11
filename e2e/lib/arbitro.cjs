@@ -46,15 +46,37 @@ async function entrar(page, codigo, { navegar = true } = {}) {
   await page.getByRole('button', { name: 'Entrar' }).click();
 }
 
+const textoFormato = ({ tipo, a, mejorDe }) => `${tipo === 'rally' ? 'Rally' : 'Saque tradicional'} a ${a} · ${mejorDe === 3 ? 'al mejor de 3' : 'un game'}`;
+
+/** Formato que muestra la pantalla de inicio: { rotulo, texto } (rotulo: de la organización o del árbitro). */
+async function formatoEnInicio(page) {
+  return page.evaluate(() => {
+    const rot = [...document.querySelectorAll('main p')].find((p) => /^Formato (que puso la organización|elegido por el árbitro)$/i.test(p.innerText.trim()));
+    return rot ? { rotulo: rot.innerText.trim(), texto: rot.nextElementSibling ? rot.nextElementSibling.innerText.trim() : null } : null;
+  });
+}
+
+/**
+ * Empieza el partido con el formato pedido. Si no es el de la organización, lo cambia con el gesto
+ * aparte ("Cambiar formato…"). Devuelve el formato que mostraba la pantalla al llegar.
+ */
 async function empezar(page, { tipo, a, mejorDe, saca }) {
   await page.getByText('¿Quién saca primero?').waitFor({ timeout: 15000 });
-  await page.getByRole('button', { name: tipo === 'rally' ? 'Rally' : 'Saque tradicional', exact: true }).click();
-  await page.getByRole('button', { name: `A ${a}`, exact: true }).click();
-  await page.getByRole('button', { name: mejorDe === 3 ? 'Mejor de 3' : 'Un game', exact: true }).click();
+  const alLlegar = await formatoEnInicio(page);
+  const quiero = textoFormato({ tipo, a, mejorDe });
+  if (!alLlegar || alLlegar.texto !== quiero) {
+    await page.getByRole('button', { name: 'Cambiar formato…' }).click();
+    await page.getByRole('button', { name: tipo === 'rally' ? 'Rally' : 'Saque tradicional', exact: true }).click();
+    await page.getByRole('button', { name: `A ${a}`, exact: true }).click();
+    await page.getByRole('button', { name: mejorDe === 3 ? 'Mejor de 3' : 'Un game', exact: true }).click();
+  }
+  const ahora = await formatoEnInicio(page);
+  if (!ahora || ahora.texto !== quiero) throw new Error(`la pantalla de inicio no quedó en "${quiero}": ${JSON.stringify(ahora)}`);
   const botonesSaca = page.locator('p', { hasText: '¿Quién saca primero?' }).locator('xpath=following-sibling::div[1]').getByRole('button');
   await botonesSaca.nth(saca === 'A' ? 0 : 1).click();
   await page.getByRole('button', { name: 'Empezar partido' }).click();
-  await page.getByRole('button', { name: 'Ganó el que saca' }).waitFor();
+  await page.getByRole('button', { name: /^Ganó el que saca/ }).waitFor();
+  return alLlegar;
 }
 
 /** Lo que muestra el tanteador: nombres, puntos, quién saca (resaltado), canto, games y avisos. */
@@ -66,18 +88,58 @@ async function leer(page) {
       nombre: c.querySelector('p')?.innerText.trim(),
       puntos: Number(c.querySelector('p.text-6xl')?.innerText.trim()),
       saca: c.className.includes('bg-[#CCFF00]'),
+      quienSaca: [...c.querySelectorAll('p')].map((p) => p.innerText.trim()).find((t) => /^Saca/.test(t)) ?? null,
     }));
     const canto = main.querySelector('p.text-5xl')?.innerText.trim() ?? null;
     const games = [...main.querySelectorAll('p')].map((p) => p.innerText.trim()).find((t) => /^Games \d+-\d+$/.test(t)) ?? null;
-    const avisos = [...main.querySelectorAll('p')].map((p) => p.innerText.trim()).filter((t) => /CAMBIO DE LADO|FIN DEL GAME|Sin señal|Otro dispositivo|Ganó /.test(t));
+    const avisos = [...main.querySelectorAll('p')].map((p) => p.innerText.trim()).filter((t) => /CAMBIO DE LADO|FIN DEL GAME|otro teléfono|^Ganó /.test(t));
+    const senal = [...main.querySelectorAll('[role=status]')].map((x) => x.innerText.trim()).find((t) => /SIN SEÑAL/.test(t)) ?? null;
     const alerta = main.querySelector('[role=alert]')?.innerText.trim() ?? null;
     const tiempos = [...main.querySelectorAll('button')].map((b) => b.innerText.trim()).filter((t) => t.startsWith('Tiempo'));
-    return { lados, canto, games, avisos, alerta, tiempos, texto: main.innerText.slice(0, 600) };
+    const vivo = main.querySelector('[aria-live=polite]')?.innerText.trim() ?? null;
+    return { lados, canto, games, avisos, senal, alerta, tiempos, vivo, texto: main.innerText.slice(0, 800) };
   });
 }
 
 async function punto(page, quien) {
-  await page.getByRole('button', { name: quien === 'saca' ? 'Ganó el que saca' : 'Ganó el que recibe' }).click();
+  await page.getByRole('button', { name: quien === 'saca' ? /^Ganó el que saca/ : /^Ganó el que recibe/ }).click();
+}
+
+/** Pide tiempo para el equipo i (0 = el de la izquierda): toca "Tiempo …" y confirma. */
+async function tiempo(page, i = 0) {
+  await page.getByRole('button', { name: /^Tiempo / }).nth(i).click();
+  await page.getByRole('button', { name: 'Sí, tiempo' }).click();
+}
+
+/**
+ * Toca "Terminar partido" y devuelve cómo quedó la confirmación: texto, dónde estaba Terminar, dónde
+ * quedó el "Sí" y si el "Sí" estaba habilitado apenas apareció (no debe: un doble toque no cierra).
+ */
+async function terminar(page) {
+  const b = page.getByRole('button', { name: 'Terminar partido' });
+  await b.waitFor({ timeout: 10000 });
+  const cajaTerminar = await b.boundingBox();
+  await b.click();
+  const si = page.getByRole('button', { name: 'Sí, cargar resultado' });
+  await si.waitFor({ timeout: 5000 });
+  const habilitadoAlAparecer = await si.isEnabled();
+  const cajaSi = await si.boundingBox();
+  const pregunta = await page.locator('p', { hasText: /^¿Cargar / }).innerText().catch(() => null);
+  return { cajaTerminar, cajaSi, habilitadoAlAparecer, pregunta };
+}
+
+/** Confirma el resultado (espera a que el "Sí" se habilite). */
+async function confirmar(page) {
+  const si = page.getByRole('button', { name: 'Sí, cargar resultado' });
+  await si.waitFor({ timeout: 5000 });
+  for (let i = 0; i < 30 && !(await si.isEnabled()); i++) await new Promise((r) => setTimeout(r, 100));
+  await si.click();
+}
+
+/** Las dos cajas se pisan (un toque en un lugar caería en el otro botón)? */
+function sePisan(x, y) {
+  if (!x || !y) return true;
+  return !(x.x + x.width <= y.x || y.x + y.width <= x.x || x.y + x.height <= y.y || y.y + y.height <= x.y);
 }
 
 // ─── Oráculo de tanteo (reglas del diseño, escritas aparte) ──────────────────
@@ -123,4 +185,4 @@ class Tanteo {
   }
 }
 
-module.exports = { leerHojaCodigos, cerrarHoja, elegirArbitraje, entrar, empezar, leer, punto, Tanteo };
+module.exports = { leerHojaCodigos, cerrarHoja, elegirArbitraje, entrar, empezar, formatoEnInicio, textoFormato, leer, punto, tiempo, terminar, confirmar, sePisan, Tanteo };
