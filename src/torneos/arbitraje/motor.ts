@@ -149,6 +149,17 @@ export function resultadoFinal(f: FormatoArbitraje, e: EstadoArbitraje): { punto
 
 export type Marcador = Pick<EstadoArbitraje, 'puntos' | 'games' | 'gamesA' | 'gamesB' | 'game' | 'saca' | 'servidor' | 'canto' | 'terminado' | 'ganador'>;
 
+const esPar = (x: unknown): x is { a: number; b: number } =>
+  !!x && typeof x === 'object' && Number.isFinite((x as { a: unknown }).a) && Number.isFinite((x as { b: unknown }).b);
+
+/** ¿Se puede dibujar? (la fila de la base es pública y antes de v37 guardaba lo que mandara el celular). */
+export function esMarcadorValido(m: unknown): m is Marcador {
+  if (!m || typeof m !== 'object') return false;
+  const x = m as Record<string, unknown>;
+  return esPar(x.puntos) && Array.isArray(x.games) && x.games.every(esPar)
+    && Number.isFinite(x.gamesA) && Number.isFinite(x.gamesB) && Number.isFinite(x.game) && (x.saca === 'A' || x.saca === 'B');
+}
+
 /** Lo que leen la TV y la web pública (sin rehacer el cálculo). */
 export function resumen(e: EstadoArbitraje): Marcador {
   const { puntos, games, gamesA, gamesB, game, saca, servidor, canto, terminado, ganador } = e;
