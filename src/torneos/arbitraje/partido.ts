@@ -7,7 +7,22 @@ import { FORMATO_DEFECTO } from './motor';
 export type LadoPartido = { parejaId: string; nombre: string; jugadores: string[] };
 export type PartidoArbitrado = { fase: 'grupo' | 'llave'; titulo: string; a: LadoPartido | null; b: LadoPartido | null; jugado: boolean };
 
-const jugadoresDe = (nombre: string) => nombre.split(/\s+y\s+|\s*\/\s*/i).map((s) => s.trim()).filter(Boolean);
+// "Ana Pérez y Luis Gómez", "Ana / Luis", "Ana - Luis", "João e Maria", "Ana & Luis". Un guion sin
+// espacios ("Ana-María") es parte del nombre.
+export const jugadoresDe = (nombre: string) =>
+  nombre.split(/\s+(?:y|e|and)\s+|\s*[/&+]\s*|\s+[-–—]\s+/i).map((s) => s.trim()).filter(Boolean);
+
+/** Nombre del jugador i de la pareja; si la pareja no se pudo separar, "Jugador 1/2" (nunca vacío). */
+export function nombreJugador(jugadores: string[], i: 0 | 1): string {
+  return jugadores.length >= 2 ? jugadores[i] : `Jugador ${i + 1}`;
+}
+
+/** Resultado del partido en el cuadro (para comprobar si un "Terminar" sin respuesta llegó igual). */
+export function resultadoEnCuadro(t: Torneo, partidoId: string): { puntosA: number; puntosB: number; games?: { a: number; b: number }[] } | null {
+  const p = t.partidosGrupo.find((x) => x.id === partidoId) ?? (t.partidosLlave ?? []).find((x) => x.id === partidoId);
+  if (!p || p.puntosA === null || p.puntosB === null) return null;
+  return p.games ? { puntosA: p.puntosA, puntosB: p.puntosB, games: p.games } : { puntosA: p.puntosA, puntosB: p.puntosB };
+}
 
 function lado(t: Torneo, parejaId: string | null): LadoPartido | null {
   if (!parejaId) return null;

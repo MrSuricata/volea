@@ -4,14 +4,27 @@ import { toast } from 'sonner';
 import type { Torneo } from '../engine/tipos';
 import { Boton, Dialogo } from '../../admin/ui';
 import { ladosDelPartido, partidosArbitrables } from './partido';
-import { codigosDelTorneo } from './servicio';
+import { codigosDelTorneo, renovarCodigos } from './servicio';
 
 export default function HojaCodigos({ torneo, onCerrar }: { torneo: Torneo; onCerrar: () => void }) {
   const [codigos, setCodigos] = useState<Map<string, string> | null>(null);
+  const [cuatroCifras, setCuatroCifras] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [vuelta, setVuelta] = useState(0);
   useEffect(() => {
-    void codigosDelTorneo(torneo).then((r) => (r.ok ? setCodigos(r.valor) : setError(r.error)));
-  }, [torneo]);
+    void codigosDelTorneo(torneo).then((r) => {
+      if (!r.ok) { setError(r.error); return; }
+      setCodigos(r.valor.codigos); setCuatroCifras(r.valor.cuatroCifras);
+    });
+  }, [torneo, vuelta]);
+
+  async function renovar() {
+    if (!window.confirm(`Cambiar ${cuatroCifras} códigos de 4 cifras por códigos nuevos de 6 (más difíciles de adivinar). Si ya repartiste la hoja, esos códigos viejos dejan de servir. ¿Seguir?`)) return;
+    const r = await renovarCodigos(torneo.id);
+    if (!r.ok) { toast.error(r.error); return; }
+    toast.success(`Listo: ${r.valor} códigos nuevos`);
+    setCodigos(null); setVuelta((v) => v + 1);
+  }
 
   const filas = partidosArbitrables(torneo).map(({ partidoId }) => {
     const d = ladosDelPartido(torneo, partidoId);
@@ -31,11 +44,17 @@ export default function HojaCodigos({ torneo, onCerrar }: { torneo: Torneo; onCe
       )}>
       {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       {!codigos && !error && <p className="text-sm text-gray-500">Generando códigos…</p>}
+      {codigos && cuatroCifras > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          <span className="flex-1">{cuatroCifras} partidos sin empezar tienen códigos viejos de 4 cifras, más fáciles de adivinar.</span>
+          <Boton variante="secundario" onClick={() => void renovar()}>Cambiar por códigos de 6</Boton>
+        </div>
+      )}
       {codigos && (
         <ul className="divide-y divide-gray-100">
           {filas.map((f) => (
             <li key={f.partidoId} className="flex items-center gap-3 py-2 text-sm">
-              <span className="w-16 font-mono text-xl font-black tracking-widest text-navy-700">{f.codigo ?? '—'}</span>
+              <span className="w-24 font-mono text-xl font-black tracking-widest text-navy-700">{f.codigo ?? '—'}</span>
               <span className="min-w-0 flex-1"><span className="text-gray-500">{f.titulo} · </span>{f.a} <b>vs</b> {f.b}</span>
             </li>
           ))}
