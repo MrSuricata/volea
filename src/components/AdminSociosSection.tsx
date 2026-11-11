@@ -304,8 +304,8 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 font-display text-lg font-bold text-navy-700">
-          <Users size={19} /> Cuentas entre socios
+        <h2 className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-wide text-navy-700">
+          <Users size={17} /> Cuentas entre socios
         </h2>
         <Boton variante="secundario" icono={<Plus size={17} />} onClick={() => { setForm({ ...FORM_INICIAL, fecha: hoyISO() }); setShowForm(true); }}>
           Nuevo movimiento
@@ -503,7 +503,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
               <div className="hidden max-h-[36rem] overflow-auto md:block">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50">
-                    <tr className="text-left font-display text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">
+                    <tr className="text-left font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">
                       <th className="px-4 py-2.5">Cuándo</th>
                       <th className="px-4 py-2.5">Área</th>
                       <th className="px-4 py-2.5">Tipo</th>

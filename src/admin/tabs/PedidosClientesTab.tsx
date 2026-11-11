@@ -140,7 +140,7 @@ export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
   return (
     <div>
       <EncabezadoPagina
-        rotulo="Tienda"
+        rotulo="Día a día"
         titulo="Pedidos"
         descripcion="Los que entran por la web o se cargan a mano desde un WhatsApp."
         acciones={<Boton icono={<Plus size={18} />} onClick={() => setModalNuevo(true)}>Nuevo pedido</Boton>}
@@ -170,6 +170,8 @@ export function PedidosClientesTab({ reportedBy }: { reportedBy: string }) {
         <Vacio
           icono={<ShoppingBag size={22} />}
           titulo={orders.length === 0 ? 'Todavía no hay pedidos' : 'Ningún pedido con esos filtros'}
+          descripcion={orders.length === 0 ? 'Los de la web entran solos; los de WhatsApp se cargan a mano.' : 'Probá con otro filtro o borrá la búsqueda.'}
+          accion={orders.length === 0 ? <Boton icono={<Plus size={18} />} onClick={() => setModalNuevo(true)}>Nuevo pedido</Boton> : undefined}
         />
       ) : (
         <ul className="space-y-2">

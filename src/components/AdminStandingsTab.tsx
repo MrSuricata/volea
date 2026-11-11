@@ -142,7 +142,7 @@ export function AdminStandingsTab({ standings, onSave, onDelete }: {
         {grouped.map(group => (
           <Tarjeta key={group.category} titulo={group.category} sinPadding acciones={<span className="text-[13px] text-gray-500">{group.entries.length}</span>}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm tabular-nums">
                 <thead className="border-b border-gray-200 bg-gray-50">
                   <tr>
                     <th scope="col" className="w-14 px-4 py-2.5 text-left font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">Pos</th>

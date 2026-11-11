@@ -320,7 +320,7 @@ export default function AdminTareasTab({ adminEmail }: { adminEmail: string }) {
   return (
     <div>
       <EncabezadoPagina
-        rotulo="Equipo"
+        rotulo="Día a día"
         titulo="Tareas"
         descripcion="La agenda compartida: anotá en un renglón y mové cada tarea con un toque."
         acciones={(

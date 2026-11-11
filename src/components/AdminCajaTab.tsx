@@ -372,7 +372,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     // pb extra en el celular: la barra fija de "Nueva venta" no tapa el último movimiento.
     <div className="fade-in pb-24 md:pb-0">
       <EncabezadoPagina
-        rotulo="Plata"
+        rotulo="Día a día"
         titulo="Caja"
         descripcion="Ventas y gastos del bot de Telegram y de esta pantalla. Al anular una venta de catálogo, el stock se repone solo."
         acciones={(

@@ -463,21 +463,21 @@ export default function AdminPage() {
       </div>
       <div className="px-4 pb-3">
         <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 ring-1 ring-white/10 focus-within:ring-white/30">
-          <Search size={15} className="shrink-0 text-white/50" />
+          <Search size={15} className="shrink-0 text-white/60" />
           <input
             type="search"
             value={buscarSeccion}
             onChange={e => setBuscarSeccion(e.target.value)}
             placeholder="Buscar sección…"
             aria-label="Buscar sección del panel"
-            className="h-10 w-full min-w-0 bg-transparent text-base text-white placeholder:text-white/40 outline-none sm:text-sm"
+            className="h-10 w-full min-w-0 bg-transparent text-base text-white placeholder:text-white/55 outline-none sm:text-sm"
           />
         </div>
       </div>
       <NavDesplazable claveActivo={activeTab} claveGrupo={q === '' ? grupoAbierto : null}>
         {q !== '' ? (
           resultados.length === 0
-            ? <p className="px-3 py-3 text-sm text-white/50">Nada con «{buscarSeccion.trim()}»</p>
+            ? <p className="px-3 py-3 text-sm text-white/65">Nada con «{buscarSeccion.trim()}»</p>
             : resultados.map(it => (
               <button key={it.id} onClick={() => irA(it.id)} className={claseItem(it.id)} aria-current={activeTab === it.id ? 'page' : undefined}>
                 <Marca id={it.id} />{it.icon} {it.label}<Aviso n={avisosPorTab[it.id] || 0} />
@@ -502,7 +502,7 @@ export default function AdminPage() {
                     aria-expanded={abierto}
                     className={cn(
                       'flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 font-display text-[12px] font-bold uppercase tracking-[0.12em] transition-colors',
-                      tieneActivo ? 'text-white' : 'text-white/50 hover:bg-white/5 hover:text-white/80',
+                      tieneActivo ? 'text-white' : 'text-white/65 hover:bg-white/5 hover:text-white',
                     )}
                   >
                     {g.icon} {g.label}
@@ -616,7 +616,9 @@ export default function AdminPage() {
           </Link>
         </header>
 
-        <main className="mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8 md:pt-8 lg:pb-12">
+        {/* Las secciones de listas largas (tablas, movimientos) usan más ancho en pantallas
+            grandes; el resto queda en 7xl para que formularios y tarjetas no se estiren. */}
+        <main className={cn('mx-auto max-w-7xl px-4 pb-28 pt-5 md:px-8 md:pt-8 lg:pb-12', SECCIONES_ANCHAS.has(activeTab) && '2xl:max-w-[96rem]')}>
           <div key={activeTab} className="fade-in">
             {activeTab === 'dashboard' && (
               <InicioTab nombre={currentAdmin?.name || currentAdmin?.email || ''} irA={irA} inscNuevas={inscNuevas} tareasPendientes={tareasPendientes} />
@@ -784,6 +786,9 @@ export default function AdminPage() {
 }
 
 type ItemMenu = { id: string; label: string; icon: ReactNode };
+
+/** Secciones de tablas/listas largas que aprovechan el ancho a partir de 1536px. */
+const SECCIONES_ANCHAS = new Set(['products', 'stock', 'orders', 'caja', 'inscripciones', 'compras', 'socios', 'jugadores']);
 
 /**
  * Lista del menú con scroll propio: barra fina oscura (.barra-oscura), degradé arriba/abajo

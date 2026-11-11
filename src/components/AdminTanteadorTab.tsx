@@ -33,7 +33,7 @@ import {
   type AvisoPunto,
   type PropuestaLlave,
 } from '../utils/tanteador';
-import { Boton, BotonIcono, Campo, EncabezadoPagina, Entrada, Insignia, Segmentado, Selector, Vacio } from '../admin/ui';
+import { Boton, BotonIcono, Campo, CargandoFilas, Dialogo, EncabezadoPagina, Entrada, ErrorEstado, Insignia, Segmentado, Selector, Vacio } from '../admin/ui';
 import { cn } from '../lib/cn';
 
 const ESPEJO_KEY = 'volea_tanteador_espejo';
@@ -97,9 +97,13 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
   const sinConexion = !enLinea || ultimoGuardadoFallo;
   const [reglamentoAbierto, setReglamentoAbierto] = useState(false);
 
+  // Sin respuesta en la primera carga la pantalla quedaba en «Cargando…» para siempre:
+  // ahora muestra el error con reintento (solo cuando todavía no hay nada que mostrar).
+  const [falloCarga, setFalloCarga] = useState(false);
   const cargar = useCallback(async () => {
     const ps = await SupabaseService.getTanteadorPartidos();
     if (ps) setPartidos(ps);
+    setFalloCarga(!ps);
   }, []);
 
   useEffect(() => {
@@ -489,7 +493,10 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
             </div>
           )}
 
-          {partidos === null && <p className="py-6 text-center text-sm text-gray-600">Cargando partidos…</p>}
+          {partidos === null && !falloCarga && <CargandoFilas filas={3} />}
+          {partidos === null && falloCarga && (
+            <ErrorEstado mensaje="No se pudieron cargar los partidos. Revisá la señal." alReintentar={() => { setFalloCarga(false); void cargar(); }} />
+          )}
 
           {enJuego.length > 0 && (
             <SeccionLista titulo="En juego" cantidad={enJuego.length}>{enJuego.map(tarjeta)}</SeccionLista>
@@ -689,12 +696,23 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
       )}
 
       {/* ============ RESULTADO MANUAL (de la hoja) ============ */}
+      {/* Diálogos del kit (antes eran capas propias): mismo encabezado, cierre y pie que el resto. */}
       {resDe && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-4">
-          <div role="dialog" aria-modal="true" aria-label="Cargar resultado" className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <p className="font-display text-lg font-bold text-navy-700">Cargar resultado</p>
-            <p className="mt-0.5 text-[13px] text-gray-600">De la hoja al sistema. El 3er set solo si se jugó.</p>
-            <div className="mt-4 grid grid-cols-[auto_1fr_1fr] items-center gap-x-2 gap-y-2 text-[13px] font-bold text-navy-700">
+        <Dialogo
+          abierto
+          ancho="sm"
+          titulo="Cargar resultado"
+          descripcion="De la hoja al sistema. El 3er set solo si se jugó."
+          alCerrar={() => setResDe(null)}
+          sucio={resSets.some((f) => f.some((x) => x !== ''))}
+          pie={(
+            <>
+              <Boton variante="secundario" onClick={() => setResDe(null)}>Cancelar</Boton>
+              <Boton onClick={guardarResultado}>Guardar</Boton>
+            </>
+          )}
+        >
+            <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-x-2 gap-y-2 text-[13px] font-bold text-navy-700">
               <span />
               <EtiquetaLado lado="A"><span className="truncate">{resDe.parejaA}</span></EtiquetaLado>
               <EtiquetaLado lado="B"><span className="truncate">{resDe.parejaB}</span></EtiquetaLado>
@@ -717,12 +735,7 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
                 ]
               ))}
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-2">
-              <Boton variante="secundario" onClick={() => setResDe(null)}>Cancelar</Boton>
-              <Boton onClick={guardarResultado}>Guardar</Boton>
-            </div>
-          </div>
-        </div>
+        </Dialogo>
       )}
 
       {/* ============ ARMAR LLAVE ============ */}
@@ -732,17 +745,18 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
           (p) => p.categoria === llaveDe.cat && p.modo === llaveDe.modo && p.fase === 'grupos' && p.estado === 'en_juego',
         ).length;
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-4">
-            <div role="dialog" aria-modal="true" aria-label="Armar llave" className="w-full max-w-md rounded-2xl bg-white p-5">
-              <p className="font-display text-lg font-bold text-navy-700">
-                Armar llave — {llaveDe.cat === 'DM' ? 'Masculino' : 'Femenino'}
-              </p>
+          <Dialogo
+            abierto
+            titulo={`Armar llave — ${llaveDe.cat === 'DM' ? 'Masculino' : 'Femenino'}`}
+            alCerrar={() => setLlaveDe(null)}
+            pie={<Boton variante="secundario" onClick={() => setLlaveDe(null)}>Cancelar</Boton>}
+          >
               {pendientes > 0 && (
-                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-900">
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-900">
                   Quedan {pendientes} cruce{pendientes > 1 ? 's' : ''} de grupo sin terminar. La siembra usa la tabla como está AHORA.
                 </p>
               )}
-              <div className="mt-3 space-y-2">
+              <div className="space-y-2">
                 {props.map((prop) => (
                   <button
                     key={prop.id}
@@ -758,19 +772,26 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
                   <p className="text-sm text-gray-600">Nada para armar: o la llave ya está creada, o las semis siguen en juego.</p>
                 )}
               </div>
-              <Boton variante="secundario" anchoCompleto onClick={() => setLlaveDe(null)} className="mt-3">Cancelar</Boton>
-            </div>
-          </div>
+          </Dialogo>
         );
       })()}
 
       {/* ============ CORREGIR MARCADOR ============ */}
       {corregir && actual && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/95 p-4">
-          <div role="dialog" aria-modal="true" aria-label="Corregir marcador" className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <p className="font-display text-lg font-bold text-navy-700">Corregir marcador</p>
-            <p className="mt-0.5 text-[13px] text-gray-600">Set {actual.sets.length + 1} en curso. Los sets ya cerrados no se tocan (para eso está Deshacer).</p>
-            <div className="mt-4 grid grid-cols-2 gap-3">
+        <Dialogo
+          abierto
+          ancho="sm"
+          titulo="Corregir marcador"
+          descripcion={`Set ${actual.sets.length + 1} en curso. Los sets ya cerrados no se tocan (para eso está Deshacer).`}
+          alCerrar={() => setCorregir(null)}
+          pie={(
+            <>
+              <Boton variante="secundario" onClick={() => setCorregir(null)}>Cancelar</Boton>
+              <Boton onClick={guardarCorreccion}>Guardar</Boton>
+            </>
+          )}
+        >
+            <div className="grid grid-cols-2 gap-3">
               {(['a', 'b'] as const).map((l) => (
                 <label key={l} className="block min-w-0">
                   <EtiquetaLado lado={l === 'a' ? 'A' : 'B'}>
@@ -788,15 +809,10 @@ export default function AdminTanteadorTab({ adminEmail }: { adminEmail: string }
                 </label>
               ))}
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-2">
-              <Boton variante="secundario" onClick={() => setCorregir(null)}>Cancelar</Boton>
-              <Boton onClick={guardarCorreccion}>Guardar</Boton>
-            </div>
-            <Boton variante="fantasma" anchoCompleto onClick={pedirReinicio} className="mt-2 text-red-700 hover:bg-red-50">
+            <Boton variante="fantasma" anchoCompleto onClick={pedirReinicio} className="mt-4 text-red-700 hover:bg-red-50">
               Reiniciar partido a 0-0 (borra todos los tantos)
             </Boton>
-          </div>
-        </div>
+        </Dialogo>
       )}
 
       {/* ============ OVERLAY ============ */}
