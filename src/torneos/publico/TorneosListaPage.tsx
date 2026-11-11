@@ -7,6 +7,7 @@ import { podioDeTorneo } from './resultado';
 import { agruparPorEvento, listarTorneosPublicos, torneoEnVivo } from './datos';
 import type { TorneoPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
+import NavPublica from './NavPublica';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 
@@ -18,6 +19,16 @@ const ETIQUETA_FASE: Record<Torneo['fase'], string> = {
 const ETIQUETA_FORMATO: Record<string, string> = { grupos: 'Grupos + Llave', individual: 'One Point Challenge' };
 
 type Estado = 'cargando' | 'ok' | 'error';
+
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/** "11 nov" (con el año si no es el actual): sin 11/11/2026, que un extranjero lee como mes/día. */
+function fechaEscrita(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getDate()} ${MESES[d.getMonth()]}${d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : ''}`;
+}
+
+const ChipFase = ({ fase }: { fase: Torneo['fase'] }) => <span className={`chip chip-fase fase-${fase}`}>{ETIQUETA_FASE[fase]}</span>;
 
 /**
  * Lista pública de torneos agrupada por EVENTO (pedido de Brian): una carta por
@@ -77,11 +88,13 @@ export default function TorneosListaPage() {
       <li key={t.id} className="carta">
         <Link className="titulo-torneo" to={`/torneos/${t.id}`}>
           <strong>{t.nombre}</strong>
-          <span>
-            {new Date(t.creadoEl).toLocaleDateString('es-UY')} · {individual ? plural(t.parejas.length, 'jugador', 'jugadores') : plural(t.parejas.length, 'pareja', 'parejas')} ·{' '}
-            {ETIQUETA_FORMATO[t.formato ?? 'grupos']} · {ETIQUETA_FASE[t.fase]}
-            {t.categoria ? ` · Cat ${t.categoria}` : ''}
-            {t.fase === 'terminado' && podio.campeon ? ` · 🏆 ${nombreDe(t, podio.campeon)}` : ''}
+          <span className="meta-torneo">
+            <ChipFase fase={t.fase} />
+            <span>{fechaEscrita(t.creadoEl)}</span>
+            <span>{individual ? plural(t.parejas.length, 'jugador', 'jugadores') : plural(t.parejas.length, 'pareja', 'parejas')}</span>
+            <span>{ETIQUETA_FORMATO[t.formato ?? 'grupos']}</span>
+            {t.categoria && <span>Cat {t.categoria}</span>}
+            {t.fase === 'terminado' && podio.campeon && <span className="campeon-mini">🏆 {nombreDe(t, podio.campeon)}</span>}
           </span>
         </Link>
         {enVivo && (
@@ -94,6 +107,7 @@ export default function TorneosListaPage() {
   return (
     <div className="rk">
       <main className="contenedor">
+        <NavPublica activa="torneos" />
         <header className="cabecera">
           <h1><span className="marca">TORNEOS</span> VOLEA</h1>
           <div className="acciones">
@@ -135,15 +149,24 @@ export default function TorneosListaPage() {
             {eventos.map((ev) => {
               const unico = ev.torneos[0];
               const jugadores = new Set(ev.torneos.flatMap((t) => t.parejas.flatMap((p) => p.jugadorIds))).size;
-              const resumen = `${new Date(ev.ultimaFecha).toLocaleDateString('es-UY')} · ${
-                ev.suelto
-                  ? `${(unico.formato ?? 'grupos') === 'individual' ? plural(unico.parejas.length, 'jugador', 'jugadores') : plural(unico.parejas.length, 'pareja', 'parejas')} · ${ETIQUETA_FASE[unico.fase]}`
-                  : `${plural(ev.torneos.length, 'categoría', 'categorías')} · ${plural(jugadores, 'jugador', 'jugadores')}${ev.terminado ? ' · Terminado' : ''}`
-              }`;
+              const individualUnico = (unico.formato ?? 'grupos') === 'individual';
+              const equipos = ev.torneos.reduce((n, t) => n + t.parejas.length, 0);
               const contenido = (
                 <>
                   <strong>{ev.nombre}</strong>
-                  <span>{resumen}</span>
+                  <span className="meta-torneo">
+                    {ev.suelto
+                      ? <ChipFase fase={unico.fase} />
+                      : <span className={`chip chip-fase fase-${ev.terminado ? 'terminado' : ev.enVivo ? 'llave' : 'faseGrupos'}`}>{ev.terminado ? 'Terminado' : ev.enVivo ? 'En juego' : 'En curso'}</span>}
+                    <span>{fechaEscrita(ev.ultimaFecha)}</span>
+                    {ev.suelto
+                      ? <span>{individualUnico ? plural(unico.parejas.length, 'jugador', 'jugadores') : plural(unico.parejas.length, 'pareja', 'parejas')}</span>
+                      : <>
+                        <span>{plural(ev.torneos.length, 'categoría', 'categorías')}</span>
+                        {jugadores > 0 && <span>{plural(jugadores, 'jugador', 'jugadores')}</span>}
+                        <span>{plural(equipos, 'equipo/pareja', 'equipos/parejas')}</span>
+                      </>}
+                  </span>
                 </>
               );
               return (

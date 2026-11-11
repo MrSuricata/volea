@@ -13,14 +13,16 @@ import { RkCargando, RkError } from './Estados';
 import { supabase } from '../../services/supabaseClient';
 import { almacenLocal } from '../../utils/almacen';
 import {
-  BLOQUE_OPC, PROGRAMA, aHora, aMinuto, aplicarAjustes, categoriasDelEvento, claveDePartido, minutoDesde,
+  BLOQUE_OPC, CLAVE_PROGRAMA, aHora, construirPrograma, aMinuto, aplicarAjustes, categoriasDelEvento, claveDePartido, minutoDesde,
   momentoDeTorneo, programarEvento,
   ritmoReal,
 } from './programa';
-import type { AjustesPrograma, CatProg, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
+import type { AjustesPrograma, CatProg, DiaPrograma, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
 import '../torneos.css';
 import PantallaTv from './PantallaTv';
 import PanelTv from './PanelTv';
+import PanelEvento from './PanelEvento';
+import NavPublica from './NavPublica';
 import { MarcadorVivo, claveMarcador, useMarcadores } from '../arbitraje/MarcadorVivo';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
@@ -106,12 +108,12 @@ async function armarCopasEnServidor(torneoId: string): Promise<string | null> {
     .select('id');
   if (e2 || !upd || upd.length === 0) return 'Las copas se crearon pero el cuadro de grupos no se pudo cerrar: cerralo desde el gestor';
   // Lugar en el programa: el mismo que tenía el cuadro de grupos.
-  const { data: prog } = await sb.from('rk_programa').select('config').eq('clave', PROGRAMA.clave).maybeSingle();
+  const { data: prog } = await sb.from('rk_programa').select('config').eq('clave', CLAVE_PROGRAMA).maybeSingle();
   const config = (prog?.config as AjustesPrograma | null) ?? {};
   const propio = config.categorias?.[torneoId];
   if (propio) {
     const categorias = { ...config.categorias, [copas.oro.id]: { ...propio }, [copas.plata.id]: { ...propio } };
-    await sb.from('rk_programa').upsert({ clave: PROGRAMA.clave, config: { ...config, categorias }, updated_at: new Date().toISOString() });
+    await sb.from('rk_programa').upsert({ clave: CLAVE_PROGRAMA, config: { ...config, categorias }, updated_at: new Date().toISOString() });
   }
   return null;
 }
@@ -152,14 +154,22 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
   return 'Se está editando desde otro lado: probá de nuevo';
 }
 
+// ¿El cuadro ya tiene resultado cargado para este partido? Un marcador de árbitro que quedó
+// "en juego" después de cargado el resultado no es un partido en vivo.
+function tieneResultado(torneos: Torneo[], torneoId: string, partidoId: string): boolean {
+  const t = torneos.find((x) => x.id === torneoId);
+  const p = t && [...t.partidosGrupo, ...(t.partidosLlave ?? [])].find((x) => x.id === partidoId);
+  return !!p && resultadoDe(p) !== null;
+}
+
 type EnCancha = { cancha: string; torneoId: string | null; partidoId: string | null; desde: string | null; habilitada: boolean };
 
 // Datos legibles de un partido marcado en cancha, buscándolo en los datos vivos.
-function etiquetaEnCancha(torneos: Torneo[], e: EnCancha): { cat: string; a: string; b: string; tipo: 'grupo' | 'llave' } | null {
+function etiquetaEnCancha(torneos: Torneo[], e: EnCancha, nombreCorto: (n: string) => string): { cat: string; a: string; b: string; tipo: 'grupo' | 'llave' } | null {
   if (!e.torneoId || !e.partidoId) return null;
   const t = torneos.find((x) => x.id === e.torneoId);
   if (!t) return null;
-  const cat = PROGRAMA.nombreCorto(t.nombre);
+  const cat = nombreCorto(t.nombre);
   const pg = t.partidosGrupo.find((p) => p.id === e.partidoId);
   if (pg) return { cat, a: nombreDe(t, pg.aId), b: nombreDe(t, pg.bId), tipo: 'grupo' };
   const llave = t.partidosLlave ?? [];
@@ -466,12 +476,12 @@ function conAlfa(hex: string, alfa: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alfa})`;
 }
 
-// Día que se muestra al entrar: el que se está jugando; antes del torneo, el primero; después, el último.
-function diaInicial(): string {
-  const m = momentoDeTorneo(new Date(), PROGRAMA.dias);
+// Día que se muestra al entrar: el que se está jugando; antes del evento, el primero; después, el último.
+function diaInicial(dias: DiaPrograma[]): string {
+  const m = momentoDeTorneo(new Date(), dias);
   if (m.dia) return m.dia;
-  const ultimo = PROGRAMA.dias[PROGRAMA.dias.length - 1];
-  return m.fecha > ultimo.fecha ? ultimo.clave : PROGRAMA.dias[0].clave;
+  const ultimo = dias[dias.length - 1];
+  return m.fecha > ultimo.fecha ? ultimo.clave : dias[0].clave;
 }
 
 export default function ProgramacionPage() {
@@ -482,7 +492,7 @@ export default function ProgramacionPage() {
   const [ajustes, setAjustes] = useState<AjustesPrograma | null>(null);
   const [actualizado, setActualizado] = useState<Date | null>(null);
   const [verTodos, setVerTodos] = useState(false);
-  const [dia, setDia] = useState(diaInicial);
+  const [diaManual, setDia] = useState<string | null>(null);
   const [filtro, setFiltro] = useState('');
   const [busqueda, setBusqueda] = useState('');
   // Modo admin: visible solo con sesión iniciada, y aún así apagado por defecto
@@ -502,6 +512,7 @@ export default function ProgramacionPage() {
   }, []);
 
   const [enCancha, setEnCancha] = useState<EnCancha[]>([]);
+  const esTv = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('tv');
 
   const cargar = useCallback(async (primera: boolean) => {
     if (primera) setEstado('cargando');
@@ -515,7 +526,7 @@ export default function ProgramacionPage() {
     if (supabase) {
       const [tablero, programa] = await Promise.all([
         supabase.from('rk_en_cancha').select('cancha, torneo_id, partido_id, updated_at, habilitada'),
-        supabase.from('rk_programa').select('config').eq('clave', PROGRAMA.clave).maybeSingle(),
+        supabase.from('rk_programa').select('config').eq('clave', CLAVE_PROGRAMA).maybeSingle(),
       ]);
       if (tablero.data) {
         setEnCancha(tablero.data.map((f) => ({
@@ -568,7 +579,7 @@ export default function ProgramacionPage() {
     const sb = supabase;
     if (!sb) return;
     const config = { ...(ajustes ?? {}), tv: { ...(ajustes?.tv ?? {}), lanzar: Date.now() } };
-    const { error } = await sb.from('rk_programa').upsert({ clave: PROGRAMA.clave, config, updated_at: new Date().toISOString() });
+    const { error } = await sb.from('rk_programa').upsert({ clave: CLAVE_PROGRAMA, config, updated_at: new Date().toISOString() });
     if (error) window.alert('No se pudo (¿sesión vencida?)');
     else setAjustes(config);
   }
@@ -577,7 +588,7 @@ export default function ProgramacionPage() {
     const sb = supabase;
     if (!sb) return 'Sin conexión con el servidor';
     const { error } = await sb.from('rk_programa')
-      .upsert({ clave: PROGRAMA.clave, config: { ...(ajustes ?? {}), ...nuevos }, updated_at: new Date().toISOString() });
+      .upsert({ clave: CLAVE_PROGRAMA, config: { ...(ajustes ?? {}), ...nuevos }, updated_at: new Date().toISOString() });
     if (error) return 'No se pudo guardar (¿sesión vencida?)';
     setAjustes({ ...(ajustes ?? {}), ...nuevos });
     return null;
@@ -614,14 +625,25 @@ export default function ProgramacionPage() {
     };
   }, [cargar]);
 
+  // TV con la red caída: reintenta sola cada 10 s hasta que vuelva (sin esperar el sondeo de 60 s).
+  useEffect(() => {
+    if (!esTv || estado !== 'error') return;
+    const t = window.setInterval(() => void cargar(true), 10000);
+    return () => window.clearInterval(t);
+  }, [esTv, estado, cargar]);
+
+  // El evento que se muestra sale de rk_programa.config.evento (ver construirPrograma).
+  // tick: el "hoy" por defecto se recalcula con el reloj de la página.
+  const programa = useMemo(() => construirPrograma(ajustes?.evento), [ajustes, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const ordenCancha = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
   const activas = enCancha.length > 0
     ? enCancha.filter((e) => e.habilitada).map((e) => e.cancha).sort(ordenCancha)
-    : PROGRAMA.canchas;
+    : programa.canchas;
 
   const { filas, resumen, cats, vigente, momento, ritmo, resumenRitmo } = useMemo(() => {
-    const vigente = aplicarAjustes(PROGRAMA, ajustes);
-    const cats = categoriasDelEvento(torneos, PROGRAMA, vigente);
+    const vigente = aplicarAjustes(programa, ajustes);
+    const cats = categoriasDelEvento(torneos, programa, vigente);
     const momento = momentoDeTorneo(new Date(), vigente.dias);
     const enJuego = enCancha.flatMap((e) => (e.torneoId && e.partidoId && e.desde
       ? [{ cancha: e.cancha, torneoId: e.torneoId, partidoId: e.partidoId, desde: minutoDesde(momento.fecha, new Date(e.desde)) }]
@@ -629,7 +651,7 @@ export default function ProgramacionPage() {
     const programado = programarEvento({ cats, vigente, ahora: momento, canchas: { activas, enJuego } });
     // Ritmo real: cuándo se fueron cargando los resultados del evento (últimos 90 minutos).
     const instantes = torneos
-      .filter((t) => PROGRAMA.esDelEvento(t))
+      .filter((t) => programa.esDelEvento(t))
       .flatMap((t) => [...t.partidosGrupo, ...(t.partidosLlave ?? [])])
       .map((p) => (p.cargadoEl ? Date.parse(p.cargadoEl) : NaN))
       .filter((x) => Number.isFinite(x));
@@ -638,10 +660,27 @@ export default function ProgramacionPage() {
       ? programarEvento({ cats, vigente: { ...vigente, duracion: ritmo }, ahora: momento, canchas: { activas, enJuego } }).resumen
       : null;
     return { ...programado, cats, vigente, momento, ritmo, resumenRitmo };
-  }, [torneos, ajustes, actualizado, enCancha, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [torneos, ajustes, programa, actualizado, enCancha, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (estado !== 'ok' && esTv) {
+    // La TV del club nunca muestra el cartel de error del sitio: pantalla completa y a reintentar.
+    return (
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 9999, background: '#001328', color: '#fff',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+        fontFamily: 'Lexend, Montserrat, system-ui, sans-serif', cursor: 'none',
+      }}>
+        <img src="/logo-white.png" alt="" style={{ height: '8vh', marginBottom: '4vh' }}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+        <div style={{ fontSize: '5vh', fontWeight: 900, color: '#CCFF00' }}>{estado === 'error' ? 'Reconectando…' : 'Cargando…'}</div>
+        {estado === 'error' && <div style={{ fontSize: '2.4vh', opacity: 0.7, marginTop: '1.5vh' }}>Sin conexión con el servidor. Se reintenta sola.</div>}
+      </div>
+    );
+  }
   if (estado === 'cargando') return <RkCargando texto="Armando la programación…" />;
   if (estado === 'error') return <RkError mensaje={mensajeError} onReintentar={() => void cargar(true)} />;
+
+  const dia = diaManual && vigente.dias.some((d) => d.clave === diaManual) ? diaManual : diaInicial(vigente.dias);
 
   const indiceDia = (clave: string) => vigente.dias.findIndex((d) => d.clave === clave);
   const diaElegido = vigente.dias.find((d) => d.clave === dia) ?? vigente.dias[0];
@@ -680,7 +719,7 @@ export default function ProgramacionPage() {
   // una misma persona a dos canchas: pasa con los que juegan varias categorías).
   const ocupados = new Map<string, string>();
   enCancha.forEach((e) => {
-    const et = e.partidoId ? etiquetaEnCancha(torneos, e) : null;
+    const et = e.partidoId ? etiquetaEnCancha(torneos, e, programa.nombreCorto) : null;
     if (!et) return;
     [...et.a.split(/\s+y\s+/i), ...et.b.split(/\s+y\s+/i)].forEach((n) => ocupados.set(normalizar(n), e.cancha));
   });
@@ -721,14 +760,14 @@ export default function ProgramacionPage() {
     const [f] = porMandar.splice(suya === -1 ? 0 : suya, 1);
     if (f) sugerencias.set(cancha, f);
   }
-  const [color1, color2, color3] = PROGRAMA.colores;
+  const [color1, color2, color3] = programa.colores;
 
   // Modo TV (/programacion?tv): pantalla completa para la tele del club, sin controles.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('tv')) {
+  if (esTv) {
     const diaTv = momento.dia ?? dia;
     const canchasTv = activas.map((nombre) => {
       const e = enCancha.find((x) => x.cancha === nombre);
-      const et = e ? etiquetaEnCancha(torneos, e) : null;
+      const et = e ? etiquetaEnCancha(torneos, e, programa.nombreCorto) : null;
       const s = sugerencias.get(nombre);
       return {
         cancha: nombre, cat: et?.cat ?? null, a: et?.a ?? null, b: et?.b ?? null,
@@ -742,14 +781,15 @@ export default function ProgramacionPage() {
     for (const [k, m] of marcadores) {
       if (enAlgunaCancha.has(k)) continue;
       const [torneoId, partidoId] = k.split(':');
-      const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true });
+      if (tieneResultado(torneos, torneoId, partidoId)) continue; // ya jugado: no es un partido en vivo
+      const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true }, programa.nombreCorto);
       if (et) canchasTv.push({ cancha: 'Con árbitro', cat: et.cat, a: et.a, b: et.b, minutos: null, sigue: null, marcador: m });
     }
     const proximosTv = filas.filter((f) => f.dia === diaTv && !enCanchaYa(f)).slice(0, 5);
     return (
       <PantallaTv
-        titulo={PROGRAMA.titulo}
-        colores={PROGRAMA.colores}
+        titulo={programa.titulo}
+        colores={programa.colores}
         canchas={canchasTv}
         proximos={proximosTv}
         resultados={cinta.slice(0, 5)}
@@ -813,8 +853,9 @@ export default function ProgramacionPage() {
           </div>
         )}
 
+        <NavPublica activa="programacion" />
         <header className="cabecera">
-          <h1><span className="marca">EN VIVO</span> {PROGRAMA.titulo}</h1>
+          <h1><span className="marca">EN VIVO</span> {programa.titulo}</h1>
           <div className="acciones">
             <Link className="boton secundario" to="/torneos">Cuadros</Link>
             <button className="boton secundario" onClick={() => void cargar(false)}>Actualizar</button>
@@ -831,6 +872,14 @@ export default function ProgramacionPage() {
           </div>
         </header>
 
+        {modoCarga && (
+          <PanelEvento
+            key={ajustes ? 'cargado' : 'vacio'}
+            evento={ajustes?.evento}
+            programa={programa}
+            onGuardar={(evento) => guardarAjustes({ ...(ajustes ?? {}), evento })}
+          />
+        )}
         {modoCarga && (
           <AjustesHorarios
             // se rearma solo si aparece o desaparece una categoría: al guardar (que puede
@@ -849,14 +898,14 @@ export default function ProgramacionPage() {
 
         {cats.length === 0 ? (
           <div style={{ ...carta, borderColor: 'var(--lima)', textAlign: 'center', padding: '30px 20px' }}>
-            <p style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{PROGRAMA.avisoSinCuadros}</p>
+            <p style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{programa.avisoSinCuadros}</p>
             <p style={{ margin: '10px 0 0', opacity: 0.75 }}>
               {vigente.dias.map((d) => `${d.nombre} desde las ${aHora(d.inicio)}`).join(' · ')}
             </p>
             {modoCarga && (
               <p style={{ margin: '14px 0 0', fontSize: '0.88rem', color: 'var(--lima)' }}>
-                Para que un cuadro aparezca acá, su nombre en el gestor tiene que decir ANIVERSARIO
-                (por ejemplo «SINGLES FEMENINO ANIVERSARIO»).
+                Los cuadros que entran, el título, los días y las canchas se cambian en «Datos del evento».
+                Por defecto entran los cuadros tocados en los últimos 3 días.
               </p>
             )}
           </div>
@@ -929,7 +978,7 @@ export default function ProgramacionPage() {
             </button>
           ))}
           <span style={{ fontSize: '0.8rem', opacity: 0.65, marginLeft: 'auto' }}>
-            Horarios estimados{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            Horarios estimados{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false })}` : ''}
           </span>
         </div>
         {resumenDia.termina !== null && (
@@ -959,14 +1008,15 @@ export default function ProgramacionPage() {
 
         {/* Filtro por categoría: un toque y ves solo lo tuyo */}
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10 }}>
-          <button onClick={() => setFiltro('')}
+          <button onClick={() => setFiltro('')} className="chip-filtro"
             style={{ ...chip, cursor: 'pointer', background: filtro === '' ? 'var(--lima)' : 'transparent', color: filtro === '' ? '#101c33' : 'var(--texto)' }}>
             Todas
           </button>
           {catsDelDia.map((c) => (
             <button key={c.torneoId} onClick={() => { setFiltro(filtro === c.corto ? '' : c.corto); setVerTodos(false); }}
+              className="chip-filtro" title={c.corto}
               style={{ ...chip, cursor: 'pointer', background: filtro === c.corto ? 'var(--lima)' : 'transparent', color: filtro === c.corto ? '#101c33' : 'var(--texto)' }}>
-              {c.corto} {c.terminado ? '✓' : `${c.jugados}/${c.total}`}
+              <span className="chip-filtro-texto">{c.corto}</span> {c.terminado ? '✓' : `${c.jugados}/${c.total}`}
             </button>
           ))}
         </div>
@@ -1016,7 +1066,7 @@ export default function ProgramacionPage() {
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
                       <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--lima)' }}>{aHora(f.ini)}</span>
                       <span style={chip}>{f.cancha}</span>
-                      <span style={chip}>{f.categoria}</span>
+                      <span className="chip-corto" title={f.categoria} style={chip}>{f.categoria}</span>
                       <span style={{ ...chip, border: 'none', opacity: 0.7, fontWeight: f.fase === 'FINAL' ? 800 : 700 }}>{f.fase}</span>
                     </div>
                     <div style={{ fontSize: '1.02rem', fontWeight: 600, lineHeight: 1.45 }}>
@@ -1071,7 +1121,8 @@ export default function ProgramacionPage() {
             const enAlgunaCancha = new Set(enCancha.flatMap((e) => (e.torneoId && e.partidoId ? [claveMarcador(e.torneoId, e.partidoId)] : [])));
             const sueltos = [...marcadores.entries()].filter(([k]) => !enAlgunaCancha.has(k)).flatMap(([k, m]) => {
               const [torneoId, partidoId] = k.split(':');
-              const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true });
+              if (tieneResultado(torneos, torneoId, partidoId)) return []; // ya jugado: no es un partido en vivo
+              const et = etiquetaEnCancha(torneos, { cancha: '', torneoId, partidoId, desde: null, habilitada: true }, programa.nombreCorto);
               return et ? [{ k, m, et }] : [];
             });
             if (sueltos.length === 0) return null;
@@ -1101,7 +1152,7 @@ export default function ProgramacionPage() {
             .slice().sort((a, b) => ordenCancha(a.cancha, b.cancha)).map((e) => {
             const nombre = e.cancha;
             const off = !e.habilitada;
-            const et = off ? null : etiquetaEnCancha(torneos, e);
+            const et = off ? null : etiquetaEnCancha(torneos, e, programa.nombreCorto);
             return (
               <div key={nombre} style={{ ...carta, borderColor: et ? 'var(--lima)' : 'var(--borde)', opacity: off ? 0.55 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>

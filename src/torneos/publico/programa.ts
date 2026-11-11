@@ -25,10 +25,10 @@ export type Programa = {
   /** Fila de rk_programa donde se guardan los ajustes hechos desde la pantalla. */
   clave: string;
   titulo: string;
-  /** Colores del flyer del evento: barra de arriba y luces del fondo. */
+  /** Colores de la barra de arriba y de las luces del fondo. */
   colores: [string, string, string];
   /** Qué cuadros del gestor son categorías de este evento. */
-  esDelEvento: (t: { nombre: string; evento?: string | null }) => boolean;
+  esDelEvento: (t: { nombre: string; evento?: string | null; updatedAt?: string | null }) => boolean;
   /** Nombre de la categoría sin el nombre del evento, para chips y filtros. */
   nombreCorto: (nombre: string) => string;
   /** Día en que juega una categoría mientras nadie la mueva a mano. */
@@ -43,26 +43,114 @@ export type Programa = {
   avisoSinCuadros: string;
 };
 
-// Aniversario Pickleball City (9 y 10 de octubre de 2026): viernes los singles desde las
-// 19:00, sábado los dobles desde las 10:00. Dos canchas, 20 minutos por partido (Brian, 5/10).
-export const PROGRAMA: Programa = {
-  clave: 'aniversario-pbcity-2026',
-  titulo: 'ANIVERSARIO PICKLEBALL CITY',
-  colores: ['#F05A28', '#9CCBEE', '#CCFF00'],
-  esDelEvento: (t) => /aniversario/i.test(t.nombre) || /aniversario/i.test(t.evento ?? ''),
-  nombreCorto: (nombre) =>
-    nombre.replace(/\b(aniversario|pickleball city|2026)\b/gi, ' ').replace(/[\s·-]+$/, '').replace(/^[\s·-]+/, '').replace(/\s+/g, ' ').trim()
-    || nombre,
-  diaDe: (nombre) => (/single/i.test(nombre) ? 'VIE' : 'SAB'),
-  dias: [
-    { clave: 'VIE', fecha: '2026-10-09', nombre: 'Viernes 9', inicio: 19 * 60 },
-    { clave: 'SAB', fecha: '2026-10-10', nombre: 'Sábado 10', inicio: 10 * 60 },
-  ],
-  duracion: 20,
-  canchas: ['Cancha 1', 'Cancha 2'],
-  bloque: null,
-  avisoSinCuadros: 'Los cuadros y los horarios se publican cuando cierran las inscripciones, el jueves 8 de octubre.',
+// ─── Evento en curso: configurable desde la web ──────────────────────────────
+// Qué evento muestran /programacion y la TV vive en rk_programa.config.evento (el mismo
+// JSON donde ya se guardan los horarios y la pantalla TV): se edita desde "Datos del
+// evento" en modo carga, sin tocar código. Todo es opcional; lo que falte o venga roto
+// cae al valor por defecto de abajo.
+
+/** Fila de rk_programa del evento en curso. El nombre es histórico (el primer evento que
+ *  la usó): cambiarlo dejaría sin sus carteles y sponsors a la TV, así que se conserva. */
+export const CLAVE_PROGRAMA = 'aniversario-pbcity-2026';
+
+export type DiaEvento = { fecha: string; nombre?: string; inicio?: number };
+/** recientes = cuadros tocados en los últimos 3 días (por defecto) · todos · evento = etiqueta de
+ *  evento del cuadro · texto = el nombre del cuadro o su evento contiene el texto. */
+export type ModoTorneos = 'recientes' | 'todos' | 'evento' | 'texto';
+export type ConfigEvento = {
+  titulo?: string;
+  colores?: string[];
+  dias?: DiaEvento[];
+  canchas?: number;
+  torneos?: { modo?: ModoTorneos; valor?: string };
+  avisoSinCuadros?: string;
 };
+
+export const COLORES_POR_DEFECTO: [string, string, string] = ['#CCFF00', '#9CCBEE', '#F05A28'];
+export const TITULO_POR_DEFECTO = 'TORNEOS VOLEA';
+export const AVISO_POR_DEFECTO = 'Todavía no hay cuadros cargados. Los horarios aparecen acá apenas se arman.';
+const INICIO_POR_DEFECTO = 10 * 60;
+const RECIENTE_MS = 3 * 24 * 60 * 60 * 1000;
+const NOMBRES_DIA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+const fechaValida = (f: unknown): f is string => {
+  if (typeof f !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(f)) return false;
+  const [a, m, d] = f.split('-').map(Number);
+  const x = new Date(a, m - 1, d);
+  return x.getFullYear() === a && x.getMonth() === m - 1 && x.getDate() === d;
+};
+
+/** "2026-11-14" → "Sábado 14". */
+export function nombreDeDia(fecha: string): string {
+  const [a, m, d] = fecha.split('-').map(Number);
+  return `${NOMBRES_DIA[new Date(a, m - 1, d).getDay()]} ${d}`;
+}
+
+const palabras = (texto: string) => normalizar(texto).split(/[^a-z0-9+]+/).filter((w) => w.length >= 4);
+
+/**
+ * El programa del evento en curso. Sin configuración: hoy (el día de torneo corre hasta las 5
+ * de la mañana), 2 canchas, 20 minutos y los cuadros tocados en los últimos 3 días — nunca
+ * un evento ni una fecha fijos en el código.
+ */
+export function construirPrograma(evento: ConfigEvento | null | undefined, ahora: Date = new Date()): Programa {
+  const e = evento ?? {};
+  const titulo = typeof e.titulo === 'string' && e.titulo.trim() ? e.titulo.trim().slice(0, 60) : TITULO_POR_DEFECTO;
+  const colores = Array.isArray(e.colores) && e.colores.length === 3 && e.colores.every((c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c))
+    ? [e.colores[0], e.colores[1], e.colores[2]] as [string, string, string]
+    : COLORES_POR_DEFECTO;
+
+  const vistos = new Set<string>();
+  let dias: DiaPrograma[] = (Array.isArray(e.dias) ? e.dias : [])
+    .filter((d) => d && fechaValida(d.fecha) && !vistos.has(d.fecha) && !!vistos.add(d.fecha))
+    .sort((x, y) => x.fecha.localeCompare(y.fecha))
+    .slice(0, 7)
+    .map((d) => ({
+      clave: d.fecha,
+      fecha: d.fecha,
+      nombre: typeof d.nombre === 'string' && d.nombre.trim() ? d.nombre.trim().slice(0, 30) : nombreDeDia(d.fecha),
+      inicio: esMinuto(d.inicio) ? d.inicio : INICIO_POR_DEFECTO,
+    }));
+  if (dias.length === 0) {
+    const hoy = momentoDeTorneo(ahora, []).fecha;
+    dias = [{ clave: hoy, fecha: hoy, nombre: nombreDeDia(hoy), inicio: INICIO_POR_DEFECTO }];
+  }
+
+  const n = typeof e.canchas === 'number' && Number.isInteger(e.canchas) && e.canchas >= 1 && e.canchas <= 12 ? e.canchas : 2;
+  const modo: ModoTorneos = e.torneos?.modo === 'todos' || e.torneos?.modo === 'evento' || e.torneos?.modo === 'texto' ? e.torneos.modo : 'recientes';
+  const valor = normalizar(e.torneos?.valor ?? '').trim();
+  const sinFiltro = (modo === 'evento' || modo === 'texto') && valor === '';
+  const esDelEvento: Programa['esDelEvento'] = (t) => {
+    if (modo === 'todos' || sinFiltro) return true;
+    if (modo === 'evento') return normalizar(t.evento ?? '').includes(valor);
+    if (modo === 'texto') return normalizar(t.nombre).includes(valor) || normalizar(t.evento ?? '').includes(valor);
+    const tocado = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
+    return !Number.isFinite(tocado) || ahora.getTime() - tocado < RECIENTE_MS;
+  };
+  // Del nombre del cuadro se saca lo que ya dice el evento: el título y el texto del filtro.
+  const quitar = new Set([...palabras(typeof e.titulo === 'string' ? e.titulo : ''), ...(modo === 'texto' || modo === 'evento' ? palabras(valor) : [])]);
+  const nombreCorto = (nombre: string) => {
+    if (quitar.size === 0) return nombre;
+    const sin = nombre.split(/\s+/).filter((w) => !quitar.has(normalizar(w).replace(/[^a-z0-9+]/g, '')) && !/^20\d\d$/.test(w));
+    return normalizarEspacios(sin.join(' ')) || nombre;
+  };
+
+  return {
+    clave: CLAVE_PROGRAMA,
+    titulo,
+    colores,
+    esDelEvento,
+    nombreCorto,
+    diaDe: () => dias[0].clave,
+    dias,
+    duracion: 20,
+    canchas: Array.from({ length: n }, (_, i) => `Cancha ${i + 1}`),
+    bloque: null,
+    avisoSinCuadros: typeof e.avisoSinCuadros === 'string' && e.avisoSinCuadros.trim() ? e.avisoSinCuadros.trim().slice(0, 240) : AVISO_POR_DEFECTO,
+  };
+}
+
+const normalizarEspacios = (s: string) => s.replace(/[\s·-]+$/, '').replace(/^[\s·-]+/, '').replace(/\s+/g, ' ').trim();
 
 export const BLOQUE_OPC = { titulo: 'ONE POINT CHALLENGE', detalle: 'Todos los anotados · eliminación directa a un punto' };
 
@@ -78,6 +166,8 @@ export type AjustesPrograma = {
   bloque?: BloquePrograma | null;
   /** Pantalla de TV: sponsors y publicidad (se edita en rk_programa.config.tv). */
   tv?: ConfigTv;
+  /** Qué evento se muestra: título, días, canchas y qué cuadros entran (rk_programa.config.evento). */
+  evento?: ConfigEvento;
 };
 
 export type SponsorTv = { nombre: string; logo?: string };
@@ -463,7 +553,7 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
 
 /** Las categorías del evento, cada una con su día y lo que le falta jugar. */
 export function categoriasDelEvento(
-  torneos: (Torneo & { evento?: string | null })[],
+  torneos: (Torneo & { evento?: string | null; updatedAt?: string | null })[],
   programa: Programa,
   vigente: ProgramaVigente,
 ): CatProg[] {
