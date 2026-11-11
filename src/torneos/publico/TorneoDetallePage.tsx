@@ -8,6 +8,7 @@ import { nombreDe } from '../ui/util';
 import { podioDeTorneo } from './resultado';
 import { obtenerTorneoPublico } from './datos';
 import { RkAviso, RkCargando, RkError } from './Estados';
+import NavPublica from './NavPublica';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 import { MarcadorVivo, MarcadoresContext, useMarcadorDe, useMarcadores } from '../arbitraje/MarcadorVivo';
@@ -130,6 +131,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
     <MarcadoresContext.Provider value={marcadores}>
     <div className="rk">
       <main className="contenedor">
+        <NavPublica activa="torneos" />
         <header className="cabecera">
           <Link className="boton secundario" to="/torneos">← Torneos</Link>
           <h1>{torneo.nombre}</h1>
@@ -185,16 +187,16 @@ function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
         <div className="grupo-titulo"><h3>Americano · tabla individual</h3></div>
         <p className="vacio" style={{ padding: '0 0 10px' }}>Compañero rotativo: cada partido suma puntos a los dos de la dupla. Se posicionan por puntos a favor; campeón el 1º y subcampeón el 2º. Sin semis ni final.</p>
         <div className="tabla-scroll" style={{ marginBottom: 14 }}>
-          <table>
+          <table className="tabla-pos">
             <thead>
-              <tr><th>#</th><th className="nombre">Jugador</th><th>PJ</th><th>PG</th><th>PP</th><th>PF</th><th>PC</th><th>Dif</th></tr>
+              <tr><th>#</th><th className="nombre">Jugador</th><th>PJ</th><th>PG</th><th className="col-extra">PP</th><th className="col-extra">PF</th><th className="col-extra">PC</th><th>Dif</th></tr>
             </thead>
             <tbody>
               {jugadores.map((f) => (
                 <tr key={f.jugadorId}>
                   <td>{f.posicion}</td>
                   <td className="nombre">{f.nombre}</td>
-                  <td>{f.pj}</td><td>{f.pg}</td><td>{f.pp}</td><td>{f.pf}</td><td>{f.pc}</td>
+                  <td>{f.pj}</td><td>{f.pg}</td><td className="col-extra">{f.pp}</td><td className="col-extra">{f.pf}</td><td className="col-extra">{f.pc}</td>
                   <td>{f.dif > 0 ? `+${f.dif}` : f.dif}</td>
                 </tr>
               ))}
@@ -210,16 +212,16 @@ function GrupoPublico({ torneo, grupo }: { torneo: Torneo; grupo: Grupo }) {
     <div className="carta" style={{ marginTop: 12 }}>
       <div className="grupo-titulo"><h3>Grupo {grupo.nombre}</h3></div>
       <div className="tabla-scroll" style={{ marginBottom: 14 }}>
-        <table>
+        <table className="tabla-pos">
           <thead>
-            <tr><th>#</th><th className="nombre">Pareja</th><th>PJ</th><th>PG</th><th>PP</th><th>PF</th><th>PC</th><th>Dif</th></tr>
+            <tr><th>#</th><th className="nombre">Pareja</th><th>PJ</th><th>PG</th><th className="col-extra">PP</th><th className="col-extra">PF</th><th className="col-extra">PC</th><th>Dif</th></tr>
           </thead>
           <tbody>
             {filas.map((f) => (
               <tr key={f.parejaId}>
                 <td>{f.posicion}{f.desempatePorSorteo ? '*' : ''}</td>
                 <td className="nombre">{nombreDe(torneo, f.parejaId)}</td>
-                <td>{f.pj}</td><td>{f.pg}</td><td>{f.pp}</td><td>{f.pf}</td><td>{f.pc}</td>
+                <td>{f.pj}</td><td>{f.pg}</td><td className="col-extra">{f.pp}</td><td className="col-extra">{f.pf}</td><td className="col-extra">{f.pc}</td>
                 <td>{f.dif > 0 ? `+${f.dif}` : f.dif}</td>
               </tr>
             ))}
@@ -241,7 +243,7 @@ function FilaResultado({ torneo, partido }: { torneo: Torneo; partido: PartidoGr
   const vivo = useMarcadorDe(torneo.id, partido.id);
   return (
     <div className="fila-partido">
-      {partido.etiqueta && <span className="chip" style={{ flexBasis: '100%', maxWidth: 'max-content' }}>{partido.etiqueta}</span>}
+      {partido.etiqueta && <span className="chip etiqueta-partido">{partido.etiqueta}</span>}
       <span className={`lado ${ganaA ? 'ganador' : ''}`}>{nombreDe(torneo, partido.aId)}</span>
       <span className="chip" title={valido && partido.wo ? 'W.O.: el partido no se jugó' : undefined}>
         {valido ? `${partido.wo ? 'W.O. · ' : ''}${partido.puntosA} – ${partido.puntosB}` : vivo ? <MarcadorVivo m={vivo} tamano={0.85} /> : 'sin jugar'}

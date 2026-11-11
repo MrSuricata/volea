@@ -30,11 +30,20 @@ function Nombres({ p, lado, resaltar }: { p: TanteadorPartido; lado: 'A' | 'B'; 
 export default function CopaVivoPage() {
   const [partidos, setPartidos] = useState<TanteadorPartido[] | null>(null);
   const [actualizado, setActualizado] = useState<Date | null>(null);
+  // Sin red: nunca queda un "Cargando…" eterno. Con datos ya vistos se conservan; sin ellos, error y reintento.
+  const [fallo, setFallo] = useState(false);
 
   const cargar = useCallback(async () => {
     const ps = await SupabaseService.getTanteadorPartidos();
-    if (ps) { setPartidos(ps); setActualizado(new Date()); }
+    if (ps) { setPartidos(ps); setActualizado(new Date()); setFallo(false); } else setFallo(true);
   }, []);
+
+  // Reintento automático cada 10 s mientras no haya podido cargar nada (la TV no tiene quien toque el botón).
+  useEffect(() => {
+    if (!fallo || partidos !== null) return;
+    const t = window.setInterval(() => void cargar(), 10000);
+    return () => window.clearInterval(t);
+  }, [fallo, partidos, cargar]);
 
   useEffect(() => {
     void cargar();
@@ -91,13 +100,23 @@ export default function CopaVivoPage() {
           </div>
           <p className="flex items-center gap-2 text-xs font-semibold text-navy-200">
             <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-lime-400" aria-hidden />
-            EN VIVO{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            EN VIVO{actualizado ? ` · ${actualizado.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false })}` : ''}
           </p>
         </div>
 
-        {partidos === null && (
-          <p className="py-16 text-center text-lg text-navy-200">Cargando la copa…</p>
-        )}
+        {partidos === null ? (
+          fallo ? (
+            <div className="py-16 text-center" role="alert">
+              <p className="text-lg font-semibold text-navy-200">No se pudo conectar con el servidor. Reintentando…</p>
+              <button onClick={() => void cargar()} className="mt-4 rounded-lg bg-lime-400 px-5 py-3 font-display font-bold text-navy-900">
+                Reintentar
+              </button>
+            </div>
+          ) : (
+            <p className="py-16 text-center text-lg text-navy-200">Cargando la copa…</p>
+          )
+        ) : (
+        <>
 
         {/* campeones (cuando la FINAL de una categoría está jugada) */}
         {(['DM', 'DF'] as const).map((cat) => {
@@ -279,6 +298,9 @@ export default function CopaVivoPage() {
             );
           })}
         </div>
+
+        </>
+        )}
 
         <p className="mt-8 text-center text-[11px] text-navy-400">
           Se actualiza solo · VOLEA · Agarrá y jugá
