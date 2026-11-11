@@ -6,6 +6,7 @@ import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
 import { EncabezadoSeccion } from './ui/EncabezadoSeccion';
 import { SeccionTorneosDiferida } from './home/SeccionTorneosDiferida';
 import { AvisoTorneoHero } from './home/AvisoTorneoHero';
+import { ordenarTalles } from './tienda/talles';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -2439,12 +2440,12 @@ function ProductDetailPage() {
                 Talle
                 {selectedSize && (
                   <span className="ml-2 text-sm font-normal text-gray-500">
-                    ({currentStock} disponibles{selectedColor ? ` en ${selectedColor}` : ''})
+                    ({currentStock} {currentStock === 1 ? 'disponible' : 'disponibles'}{selectedColor ? ` en ${selectedColor}` : ''})
                   </span>
                 )}
               </label>
               <div className="flex flex-wrap gap-2">
-                {product.sizes.map(size => {
+                {ordenarTalles(product.sizes).map(size => {
                   const sizeStock = getStock(size);
                   return (
                     <button
@@ -2460,6 +2461,8 @@ function ProductDetailPage() {
                             : 'border-gray-300 text-navy-700 hover:border-navy-700'
                       }`}
                       disabled={sizeStock === 0}
+                      aria-pressed={selectedSize === size}
+                      aria-label={sizeStock === 0 ? `${size}, sin stock` : size}
                     >
                       {size}
                     </button>
@@ -2523,7 +2526,7 @@ function ProductDetailPage() {
           <div className="mb-6">
             {selectedSize && currentStock > 0 ? (
               <span className="flex items-center gap-2 text-green-700 text-sm font-semibold">
-                <Check size={16} /> En stock ({currentStock} disponibles en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
+                <Check size={16} /> En stock ({currentStock} {currentStock === 1 ? 'disponible' : 'disponibles'} en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
               </span>
             ) : getTotalStock(product) === 0 ? (
               <span className="flex items-center gap-2 text-red-700 text-sm font-semibold">
@@ -2575,7 +2578,7 @@ function ProductDetailPage() {
           </div>
           <ul className="mt-5 space-y-2 rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
             <li className="flex items-start gap-2"><Truck size={16} className="mt-0.5 shrink-0 text-navy-700" /> Envíos a todo Uruguay, o retiro a coordinar (por ejemplo en un torneo).</li>
-            <li className="flex items-start gap-2"><CreditCard size={16} className="mt-0.5 shrink-0 text-navy-700" /> Pagás al coordinar por WhatsApp: transferencia o efectivo.</li>
+            <li className="flex items-start gap-2"><CreditCard size={16} className="mt-0.5 shrink-0 text-navy-700" /> Pagás online con Mercado Pago, o al coordinar por WhatsApp (transferencia o efectivo).</li>
             <li className="flex items-start gap-2"><MessageCircle size={16} className="mt-0.5 shrink-0 text-navy-700" /> Te respondemos por WhatsApp para coordinar la entrega.</li>
           </ul>
         </div>
