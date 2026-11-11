@@ -5,6 +5,8 @@ import { LazyMotion, MotionConfig, m, useScroll, useTransform } from 'framer-mot
 import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
 import { EncabezadoSeccion } from './ui/EncabezadoSeccion';
 import { SeccionTorneosDiferida } from './home/SeccionTorneosDiferida';
+import { AvisoTorneoHero } from './home/AvisoTorneoHero';
+import { ordenarTalles } from './tienda/talles';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -773,7 +775,8 @@ function TopBar() {
         href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1 text-lime-400 hover:text-lime-300 transition-colors"
+        // -my/py: el área de toque crece hasta ~36px de alto sin agrandar la franja (antes 79x16).
+        className="-my-2.5 -mr-2 flex items-center gap-1 px-2 py-2.5 text-lime-400 hover:text-lime-300 transition-colors"
       >
         <Instagram size={14} />
         <span>@{INSTAGRAM_HANDLE}</span>
@@ -839,7 +842,7 @@ function Navbar() {
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
         {/* Logo */}
         <Link to="/" className="flex-shrink-0">
-          <img src="/logo-white.png" alt="VOLEA" className="h-12 md:h-14 drop-shadow-lg" onError={handleImgError} />
+          <img src="/logo-white.png" alt="VOLEA" width={560} height={139} className="h-12 w-auto md:h-14 drop-shadow-lg" onError={handleImgError} />
         </Link>
 
         {/* Desktop nav */}
@@ -894,7 +897,8 @@ function Navbar() {
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <div className="absolute left-0 top-0 h-full w-72 bg-navy-800 slide-in-left">
             <div className="flex items-center justify-between p-4 border-b border-navy-600">
-              <img src="/logo.png" alt="VOLEA" className="h-8" onError={handleImgError} />
+              {/* logo blanco: el /logo.png (letras azules) sobre navy-800 no se leía */}
+              <img src="/logo-white.png" alt="VOLEA" width={560} height={139} className="h-8 w-auto" onError={handleImgError} />
               <button onClick={() => setMobileOpen(false)} aria-label="Cerrar menú" className="-m-2.5 p-2.5 text-white hover:text-lime-400">
                 <X size={24} />
               </button>
@@ -1486,6 +1490,15 @@ function HomePage() {
 
         <m.div style={{ y: heroTextY }} className="relative z-10 mx-auto w-full max-w-7xl px-4 py-20 md:py-24">
           <div className="max-w-4xl">
+            {/* Torneo en vivo o el próximo de la agenda, arriba de todo (ver AvisoTorneoHero). */}
+            <AvisoTorneoHero
+              proximo={torneoDestacado ? {
+                etiqueta: torneoEnCurso ? 'Se juega hoy' : 'Se viene',
+                nombre: torneoDestacado.name,
+                fecha: diasCortos(torneoDestacado.date, torneoDestacado.endDate),
+                to: torneoInscribe ? `/inscripcion/${torneoDestacado.id}` : '/eventos',
+              } : null}
+            />
             <p className="hero-enter hero-enter-1 mb-5 inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400 opacity-0 md:mb-6 md:text-sm">
               <span aria-hidden className="h-px w-8 bg-lime-400" />
               La primera marca de pickleball de Uruguay
@@ -1690,7 +1703,7 @@ function HomePage() {
                     {/* Etiqueta según lo que sea (torneo/clínica/social) y según
                         el momento: mientras se juega no puede decir "próximo". */}
                     <span className="inline-flex items-center gap-2 rounded-full bg-lime-400 px-3 py-1 font-display text-xs font-black uppercase tracking-wider text-navy-900">
-                      {torneoEnCurso ? 'Se está jugando' : `Próximo ${categoriaEvento(torneoDestacado.category)}`}
+                      {torneoEnCurso ? 'Se está jugando' : `${torneoDestacado.category === 'clinic' ? 'Próxima' : 'Próximo'} ${categoriaEvento(torneoDestacado.category)}`}
                     </span>
                     <h2 className="mt-3 font-display text-3xl font-black uppercase leading-none text-white sm:text-4xl">
                       {torneoDestacado.name}
@@ -1733,14 +1746,14 @@ function HomePage() {
                     {waTorneo && torneoDestacado.phone && (
                       <a
                         href={`tel:${torneoDestacado.phone.replace(/\s/g, '')}`}
-                        className="text-center font-display text-sm font-bold text-white transition-colors hover:text-lime-400"
+                        className="py-2 text-center font-display text-sm font-bold text-white transition-colors hover:text-lime-400"
                       >
                         {torneoDestacado.phone}
                       </a>
                     )}
                     <Link
                       to="/eventos"
-                      className="text-center text-xs font-semibold text-gray-400 underline-offset-2 transition-colors hover:text-white hover:underline"
+                      className="py-2.5 text-center text-sm font-semibold text-gray-300 underline-offset-2 transition-colors hover:text-white hover:underline"
                     >
                       Ver todos los eventos
                     </Link>
@@ -1798,6 +1811,9 @@ function HomePage() {
       )}
 
       {/* ── 4. Categorías ───────────────────────────────────────────────── */}
+      {/* Mismo criterio que Destacados: con los datos ya cargados y ninguna categoría con
+          productos, el título quedaba solo sobre un hueco gris. */}
+      {(!datosListos || categoriasConProductos(categories, products).length > 0) && (
       <section className="bg-gray-50 py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
           <EncabezadoSeccion eyebrow="Encontrá lo tuyo" titulo="Explorá por categoría" />
@@ -1844,6 +1860,7 @@ function HomePage() {
           </Reveal>
         </div>
       </section>
+      )}
 
       {/* ── 4b. Torneos: campeones de la última fecha, top 5 del año y números, calculados
           de los resultados reales. Baja su código y sus datos recién al acercarse. ── */}
@@ -2207,7 +2224,7 @@ function ShopPage() {
         <button
           onClick={() => setSelectedCategory('')}
           aria-pressed={!selectedCategory}
-          className={`shrink-0 px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+          className={`shrink-0 min-h-[44px] px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
             !selectedCategory ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
           }`}
         >
@@ -2218,7 +2235,7 @@ function ShopPage() {
             key={cat.id}
             onClick={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
             aria-pressed={selectedCategory === cat.id}
-            className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+            className={`shrink-0 min-h-[44px] whitespace-nowrap px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
               selectedCategory === cat.id ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
@@ -2229,7 +2246,7 @@ function ShopPage() {
 
       {/* Product Grid */}
       {filtered.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">
+        <div className="text-center py-20 text-gray-500">
           {!datosListos && products.length === 0 ? (
             // Los datos siguen viajando (red lenta): decir "no hay" acá sería mentira. Esqueleto
             // con la forma de las tarjetas (no un ícono): la página ya tiene su forma final y
@@ -2245,8 +2262,34 @@ function ShopPage() {
             </div>
           ) : (
             <>
-              <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
-              <p className="font-display text-lg">No encontramos productos con esa búsqueda. Probá otra categoría.</p>
+              <Package size={64} strokeWidth={1} className="mx-auto mb-4 text-gray-400" />
+              {/* Sin búsqueda ni categoría elegida, el problema no es la búsqueda: no hay
+                  productos publicados. Antes decía "probá otra categoría" igual. */}
+              {searchQuery || selectedCategory ? (
+                <>
+                  <p className="font-display text-lg">No encontramos productos con esa búsqueda.</p>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setSelectedCategory(''); }}
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg border border-navy-700 px-5 py-3 font-display text-sm font-bold text-navy-700 hover:bg-navy-50"
+                  >
+                    Ver toda la colección
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="font-display text-lg">Estamos cargando la colección nueva.</p>
+                  <p className="mt-2 text-sm">Mientras tanto, preguntanos por WhatsApp qué hay disponible.</p>
+                  <a
+                    href={`https://wa.me/${WHATSAPP_NUMBER}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display text-sm font-bold text-navy-900 hover:bg-lime-300"
+                  >
+                    <MessageCircle size={16} /> Escribinos
+                  </a>
+                </>
+              )}
             </>
           )}
         </div>
@@ -2429,12 +2472,12 @@ function ProductDetailPage() {
                 Talle
                 {selectedSize && (
                   <span className="ml-2 text-sm font-normal text-gray-500">
-                    ({currentStock} disponibles{selectedColor ? ` en ${selectedColor}` : ''})
+                    ({currentStock} {currentStock === 1 ? 'disponible' : 'disponibles'}{selectedColor ? ` en ${selectedColor}` : ''})
                   </span>
                 )}
               </label>
               <div className="flex flex-wrap gap-2">
-                {product.sizes.map(size => {
+                {ordenarTalles(product.sizes).map(size => {
                   const sizeStock = getStock(size);
                   return (
                     <button
@@ -2450,6 +2493,8 @@ function ProductDetailPage() {
                             : 'border-gray-300 text-navy-700 hover:border-navy-700'
                       }`}
                       disabled={sizeStock === 0}
+                      aria-pressed={selectedSize === size}
+                      aria-label={sizeStock === 0 ? `${size}, sin stock` : size}
                     >
                       {size}
                     </button>
@@ -2513,7 +2558,7 @@ function ProductDetailPage() {
           <div className="mb-6">
             {selectedSize && currentStock > 0 ? (
               <span className="flex items-center gap-2 text-green-700 text-sm font-semibold">
-                <Check size={16} /> En stock ({currentStock} disponibles en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
+                <Check size={16} /> En stock ({currentStock} {currentStock === 1 ? 'disponible' : 'disponibles'} en talle {selectedSize}{selectedColor ? ` / ${selectedColor}` : ''})
               </span>
             ) : getTotalStock(product) === 0 ? (
               <span className="flex items-center gap-2 text-red-700 text-sm font-semibold">
@@ -2565,7 +2610,7 @@ function ProductDetailPage() {
           </div>
           <ul className="mt-5 space-y-2 rounded-xl bg-gray-50 p-4 text-sm text-gray-700">
             <li className="flex items-start gap-2"><Truck size={16} className="mt-0.5 shrink-0 text-navy-700" /> Envíos a todo Uruguay, o retiro a coordinar (por ejemplo en un torneo).</li>
-            <li className="flex items-start gap-2"><CreditCard size={16} className="mt-0.5 shrink-0 text-navy-700" /> Pagás al coordinar por WhatsApp: transferencia o efectivo.</li>
+            <li className="flex items-start gap-2"><CreditCard size={16} className="mt-0.5 shrink-0 text-navy-700" /> Pagás online con Mercado Pago, o al coordinar por WhatsApp (transferencia o efectivo).</li>
             <li className="flex items-start gap-2"><MessageCircle size={16} className="mt-0.5 shrink-0 text-navy-700" /> Te respondemos por WhatsApp para coordinar la entrega.</li>
           </ul>
         </div>
@@ -2645,8 +2690,8 @@ function EventsPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Eventos y torneos</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Agenda VOLEA</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Eventos y torneos</h1>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-10">
@@ -2659,7 +2704,8 @@ function EventsPage() {
           <button
             key={f.key}
             onClick={() => setFilter(f.key)}
-            className={`px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+            aria-pressed={filter === f.key}
+            className={`min-h-[44px] px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
               filter === f.key ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
@@ -2668,11 +2714,39 @@ function EventsPage() {
         ))}
       </div>
 
+      {/* Sin nada próximo, la página era solo una lista de eventos en gris y ninguna salida:
+          ahora dice qué pasa y a dónde ir (resultados, ranking, Instagram para enterarse). */}
+      {upcoming.length === 0 && past.length > 0 && (
+        <div className="mb-12 rounded-2xl bg-navy-700 p-6 text-white md:flex md:items-center md:justify-between md:gap-8 md:p-8">
+          <div>
+            <p className="font-display text-xl font-black uppercase leading-tight md:text-2xl">
+              Por ahora no hay {({ tournament: 'torneos', clinic: 'clínicas', social: 'encuentros' } as Record<string, string>)[filter] ?? 'eventos'} en agenda
+            </p>
+            <p className="mt-2 max-w-xl text-sm text-white/70">
+              Mientras se arma la próxima fecha, mirá cómo salieron los últimos torneos y el ranking. Los anunciamos primero en Instagram.
+            </p>
+          </div>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row md:mt-0 md:shrink-0">
+            <Link to="/torneos" className="inline-flex items-center justify-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display text-sm font-bold text-navy-900 transition-colors hover:bg-lime-300">
+              <Trophy size={16} /> Ver resultados
+            </Link>
+            <a
+              href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/30 px-5 py-3 font-display text-sm font-bold text-white transition-colors hover:border-lime-400 hover:text-lime-400"
+            >
+              <Instagram size={16} /> @{INSTAGRAM_HANDLE}
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Upcoming */}
       {upcoming.length > 0 && (
         <div className="mb-12">
           <h2 className="font-display text-2xl font-bold text-navy-700 mb-6 flex items-center gap-2">
-            <CalendarDays size={24} /> Próximos Eventos
+            <CalendarDays size={24} /> Próximos eventos
           </h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {upcoming.map(evt => (
@@ -2761,9 +2835,14 @@ function EventsPage() {
       {/* Past */}
       {past.length > 0 && (
         <div>
-          <h2 className="font-display text-2xl font-bold text-gray-400 mb-6 flex items-center gap-2">
-            <CalendarDays size={24} /> Eventos Pasados
-          </h2>
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+            <h2 className="font-display text-2xl font-bold text-gray-500 flex items-center gap-2">
+              <CalendarDays size={24} /> Eventos pasados
+            </h2>
+            <Link to="/torneos" className="inline-flex items-center gap-1.5 py-2 font-display text-sm font-bold text-navy-700 hover:text-lime-800">
+              Resultados de los torneos <ArrowRight size={15} />
+            </Link>
+          </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 opacity-70">
             {past.map(evt => (
               <div key={evt.id} className="bg-white rounded-xl overflow-hidden shadow-md border border-gray-100">
@@ -2801,9 +2880,18 @@ function EventsPage() {
       )}
 
       {filtered.length === 0 && (datosListos || events.length > 0) && (
-        <div className="text-center py-20 text-gray-400">
-          <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4" />
+        <div className="text-center py-20 text-gray-500">
+          <CalendarDays size={64} strokeWidth={1} className="mx-auto mb-4 text-gray-400" />
           <p className="font-display text-lg">Por ahora no hay eventos agendados</p>
+          <p className="mt-2 text-sm">Los anunciamos primero en Instagram.</p>
+          <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link to="/torneos" className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-5 py-3 font-display text-sm font-bold text-white hover:bg-navy-600">
+              <Trophy size={16} /> Ver resultados de torneos
+            </Link>
+            <a href={`https://instagram.com/${INSTAGRAM_HANDLE}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-5 py-3 font-display text-sm font-bold text-navy-700 hover:bg-gray-50">
+              <Instagram size={16} /> Seguinos en Instagram
+            </a>
+          </div>
         </div>
       )}
     </div>
@@ -2905,9 +2993,9 @@ function MapPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Clubes y canchas</h1>
-      <p className="text-gray-500 mb-2">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Dónde jugar</p>
+      <h1 className="titulo-pagina mt-2 mb-3">Clubes y canchas</h1>
+      <p className="text-gray-500 mb-8">Encontrá dónde jugar pickleball en Uruguay, Argentina, Chile y Brasil</p>
 
       {/* Country filter */}
       <div className="flex flex-wrap gap-2 mb-8">
@@ -3018,8 +3106,8 @@ function ContactPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Contacto</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Hablemos</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Contacto</h1>
 
       <div className="grid md:grid-cols-2 gap-12">
         {/* Contact Info */}
@@ -3087,8 +3175,10 @@ function ContactPage() {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Nombre</label>
+              <label htmlFor="ct-nombre" className="block text-sm font-semibold text-navy-700 mb-1">Nombre</label>
               <input
+                id="ct-nombre"
+                autoComplete="name"
                 type="text"
                 required
                 value={form.name}
@@ -3097,8 +3187,10 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Email</label>
+              <label htmlFor="ct-email" className="block text-sm font-semibold text-navy-700 mb-1">Email</label>
               <input
+                id="ct-email"
+                autoComplete="email"
                 type="email"
                 required
                 value={form.email}
@@ -3107,8 +3199,11 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Teléfono</label>
+              <label htmlFor="ct-telefono" className="block text-sm font-semibold text-navy-700 mb-1">Teléfono <span className="font-normal text-gray-500">(opcional)</span></label>
               <input
+                id="ct-telefono"
+                autoComplete="tel"
+                inputMode="tel"
                 type="tel"
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
@@ -3116,8 +3211,9 @@ function ContactPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-navy-700 mb-1">Mensaje</label>
+              <label htmlFor="ct-mensaje" className="block text-sm font-semibold text-navy-700 mb-1">Mensaje</label>
               <textarea
+                id="ct-mensaje"
                 required
                 rows={4}
                 value={form.message}
@@ -3271,7 +3367,8 @@ function InscripcionPage() {
   if (!evt.inscripcionesAbiertas || eventoTerminado || cierrePasado) {
     return (
       <div className="fade-in max-w-7xl mx-auto px-4 py-20 text-center">
-        <h1 className="font-display text-2xl font-bold text-navy-700 mb-2">{evt.name}</h1>
+        <p className="eyebrow-pagina">{eventoTerminado ? 'Evento finalizado' : 'Inscripciones cerradas'}</p>
+        <h1 className="titulo-pagina mt-2 mb-3 md:text-4xl">{evt.name}</h1>
         <p className="text-gray-600 mb-6">
           {eventoTerminado
             ? 'Este torneo ya se jugó: las inscripciones están cerradas.'
@@ -3288,6 +3385,17 @@ function InscripcionPage() {
             <MessageCircle size={18} /> Consultar por WhatsApp
           </a>
         )}
+        {/* Antes, sin WhatsApp cargado, la página quedaba sin ninguna salida. */}
+        <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          {eventoTerminado && (
+            <Link to="/torneos" className="inline-flex items-center gap-2 rounded-lg bg-navy-700 px-6 py-3 font-display font-bold text-white transition-colors hover:bg-navy-600">
+              <Trophy size={18} /> Ver los resultados
+            </Link>
+          )}
+          <Link to="/eventos" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-6 py-3 font-display font-bold text-navy-700 transition-colors hover:bg-gray-50">
+            <CalendarDays size={18} /> Próximos eventos
+          </Link>
+        </div>
       </div>
     );
   }
@@ -3336,8 +3444,9 @@ function InscripcionPage() {
 
   return (
     <div className="fade-in max-w-3xl mx-auto px-4 py-12">
-      <Link to="/eventos" className="text-sm text-gray-400 hover:text-navy-700">← Eventos</Link>
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mt-2 mb-1">Inscripción — {evt.name}</h1>
+      <Link to="/eventos" className="-my-2 inline-block py-2 text-sm text-gray-500 hover:text-navy-700">← Eventos</Link>
+      <p className="eyebrow-pagina mt-4 flex">Inscripción</p>
+      <h1 className="titulo-pagina mt-2 mb-2 md:text-4xl">{evt.name}</h1>
       <p className="text-gray-500 mb-1">
         {rangoLargo(evt.date, evt.endDate)} · {evt.location}{evt.city ? `, ${evt.city}` : ''}
       </p>
@@ -3351,18 +3460,18 @@ function InscripcionPage() {
           <Users size={14} /> Ya hay {inscriptos} {inscriptos === 1 ? 'inscripto' : 'inscriptos'}
         </p>
       )}
-      <div className="w-16 h-1 bg-lime-400 mb-8 mt-2" />
+      <div aria-hidden className="mb-8" />
 
       <form onSubmit={enviar} className="space-y-5">
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-nombre" className={labelCls}>Nombre y apellido *</label>
-            <input id="insc-nombre" type="text" required value={form.nombre}
+            <input id="insc-nombre" type="text" required autoComplete="name" value={form.nombre}
               onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} />
           </div>
           <div>
             <label htmlFor="insc-celular" className={labelCls}>Celular (WhatsApp) *</label>
-            <input id="insc-celular" type="tel" required placeholder="099 123 456" value={form.celular}
+            <input id="insc-celular" type="tel" inputMode="tel" autoComplete="tel" required placeholder="099 123 456" value={form.celular}
               onChange={e => setForm({ ...form, celular: e.target.value })} className={inputCls} />
           </div>
         </div>
@@ -3393,7 +3502,7 @@ function InscripcionPage() {
                     onClick={() => toggleCat(c)}
                     aria-pressed={cats.includes(c)}
                     disabled={!cats.includes(c) && topeAlcanzado}
-                    className={`rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-200 ${
+                    className={`min-h-[44px] rounded-lg border px-2 py-2 font-display text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-200 ${
                       cats.includes(c)
                         ? 'border-navy-700 bg-navy-700 text-white'
                         : 'border-gray-200 text-navy-700 hover:border-navy-700'
@@ -3403,7 +3512,7 @@ function InscripcionPage() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">
+              <p className="mt-1.5 text-xs text-gray-500">
                 Tocá todas las categorías en las que jugás{maxCats ? ` (hasta ${maxCats})` : ''}.
                 {topeAlcanzado ? ' Ya elegiste el máximo: destildá una para cambiarla.' : ''}
               </p>
@@ -3441,21 +3550,21 @@ function InscripcionPage() {
                   className={inputCls} />
               </div>
             ))}
-            <p className="text-xs text-gray-400">Dejá vacío el que todavía no tenés confirmado.</p>
+            <p className="text-xs text-gray-500">Dejá vacío el que todavía no tenés confirmado.</p>
           </div>
         )}
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="insc-email" className={labelCls}>Email</label>
-            <input id="insc-email" type="email" value={form.email}
+            <input id="insc-email" type="email" autoComplete="email" value={form.email}
               onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} />
           </div>
           <div>
             <label htmlFor="insc-dupr" className={labelCls}>Tu DUPR ID <span className="font-normal text-gray-400">(opcional)</span></label>
-            <input id="insc-dupr" type="text" placeholder="Ej: 7XZ4V2" value={form.duprId}
+            <input id="insc-dupr" type="text" autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="Ej: 7XZ4V2" value={form.duprId}
               onChange={e => setForm({ ...form, duprId: e.target.value })} className={inputCls} />
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500">
               ¿No tenés? Creá tu cuenta gratis en{' '}
               <a href="https://mydupr.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-lime-800 hover:underline">mydupr.com</a>{' '}
               y tus partidos contarán para tu rating mundial.
@@ -3729,8 +3838,8 @@ function CheckoutPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700 mb-2">Finalizar pedido</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
+      <p className="eyebrow-pagina">Tu pedido</p>
+      <h1 className="titulo-pagina mt-2 mb-8">Finalizar pedido</h1>
 
       <div className="grid lg:grid-cols-2 gap-12">
         {/* Order Summary */}
@@ -4005,7 +4114,9 @@ function FloatingWhatsApp() {
   const { pathname } = useLocation();
   // Checkout: tapaba "Enviar pedido" y es el mismo canal. Pago y TV (/copa, /programacion):
   // no aporta. En la ficha sube para no pisar la barra fija de "Agregar".
-  if (/^\/(checkout|pago|copa|programacion|admin)(\/|$)/.test(pathname)) return null;
+  // Torneos, ranking, clasificación, árbitro e inscripción: tapaba la última columna de las
+  // tablas y del cuadro, el marcador y los campos del formulario (ahí la acción es otra).
+  if (/^\/(checkout|pago|copa|programacion|admin|torneos|ranking|clasificacion|arbitro|inscripcion)(\/|$)/.test(pathname)) return null;
   const enFicha = pathname.startsWith('/producto/');
   return (
     <a
@@ -4103,6 +4214,10 @@ function BarraAdmin() {
 
 function Footer() {
   const { categories, products } = useStore();
+  // Sin categorías con productos (cargando, o tienda vacía) la columna quedaba con el título solo.
+  const categoriasFooter = categoriasConProductos(categories, products);
+  // Blanco de toque de ~36px por link (antes 18px de alto, pegados).
+  const linkFooter = 'inline-block py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm';
 
   return (
     <footer className="relative text-white">
@@ -4124,7 +4239,7 @@ function Footer() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-10 md:gap-10">
           {/* Logo */}
           <div className="col-span-2 lg:col-span-1">
-            <img src="/logo-white.png" alt="VOLEA" className="h-10 mb-4" onError={(e) => {
+            <img src="/logo-white.png" alt="VOLEA" width={560} height={139} loading="lazy" className="h-10 w-auto mb-4" onError={(e) => {
               e.currentTarget.style.display = 'none';
               const span = document.createElement('span');
               span.className = 'font-display text-3xl font-black text-lime-400';
@@ -4142,7 +4257,7 @@ function Footer() {
           {/* Quick Links */}
           <div>
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Navegá</h3>
-            <ul className="space-y-2">
+            <ul>
               {[
                 { to: '/', label: 'Inicio' },
                 { to: '/tienda', label: 'Tienda' },
@@ -4154,7 +4269,7 @@ function Footer() {
                 { to: '/contacto', label: 'Contacto' },
               ].map(link => (
                 <li key={link.to}>
-                  <Link to={link.to} className="text-gray-400 hover:text-lime-400 transition-colors text-sm">
+                  <Link to={link.to} className={linkFooter}>
                     {link.label}
                   </Link>
                 </li>
@@ -4163,14 +4278,15 @@ function Footer() {
           </div>
 
           {/* Categories */}
+          {categoriasFooter.length > 0 && (
           <div>
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Categorías</h3>
-            <ul className="space-y-2">
-              {categoriasConProductos(categories, products).map(cat => (
+            <ul>
+              {categoriasFooter.map(cat => (
                 <li key={cat.id}>
                   <Link
                     to={`/tienda?category=${encodeURIComponent(cat.id)}`}
-                    className="text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                    className={linkFooter}
                   >
                     {cat.name}
                   </Link>
@@ -4178,17 +4294,18 @@ function Footer() {
               ))}
             </ul>
           </div>
+          )}
 
           {/* Contact */}
           <div className="col-span-2 md:col-span-1">
             <h3 className="mb-4 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400">Contacto</h3>
-            <ul className="space-y-3">
+            <ul className="space-y-1">
               <li>
                 <a
                   href={`https://wa.me/${WHATSAPP_NUMBER}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                  className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
                 >
                   <Phone size={16} /> {WHATSAPP_DISPLAY}
                 </a>
@@ -4198,14 +4315,14 @@ function Footer() {
                   href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
+                  className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm"
                 >
                   <Instagram size={16} /> @{INSTAGRAM_HANDLE}
                 </a>
               </li>
               {EMAIL_CONTACTO && (
                 <li>
-                  <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-2 text-gray-400 hover:text-lime-400 transition-colors text-sm">
+                  <a href={`mailto:${EMAIL_CONTACTO}`} className="flex items-center gap-2 py-2 text-gray-400 hover:text-lime-400 transition-colors text-sm">
                     <Mail size={16} /> {EMAIL_CONTACTO}
                   </a>
                 </li>
@@ -4216,16 +4333,16 @@ function Footer() {
 
         {/* Bottom */}
         <div className="border-t border-navy-600 mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-gray-500 text-sm">
+          <p className="text-gray-400 text-sm">
             &copy; 2026 VOLEA. La primera marca de pickleball de Uruguay.
           </p>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1">
             <a
               href={`https://instagram.com/${INSTAGRAM_HANDLE}`}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Instagram de VOLEA"
-              className="text-gray-400 hover:text-lime-400 transition-colors"
+              className="p-3 text-gray-400 hover:text-lime-400 transition-colors"
             >
               <Instagram size={20} />
             </a>
@@ -4234,7 +4351,7 @@ function Footer() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label="WhatsApp de VOLEA"
-              className="text-gray-400 hover:text-lime-400 transition-colors"
+              className="p-3 text-gray-400 hover:text-lime-400 transition-colors"
             >
               <MessageCircle size={20} />
             </a>
@@ -4363,7 +4480,8 @@ function CopaVivoRoute() {
 function TorneoDetalleRoute() {
   const [nombre, setNombre] = useState<string | undefined>(undefined);
   usePageMeta({
-    title: nombre ?? 'Torneo',
+    // Hasta que llega el nombre: algo que diga qué es la página (antes "Torneo | VOLEA").
+    title: nombre ?? 'Resultados del torneo',
     description: 'Resultados en vivo del torneo: grupos, llave y podio. VOLEA pickleball Uruguay.',
   });
   return (

@@ -150,6 +150,24 @@ function conDefaults(t: TorneoPublico): TorneoPublico {
   };
 }
 
+// En vivo: el grupo más reciente con actividad real. Si hay UNA sola categoría en
+// juego, el link va directo a ella (es lo que la gente quiere mirar); si hay varias,
+// a la lista.
+function enVivoDeEventos(eventos: ReturnType<typeof agruparPorEvento>, ahoraMs: number): EnVivoHome | null {
+  const grupoVivo = eventos.find((e) => e.enVivo);
+  if (!grupoVivo) return null;
+  const vivos = grupoVivo.torneos.filter((t) => torneoEnVivo(t, ahoraMs));
+  return {
+    nombre: partirNombreEvento(grupoVivo.nombre).nombre,
+    to: vivos.length === 1 ? `/torneos/${vivos[0].id}` : '/torneos',
+  };
+}
+
+/** Solo el "en vivo" (para el aviso del hero de la home, que no necesita el resto). */
+export function enVivoHome(torneosCrudos: TorneoPublico[], ahoraMs: number): EnVivoHome | null {
+  return enVivoDeEventos(agruparPorEvento(torneosCrudos.map(conDefaults), ahoraMs), ahoraMs);
+}
+
 export function resumenTorneosHome(
   torneosCrudos: TorneoPublico[],
   jugadores: Jugador[],
@@ -159,19 +177,7 @@ export function resumenTorneosHome(
   const torneos = torneosCrudos.map(conDefaults);
   const eventos = agruparPorEvento(torneos, ahoraMs);
   const padron = new Map(jugadores.map((j) => [j.id, j.nombre]));
-
-  // En vivo: el grupo más reciente con actividad real. Si hay UNA sola categoría en
-  // juego, el link va directo a ella (es lo que la gente quiere mirar); si hay varias,
-  // a la lista.
-  let enVivo: EnVivoHome | null = null;
-  const grupoVivo = eventos.find((e) => e.enVivo);
-  if (grupoVivo) {
-    const vivos = grupoVivo.torneos.filter((t) => torneoEnVivo(t, ahoraMs));
-    enVivo = {
-      nombre: partirNombreEvento(grupoVivo.nombre).nombre,
-      to: vivos.length === 1 ? `/torneos/${vivos[0].id}` : '/torneos',
-    };
-  }
+  const enVivo = enVivoDeEventos(eventos, ahoraMs);
 
   // Última fecha: el evento más reciente con TODAS sus categorías terminadas y al menos
   // un campeón que se pueda mostrar (uno a medio cargar o colgado no es "la última fecha").

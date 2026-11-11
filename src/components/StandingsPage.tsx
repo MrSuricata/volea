@@ -1,4 +1,5 @@
-import { Trophy } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Trophy } from 'lucide-react';
 import type { StandingEntry } from '../types';
 
 const formatPrice = (n: number) => '$ ' + n.toLocaleString('es-UY', { maximumFractionDigits: 0 });
@@ -40,7 +41,7 @@ function PositionBadge({ position }: { position: number }) {
     );
   }
   return (
-    <span className="inline-flex items-center justify-center w-8 h-8 text-gray-400 font-semibold text-sm">
+    <span className="inline-flex items-center justify-center w-8 h-8 text-gray-500 font-semibold text-sm">
       {position}
     </span>
   );
@@ -101,14 +102,25 @@ export function StandingsPage({ standings }: { standings: StandingEntry[] }) {
   return (
     <div className="fade-in max-w-5xl mx-auto px-4 py-12">
       {/* Header */}
-      <p className="font-display text-sm font-bold tracking-[0.2em] text-lime-600 mb-2">
-        CAMINO AL MUNDIAL
-      </p>
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700">Clasificación</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
-      <p className="text-gray-500 mb-10 max-w-2xl">
+      <p className="eyebrow-pagina">Camino al Mundial</p>
+      <h1 className="titulo-pagina mt-2 mb-4">Clasificación</h1>
+      <p className="text-gray-500 mb-6 max-w-2xl">
         Ranking de jugadores y jugadoras rumbo al Mundial de pickleball, actualizado por el equipo VOLEA.
       </p>
+      {/* Hay dos tablas con nombres parecidos: esta (la carga el equipo a mano, rumbo al
+          Mundial) y el Ranking VOLEA (/ranking, sale solo de los resultados de los torneos).
+          Que se entienda cuál es cuál y se pueda ir a la otra. */}
+      <Link
+        to="/ranking"
+        className="group mb-10 flex items-center justify-between gap-4 rounded-xl border border-navy-100 bg-navy-50 px-4 py-3 text-sm text-navy-700 transition-colors hover:border-navy-300"
+      >
+        <span>
+          ¿Buscás los puntos de los torneos VOLEA? Eso es el <strong className="font-semibold">Ranking VOLEA</strong>.
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 font-display text-xs font-bold uppercase tracking-wider">
+          Ver ranking <ArrowRight size={14} className="transition-transform duration-200 group-hover:translate-x-0.5" />
+        </span>
+      </Link>
 
       {groups.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
@@ -132,7 +144,7 @@ export function StandingsPage({ standings }: { standings: StandingEntry[] }) {
         </div>
       )}
 
-      <p className="text-xs text-gray-400 text-center mt-10">
+      <p className="text-xs text-gray-500 text-center mt-10">
         Los puntos se actualizan después de cada torneo oficial.
       </p>
     </div>
