@@ -170,13 +170,16 @@ async function flujoCompleto(esc) {
   await esc.paso('árbitro: partido 1 rally a 15 · un game, con Tiempo y Deshacer', async () => {
     await ar.entrar(cel, f1.codigo);
     await cel.getByText('¿Quién saca primero?').waitFor();
+    const primero = await cel.locator('main').last().innerText();
+    if (/Equipo A vs Equipo B/.test(primero)) esc.observaciones.push({ tipo: 'hallazgo.arbitro-nombres-tardan', ctx: 'arbitro', url: cel.url(), detalle: 'la pantalla de inicio aparece primero con "Equipo A vs Equipo B" (y sin el freno de "todavía no se sabe quién juega") hasta que llega leerTorneo()' });
+    const ok = await cel.getByText(f1.a).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
     const txt = await cel.locator('main').last().innerText();
-    esc.verificar(txt.includes(f1.a) && txt.includes(f1.b), 'la pantalla de inicio muestra las dos parejas del código', txt.slice(0, 200));
+    esc.verificar(ok && txt.includes(f1.b), 'la pantalla de inicio muestra las dos parejas del código', txt.slice(0, 200));
     await esc.revisarPantalla(cel, 'p1-inicio');
     // la web pública, abierta en otro celular, para ver el marcador en vivo
     await pub.goto(`${BASE}/torneos/${id}`);
     const partida = await jugarPartido(esc, cel, { formato: { tipo: 'rally', a: 15, mejorDe: 1 }, saca: 'A', semilla: 11, etiqueta: 'p1' });
-    const vivo = await pub.getByText('EN VIVO').first().waitFor({ timeout: 25000 }).then(() => true, () => false);
+    const vivo = await pub.getByText('EN VIVO', { exact: true }).first().waitFor({ timeout: 25000 }).then(() => true, () => false);
     esc.verificar(vivo, 'la página pública del torneo muestra el partido EN VIVO mientras se arbitra');
     await esc.revisarPantalla(pub, 'publico-en-vivo-p1');
     await confirmarYVerificar(esc, cel, partida, { torneoId: id, partidoId: f1.partidoId, codigo: f1.codigo, etiqueta: 'p1' });
@@ -567,3 +570,42 @@ const ESCENARIOS = {
 };
 
 module.exports = { ESCENARIOS, prepararTorneo, hojaCodigos, jugarPartido, confirmarYVerificar, generador };
+
+// Final de un torneo OCULTO con las semis sin jugar: el árbitro no puede leer los nombres.
+async function finalSinDefinirOculto(esc) {
+  const admin = await esc.contexto('admin', ESCRITORIO);
+  const { id, fuerza } = await prepararTorneo(esc, admin, { nombre: 'Sudamericano 2026 · Oculto' });
+  await esc.paso('gestor: grupos completos, llave armada y torneo oculto', async () => {
+    await require('./gestor.cjs').cargarGrupos(esc, admin, id, fuerza);
+    await admin.getByRole('button', { name: 'Armar llave' }).last().click();
+    await admin.getByText('Así sale la llave').waitFor();
+    await admin.getByRole('button', { name: 'Armar llave' }).last().click();
+    await admin.getByRole('heading', { name: 'Llave', exact: true }).waitFor();
+    await g.abrirAjustes(admin);
+    await admin.getByRole('switch', { name: /Visible al público/ }).click();
+    await g.cerrarAjustes(admin);
+    await g.esperarSincronizado(admin);
+  });
+  const hoja = await hojaCodigos(esc, admin, id, 'llave-oculta');
+  const t = await g.torneoLocal(admin, id);
+  const final = t.partidosLlave.find((p) => p.ronda === 2);
+  const f = hoja.filas.find((x) => x.partidoId === final.id);
+  const cel = await esc.contexto('arbitro', CELULAR);
+  await esc.paso('árbitro entra a la final sin semis jugadas', async () => {
+    await ar.entrar(cel, f.codigo);
+    const frenado = await cel.getByText('Todavía no se sabe quién juega').waitFor({ timeout: 8000 }).then(() => true, () => false);
+    esc.verificar(frenado, 'la final sin rivales definidos NO se puede empezar', 'en un torneo oculto leerTorneo() devuelve null (RLS) y la pantalla deja empezar con "Equipo A vs Equipo B"');
+    await esc.revisarPantalla(cel, 'final-oculta-inicio');
+    if (frenado) return;
+    await ar.empezar(cel, { tipo: 'sideout', a: 11, mejorDe: 3, saca: 'A' });
+    while (!(await cel.getByRole('button', { name: 'Terminar partido' }).count())) await ar.punto(cel, 'saca');
+    await cel.getByRole('button', { name: 'Terminar partido' }).click();
+    await cel.getByRole('button', { name: /^Confirmar/ }).click();
+    await esperar(1500);
+    await esc.revisarPantalla(cel, 'final-oculta-terminada');
+    const nube = esc.fake.torneo(id);
+    const fin = nube.partidosLlave.find((p) => p.id === final.id);
+    esc.verificar(fin.puntosA === null, 'la base NO acepta un resultado para la final con las semis sin jugar', { finalEnLaBase: [fin.puntosA, fin.puntosB], semis: nube.partidosLlave.filter((p) => p.ronda === 1).map((p) => [p.puntosA, p.puntosB]) });
+  });
+}
+ESCENARIOS['arbitro-final-sin-rivales-oculto'] = finalSinDefinirOculto;

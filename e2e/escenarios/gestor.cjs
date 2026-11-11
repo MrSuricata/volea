@@ -91,7 +91,11 @@ async function cargarLlave(esc, page, id, fuerza) {
     const nombre = (pid) => t.parejas.find((p) => p.id === pid).nombre;
     const caja = page.locator('.partido-llave').filter({ has: page.getByLabel(`Puntos de ${nombre(a)}`, { exact: true }) }).filter({ has: page.getByLabel(`Puntos de ${nombre(b)}`, { exact: true }) });
     if (!(await caja.count())) {
-      // en el celular la llave se ve de a una ronda: no debería pasar en escritorio
+      // en el celular la llave se ve de a una ronda: probar las pestañas de ronda
+      const tabs = page.getByRole('radiogroup', { name: 'Ronda' }).getByRole('radio');
+      for (let i = 0; i < await tabs.count() && !(await caja.count()); i++) { await tabs.nth(i).click(); }
+    }
+    if (!(await caja.count())) {
       esc.exigir(false, 'el cruce de la llave está en pantalla para cargarlo', { a: nombre(a), b: nombre(b) });
     }
     await caja.first().getByLabel(`Puntos de ${nombre(a)}`, { exact: true }).fill(String(r.a));
@@ -170,9 +174,9 @@ async function verificarPublico(esc, browserPage, t, esperadoCampeon, cuando) {
   await esc.revisarPantalla(page, `publico-${cuando.replace(/\W+/g, '-')}`);
 }
 
-async function flujoGestor(esc, formatoId, idaYVuelta) {
+async function flujoGestor(esc, formatoId, idaYVuelta, viewport = ESCRITORIO) {
   const cfg = FORMATOS[formatoId];
-  const page = await esc.contexto('admin', ESCRITORIO);
+  const page = await esc.contexto(viewport.width < 600 ? 'admin-celular' : 'admin', viewport);
   const nombres = o.parejasDePrueba(cfg.parejas, formatoId.length);
   const nombreTorneo = `Sudamericano 2026 · ${cfg.titulo}${idaYVuelta ? ' (ida y vuelta)' : ''}`;
   let id;
