@@ -1130,7 +1130,7 @@ function PedidoModal({ compra, products, onClose, onGuardado, onBorrar, bloquead
                   return (
                     <div key={l.id} className="rounded-xl border border-gray-200 bg-white p-3">
                       <div className="flex items-start gap-2">
-                        <span className="mt-3 hidden w-5 shrink-0 text-center text-xs font-bold tabular-nums text-gray-400 sm:block">{i + 1}</span>
+                        <span className="mt-3 hidden w-5 shrink-0 text-center text-xs font-bold tabular-nums text-gray-500 sm:block">{i + 1}</span>
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="grid gap-2 sm:grid-cols-2">
                             <Selector

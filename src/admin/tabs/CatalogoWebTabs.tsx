@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { CalendarDays, Check, ChevronRight, Map as MapIcon, Megaphone, Pencil, Plus, Tag, Trash2, Users } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { Announcement, Club, Event } from '../../types';
 import { useStore } from '../../tienda/store';
@@ -114,6 +115,16 @@ export function EventosTab({ verInscriptos }: { verInscriptos: (eventoId: string
   const { events, saveEvent, removeEvent } = useStore();
   const [editando, setEditando] = useState<Event | null | 'nuevo'>(null);
   const [aBorrar, setABorrar] = useState<Event | null>(null);
+  // ?nuevo=1: se llega desde el vacío de Inscripciones ("Crear evento") con el editor ya
+  // abierto. El parámetro se consume para que "atrás" o recargar no lo vuelvan a abrir.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('nuevo') !== '1') return;
+    setEditando('nuevo');
+    const p = new URLSearchParams(params);
+    p.delete('nuevo');
+    setParams(p, { replace: true });
+  }, [params, setParams]);
   // Inscriptos del evento a borrar: 'cargando' mientras se pregunta (no se deja confirmar a
   // ciegas); null = no se pudo saber (se deja borrar igual, avisando).
   const [inscriptos, setInscriptos] = useState<number | null | 'cargando'>('cargando');
@@ -139,7 +150,12 @@ export function EventosTab({ verInscriptos }: { verInscriptos: (eventoId: string
         acciones={<Boton icono={<Plus size={18} />} onClick={() => setEditando('nuevo')}>Nuevo evento</Boton>}
       />
       {ordenados.length === 0 ? (
-        <Vacio icono={<CalendarDays size={22} />} titulo="Todavía no hay eventos" />
+        <Vacio
+          icono={<CalendarDays size={22} />}
+          titulo="Todavía no hay eventos"
+          descripcion="Un evento es lo que se anuncia en la web; si le abrís la inscripción, los anotados llegan a Inscripciones."
+          accion={<Boton icono={<Plus size={18} />} onClick={() => setEditando('nuevo')}>Crear evento</Boton>}
+        />
       ) : (
         <ul className={lista}>
           {ordenados.map((evt) => {

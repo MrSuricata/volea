@@ -366,7 +366,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
                   detalle={(
                     <>
                       <span className="font-semibold">{debe ? 'le debe al grupo' : favor ? 'el grupo le debe' : 'al día'}</span>
-                      <span className="text-gray-400"> · {modo === 'hoy' ? 'comprometido' : 'al día'}: {miniSaldo(saldosOtro[s])}</span>
+                      <span className="text-gray-500"> · {modo === 'hoy' ? 'comprometido' : 'al día'}: {miniSaldo(saldosOtro[s])}</span>
                     </>
                   )}
                 />
@@ -416,7 +416,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
 
           {/* Filtros: una fila de chips que se desliza + rango de fechas */}
           <div className="mb-4 space-y-3">
-            <div className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+            <div className="sin-barra desliza-indicio -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
               <Chip activo={filterArea === 'todas'} onClick={() => setFilterArea('todas')}>Todas las áreas</Chip>
               {areas.map(a => (
                 <Chip key={a} activo={filterArea === a} onClick={() => setFilterArea(a)}>{AREA_LBL[a]}</Chip>
@@ -444,7 +444,14 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
           </div>
 
           {/* Movimientos: lista en el celular, tabla en la compu */}
-          {filtered.length === 0 ? (
+          {filtered.length === 0 && (moves || []).length === 0 ? (
+            // Sin ningún movimiento cargado no tiene sentido hablar de filtros.
+            <Vacio
+              titulo="Todavía no hay movimientos"
+              descripcion="Aportes, retiros y gastos entre socios aparecen acá."
+              accion={<Boton variante="secundario" icono={<Plus size={17} />} onClick={() => { setForm({ ...FORM_INICIAL, fecha: hoyISO() }); setShowForm(true); }}>Nuevo movimiento</Boton>}
+            />
+          ) : filtered.length === 0 ? (
             <Vacio
               titulo="Sin movimientos con estos filtros"
               descripcion="Probá con otra área, otro tipo o sin rango de fechas."
@@ -734,7 +741,7 @@ export function AdminSociosSection({ moves, loading, onRefresh, onAddMany, onDel
                   return (
                     <p key={s} className="flex justify-between py-0.5">
                       <span className="text-gray-600">{NOMBRES[s]}</span>
-                      <span className={cn('font-semibold tabular-nums', v > 0.004 ? 'text-red-700' : v < -0.004 ? 'text-emerald-700' : 'text-gray-400')}>
+                      <span className={cn('font-semibold tabular-nums', v > 0.004 ? 'text-red-700' : v < -0.004 ? 'text-emerald-700' : 'text-gray-500')}>
                         {Math.abs(v) < 0.005 ? '—' : (v > 0 ? `debe ${money2(v)} más` : `${money2(-v)} a favor`)}
                       </span>
                     </p>
