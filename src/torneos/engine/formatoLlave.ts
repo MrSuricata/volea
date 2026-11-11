@@ -5,14 +5,31 @@ import type { PartidoLlave, SlotLlave, Torneo } from './tipos';
 import { nuevoId, resultadoDe } from './tipos';
 import { calcularTabla } from './tabla';
 import { armarLlaveSeis } from './copas';
+import { armarLlave } from './llave';
+import { calcularClasificados } from './clasificacion';
 
-export type FormatoLlave = 'auto' | 'final' | 'semis' | 'cruces' | 'seis' | 'copas' | 'tabla';
+// 'libre': llave por siembra eligiendo en el gestor cuántos clasifican (lo que hace 'auto' con 3 o
+// 5+ grupos), elegible a propósito también con 1, 2 o 4 grupos, donde 'auto' arma un formato fijo.
+export type FormatoLlave = 'auto' | 'final' | 'semis' | 'cruces' | 'seis' | 'copas' | 'tabla' | 'libre';
 
-export function formatoDe(t: Torneo): FormatoLlave {
+/** El formato tal cual quedó guardado (banderas viejas incluidas), sea posible o no hoy. */
+export function formatoGuardado(t: Torneo): FormatoLlave {
   if (t.copas) return 'copas';
   if (t.llave6) return 'seis';
   if (t.sinLlave || t.americanoIndividual) return 'tabla';
   return t.formatoLlave ?? 'auto';
+}
+
+/**
+ * El formato elegido, resuelto: si el guardado ya no es posible con estos grupos (se eligió
+ * "cruces" con 4 grupos y después se rearmaron en 3, por ejemplo) vale 'auto'. Es la única
+ * función que decide eso: selector, gestor, En vivo y programación pasan todos por acá.
+ * No reescribe el torneo: si los grupos vuelven a permitirlo, el guardado vuelve a valer.
+ */
+export function formatoDe(t: Torneo): FormatoLlave {
+  const f = formatoGuardado(t);
+  if (f === 'auto') return f;
+  return formatosPosibles(t).some((o) => o.valor === f) ? f : 'auto';
 }
 
 /** Devuelve el torneo con el formato puesto (y las banderas viejas acomodadas). */
@@ -47,7 +64,15 @@ export function formatosPosibles(t: Torneo): OpcionFormato[] {
   if (g >= 2) {
     o.push({ valor: 'copas', texto: 'Copa de Oro y Copa de Plata', ayuda: 'Tabla general: las mejores a Oro y el resto a Plata, cada una con su llave.' });
   }
-  o.push({ valor: 'auto', texto: 'Elegir al armar', ayuda: 'Cuántos clasifican se elige en el paso Llave (incluye mejores terceros).' });
+  const libre = { texto: 'Elegir cuántos clasifican', ayuda: 'Llave por siembra: en el paso Llave se elige cuántos pasan (incluye mejores terceros).' };
+  const fijo = autoFijo(g);
+  if (fijo) {
+    const comoFijo = o.find((x) => x.valor === fijo)?.texto ?? fijo;
+    o.push({ valor: 'libre', ...libre });
+    o.push({ valor: 'auto', texto: `Automático (${comoFijo})`, ayuda: `Con ${g <= 1 ? 'un grupo' : `${g} grupos`} se arma "${comoFijo}".` });
+  } else {
+    o.push({ valor: 'auto', texto: 'Elegir al armar', ayuda: libre.ayuda });
+  }
   return o;
 }
 
@@ -64,13 +89,69 @@ const gan = (partidoId: string): SlotLlave => ({ tipo: 'ganadorDe', partidoId })
 const partido = (ronda: number, posicion: number, a: SlotLlave, b: SlotLlave): PartidoLlave =>
   ({ id: nuevoId(), ronda, posicion, a, b, puntosA: null, puntosB: null, esTercerPuesto: false });
 
-/** El formato que se usa de verdad: "auto" toma el obvio cuando lo hay. */
+// Lo que arma "auto" según la cantidad de grupos (null = no hay uno obvio: se elige al armar).
+function autoFijo(grupos: number): 'final' | 'cruces' | null {
+  if (grupos <= 1) return 'final';
+  if (grupos === 2 || grupos === 4) return 'cruces';
+  return null;
+}
+
+/** El formato que se usa de verdad: "auto" toma el obvio cuando lo hay. Lo usan En vivo y el gestor. */
 export function formatoEfectivo(t: Torneo): FormatoLlave {
   const f = formatoDe(t);
   if (f !== 'auto') return f;
-  if (t.grupos.length <= 1) return 'final';
-  if (t.grupos.length === 2 || t.grupos.length === 4) return 'cruces';
-  return 'auto';
+  return autoFijo(t.grupos.length) ?? 'auto';
+}
+
+/**
+ * Cómo se arma la llave de este cuadro en el gestor, con la misma resolución que En vivo:
+ * 'fijo' = armarLlaveFormato (final, semis, cruces, llave de 6), 'copas', 'tabla' (americano)
+ * o 'libre' (se elige cuántos clasifican y se siembra).
+ */
+export function modoArmado(t: Torneo): 'fijo' | 'copas' | 'tabla' | 'libre' {
+  const f = formatoEfectivo(t);
+  if (f === 'copas' || f === 'tabla') return f;
+  if (f === 'auto' || f === 'libre') return 'libre';
+  return 'fijo';
+}
+
+// Firma de las siembras de una llave: qué parejas entran en cada partido y en qué ronda (sin el
+// orden del dibujo ni los lados, que se pueden mover a mano sin cambiar los cruces).
+function firmaSiembras(l: PartidoLlave[]): string {
+  return l.filter((p) => !p.esTercerPuesto)
+    .map((p) => {
+      const lados = [p.a, p.b].map((s) => (s === null ? '·bye' : s.tipo === 'seed' ? s.parejaId : null));
+      if (lados.every((x) => x === null || x === '·bye')) return null;
+      return `${p.ronda}:${lados.map((x) => x ?? '·').sort().join('/')}`;
+    })
+    .filter((x): x is string => x !== null)
+    .sort()
+    .join(' ');
+}
+
+/**
+ * true si la llave armada ya no coincide con la que saldría hoy con las tablas de grupo (se corrigió
+ * un resultado de grupo después de armarla, aunque clasifiquen los mismos y solo cambie el orden).
+ * Compara las siembras con lo que arma el formato y, si se armó eligiendo cuántos clasifican, con
+ * esa configuración (vale cualquiera de las dos: una llave armada antes con la otra no es "vieja").
+ * No rearma nada. Con grupos incompletos no avisa.
+ */
+export function llaveDesactualizada(t: Torneo): boolean {
+  const armada = t.partidosLlave;
+  if (!armada || armada.length === 0 || t.grupos.length === 0 || (t.formato ?? 'grupos') === 'individual') return false;
+  if (!completo(t)) return false;
+  const candidatas: PartidoLlave[][] = [];
+  try {
+    const f = armarLlaveFormato(t);
+    if (f) candidatas.push(f);
+  } catch { /* sin llave fija posible: queda la de la configuración */ }
+  if (t.configLlave) {
+    const c = calcularClasificados(t.grupos, t.partidosGrupo, t.configLlave);
+    if (c.length >= 2) candidatas.push(armarLlave(c, false));
+  }
+  if (candidatas.length === 0) return false;
+  const firma = firmaSiembras(armada);
+  return !candidatas.some((c) => firmaSiembras(c) === firma);
 }
 
 /**

@@ -31,7 +31,7 @@ describe('formato de llave', () => {
 
   it('opciones según la cantidad de grupos', () => {
     const uno = torneo([{ id: 'A', nombre: 'A', parejaIds: ['a', 'b', 'c', 'd'] }]);
-    expect(formatosPosibles(uno).map((o) => o.valor)).toEqual(['final', 'semis', 'tabla', 'auto']);
+    expect(formatosPosibles(uno).map((o) => o.valor)).toEqual(['final', 'semis', 'tabla', 'libre', 'auto']);
     const tres = torneo(['A', 'B', 'C'].map((g) => ({ id: g, nombre: g, parejaIds: [`${g}1`, `${g}2`, `${g}3`] })));
     expect(formatosPosibles(tres).map((o) => o.valor)).toEqual(['seis', 'copas', 'auto']);
     expect(formatoEfectivo(tres)).toBe('auto');
