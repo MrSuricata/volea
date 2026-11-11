@@ -4,5 +4,5 @@ import { mergeConfig } from 'vite';
 import base from '../vite.config.ts';
 
 export default mergeConfig(base, {
-  server: { port: 5311, strictPort: true, host: '127.0.0.1', watch: { ignored: ['**/.claude/**', '**/e2e/**'] } },
+  server: { port: Number(new URL(process.env.E2E_BASE || 'http://127.0.0.1:5311').port) || 5311, strictPort: true, host: '127.0.0.1', watch: { ignored: ['**/.claude/**', '**/e2e/**'] } },
 });
