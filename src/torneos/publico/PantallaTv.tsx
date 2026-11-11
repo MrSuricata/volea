@@ -8,7 +8,7 @@ import { formatPrice } from '../../lib/formato';
 import type { Product } from '../../types';
 import { aHora } from './programa';
 import type { AnuncioTv, ConfigTv, SponsorTv } from './programa';
-import type { Marcador } from '../arbitraje/motor';
+import { esMarcadorValido, type Marcador } from '../arbitraje/motor';
 
 export type CanchaTv = { cancha: string; cat: string | null; a: string | null; b: string | null; minutos: number | null; sigue: { cat: string; a: string; b: string } | null; marcador?: Marcador | null };
 export type ProximoTv = { ini: number; cancha: string; categoria: string; fase: string; a: string; b: string; bloque?: boolean };
@@ -207,7 +207,10 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
 
       {/* Canchas */}
       <section style={{ position: 'relative', display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, canchas.length)}, 1fr)`, gap: '0.7em' }}>
-        {canchas.map((c) => (
+        {canchas.map((cancha) => {
+          // Un marcador roto en la base no puede tirar abajo la TV: si no tiene la forma esperada, no se muestra.
+          const c = esMarcadorValido(cancha.marcador) ? cancha : { ...cancha, marcador: null };
+          return (
           <div key={c.cancha} style={{
             background: CARTA, borderRadius: '0.6em', padding: '0.6em 0.8em',
             border: `2px solid ${c.a ? LIMA : BORDE}`, boxShadow: c.a ? `0 0 1.2em ${LIMA}33` : 'none',
@@ -239,7 +242,8 @@ export default function PantallaTv({ titulo, colores, canchas, proximos, resulta
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </section>
 
       {/* Próximos | Resultados */}
