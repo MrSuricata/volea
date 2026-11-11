@@ -56,7 +56,7 @@ async function revisarVistas(esc, page, etiqueta, id) {
   // /torneos/:id
   await page.goto(`${BASE}/torneos/${id}`);
   await page.getByText(/Grupo A/i).first().waitFor({ timeout: 15000 });
-  const vivo = await page.getByText('EN VIVO').first().waitFor({ timeout: 25000 }).then(() => true, () => false);
+  const vivo = await page.getByText('EN VIVO', { exact: true }).first().waitFor({ timeout: 25000 }).then(() => true, () => false);
   esc.verificar(vivo, `${etiqueta}: /torneos/:id muestra el marcador EN VIVO del partido con árbitro`);
   await esc.revisarPantalla(page, `${etiqueta}-torneo-detalle`);
 }
@@ -87,7 +87,10 @@ async function enVivo(esc, { nombre, evento, programacionEsperada }) {
     let despues = antes;
     while (Date.now() - t0 < 8000 && despues === antes) { await esperar(250); despues = await leerVivo(movil); }
     esc.verificar(despues !== antes, 'el celular del público ve el punto nuevo sin recargar (< 8 s)', { antes, despues, ms: Date.now() - t0 });
-    esc.verificar(/6-1|1-6/.test(despues || ''), 'el marcador público es el del árbitro (6-1)', despues);
+    const tt = new ar.Tanteo({ tipo: 'rally', a: 15, mejorDe: 1 }, 'A');
+    for (const h of ['saca', 'saca', 'recibe', 'saca', 'saca', 'saca', 'saca']) tt.rally(h);
+    const esperado = `${tt.saca === 'A' ? '●' : ''}${tt.pA}-${tt.pB}${tt.saca === 'B' ? '●' : ''}`;
+    esc.verificar((despues || '').replace(/\s/g, '') === esperado, `el marcador público es el del árbitro (${esperado})`, despues);
   });
 
   for (const [pagina, etiqueta] of [[movil, 'celular'], [compu, 'escritorio']]) {
@@ -117,16 +120,22 @@ async function enVivo(esc, { nombre, evento, programacionEsperada }) {
     await esc.revisarPantalla(tv, 'tv-1440');
   });
   await esc.paso('al terminar el partido el marcador en vivo desaparece y queda el resultado', async () => {
+    await movil.goto(`${BASE}/torneos/${id}`);
+    await movil.getByText('EN VIVO', { exact: true }).first().waitFor({ timeout: 15000 }).catch(() => {});
     while (!(await cel.getByRole('button', { name: 'Terminar partido' }).count())) await ar.punto(cel, 'saca');
     await cel.getByRole('button', { name: 'Terminar partido' }).click();
     await cel.getByRole('button', { name: /^Confirmar/ }).click();
     await cel.getByText('Resultado cargado ✓').waitFor();
     const t0 = Date.now();
     let sigue = true;
-    while (Date.now() - t0 < 10000 && sigue) { await esperar(400); sigue = (await movil.getByText('EN VIVO').count()) > 0; }
+    while (Date.now() - t0 < 10000 && sigue) { await esperar(400); sigue = (await movil.getByText('EN VIVO', { exact: true }).count()) > 0; }
     esc.verificar(!sigue, 'el EN VIVO desaparece de /torneos/:id al terminar', { ms: Date.now() - t0 });
-    const r = await movil.getByText(/15 – \d+|\d+ – 15/).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
-    esc.verificar(r, 'y aparece el resultado final en el cuadro público sin recargar');
+    const t1 = Date.now();
+    const sinJugar = await movil.getByText('sin jugar').count();
+    const r = await movil.getByText(/15 – \d+|\d+ – 15/).first().waitFor({ timeout: 40000 }).then(() => true, () => false);
+    const demora = Date.now() - t1;
+    esc.verificar(r, 'y aparece el resultado final en el cuadro público sin recargar (≤ 40 s)', { ms: demora });
+    if (r && demora > 5000) esc.observaciones.push({ tipo: 'hallazgo.publico-hueco-al-terminar', ctx: 'publico-celular', url: movil.url(), detalle: `al terminar el partido el EN VIVO se va enseguida pero el resultado tarda ${Math.round(demora / 1000)} s en aparecer (refresco cada ~30 s): mientras, ${sinJugar} partido(s) dicen "sin jugar"` });
     await esc.revisarPantalla(movil, 'celular-resultado-final');
   });
 }

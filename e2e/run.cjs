@@ -20,6 +20,7 @@ for (const id of gestor.idsDeEscenarios()) {
   const [, formato, rueda] = id.match(/^gestor-(.+)-(1r|iv)$/);
   ESCENARIOS[id] = { grupo: 'gestor', fn: (esc) => gestor.flujoGestor(esc, formato, rueda === 'iv') };
 }
+for (const f of ['cruces4', 'auto', 'copas']) ESCENARIOS[`gestor-${f}-1r-celular`] = { grupo: 'gestor-celular', fn: (esc) => gestor.flujoGestor(esc, f, false, require('./lib/harness.cjs').CELULAR) };
 for (const [id, fn] of Object.entries(arbitro.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'arbitro', fn };
 for (const [id, fn] of Object.entries(publico.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'publico', fn };
 for (const [id, fn] of Object.entries(sinBase.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'sin-base', fn };
