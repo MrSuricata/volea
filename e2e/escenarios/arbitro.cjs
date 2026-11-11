@@ -170,8 +170,11 @@ async function flujoCompleto(esc) {
   await esc.paso('árbitro: partido 1 rally a 15 · un game, con Tiempo y Deshacer', async () => {
     await ar.entrar(cel, f1.codigo);
     await cel.getByText('¿Quién saca primero?').waitFor();
+    const primero = await cel.locator('main').last().innerText();
+    if (/Equipo A vs Equipo B/.test(primero)) esc.observaciones.push({ tipo: 'hallazgo.arbitro-nombres-tardan', ctx: 'arbitro', url: cel.url(), detalle: 'la pantalla de inicio aparece primero con "Equipo A vs Equipo B" (y sin el freno de "todavía no se sabe quién juega") hasta que llega leerTorneo()' });
+    const ok = await cel.getByText(f1.a).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
     const txt = await cel.locator('main').last().innerText();
-    esc.verificar(txt.includes(f1.a) && txt.includes(f1.b), 'la pantalla de inicio muestra las dos parejas del código', txt.slice(0, 200));
+    esc.verificar(ok && txt.includes(f1.b), 'la pantalla de inicio muestra las dos parejas del código', txt.slice(0, 200));
     await esc.revisarPantalla(cel, 'p1-inicio');
     // la web pública, abierta en otro celular, para ver el marcador en vivo
     await pub.goto(`${BASE}/torneos/${id}`);
