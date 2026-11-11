@@ -14,6 +14,7 @@ const gestor = require('./escenarios/gestor.cjs');
 const arbitro = require('./escenarios/arbitro.cjs');
 const publico = require('./escenarios/publico.cjs');
 const sinBase = require('./escenarios/sinBase.cjs');
+const concurrencia = require('./escenarios/concurrencia.cjs');
 
 const ESCENARIOS = {};
 for (const id of gestor.idsDeEscenarios()) {
@@ -21,6 +22,7 @@ for (const id of gestor.idsDeEscenarios()) {
   ESCENARIOS[id] = { grupo: 'gestor', fn: (esc) => gestor.flujoGestor(esc, formato, rueda === 'iv') };
 }
 for (const f of ['cruces4', 'auto', 'copas']) ESCENARIOS[`gestor-${f}-1r-celular`] = { grupo: 'gestor-celular', fn: (esc) => gestor.flujoGestor(esc, f, false, require('./lib/harness.cjs').CELULAR) };
+for (const [id, fn] of Object.entries(concurrencia.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'gestor', fn };
 for (const [id, fn] of Object.entries(arbitro.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'arbitro', fn };
 for (const [id, fn] of Object.entries(publico.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'publico', fn };
 for (const [id, fn] of Object.entries(sinBase.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'sin-base', fn };
@@ -41,7 +43,7 @@ async function levantarServidor() {
     if (await arriba()) return proc;
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('No levantó el dev server en 5311');
+  throw new Error(`No levantó el dev server en ${BASE}`);
 }
 
 (async () => {
