@@ -9,6 +9,7 @@ import { podioDeTorneo } from './resultado';
 import { obtenerTorneoPublico } from './datos';
 import { RkAviso, RkCargando, RkError } from './Estados';
 import NavPublica from './NavPublica';
+import OpcPublico from './OpcPublico';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
 import '../torneos.css';
 import { MarcadorVivo, MarcadoresContext, useMarcadorDe, useMarcadores } from '../arbitraje/MarcadorVivo';
@@ -147,7 +148,8 @@ export default function TorneoDetallePage({ onNombre }: Props) {
           {torneo.evento && !individual && <span className="chip">Evento {torneo.evento}</span>}
         </div>
 
-        {podio.campeon && (
+        {/* One Point Challenge: su propia vista (resumen, rondas, cuadro y podio). */}
+        {podio.campeon && !(individual && tieneLlave) && (
           <div className="carta campeon">
             <div style={{ fontSize: '3rem' }}>🏆</div>
             <h2>{nombreDe(torneo, podio.campeon)}</h2>
@@ -160,7 +162,7 @@ export default function TorneoDetallePage({ onNombre }: Props) {
 
         {tieneGrupos && grupos.map((g) => <GrupoPublico key={g.id} torneo={torneo} grupo={g} />)}
 
-        {tieneLlave && <LlavePublica torneo={torneo} />}
+        {tieneLlave && (individual ? <OpcPublico torneo={torneo} /> : <LlavePublica torneo={torneo} />)}
 
         {!tieneGrupos && !tieneLlave && (
           <p className="vacio">
