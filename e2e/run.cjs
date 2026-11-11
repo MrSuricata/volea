@@ -16,6 +16,7 @@ const arbitro = require('./escenarios/arbitro.cjs');
 const publico = require('./escenarios/publico.cjs');
 const sinBase = require('./escenarios/sinBase.cjs');
 const opc = require('./escenarios/opc.cjs');
+const concurrencia = require('./escenarios/concurrencia.cjs');
 
 const ESCENARIOS = {};
 for (const id of gestor.idsDeEscenarios()) {
@@ -23,6 +24,7 @@ for (const id of gestor.idsDeEscenarios()) {
   ESCENARIOS[id] = { grupo: 'gestor', fn: (esc) => gestor.flujoGestor(esc, formato, rueda === 'iv') };
 }
 for (const f of ['cruces4', 'auto', 'copas']) ESCENARIOS[`gestor-${f}-1r-celular`] = { grupo: 'gestor-celular', fn: (esc) => gestor.flujoGestor(esc, f, false, require('./lib/harness.cjs').CELULAR) };
+for (const [id, fn] of Object.entries(concurrencia.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'gestor', fn };
 for (const [id, fn] of Object.entries(arbitro.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'arbitro', fn };
 for (const [id, fn] of Object.entries(publico.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'publico', fn };
 for (const [id, fn] of Object.entries(sinBase.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'sin-base', fn };

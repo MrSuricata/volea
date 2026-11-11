@@ -15,6 +15,7 @@
 // como `import type` - ya se borraba en runtime antes de este cambio; ver el grep de build en el
 // commit para confirmar que el chunk de entrada sigue sin ninguna de las dos cosas.
 import type { EstadoTorneos } from './TorneosApp';
+import type { Torneo } from './engine/tipos';
 
 export const CLAVE_CACHE = 'volea-torneos:cache';
 
@@ -27,6 +28,13 @@ export type Cache = {
   jugadoresSucios: boolean;
   configSucia: boolean;
   conflictos: string[]; // ids con conflicto sin resolver; vive en el cache (no en un ref de resultado)
+  // Copia del torneo TAL COMO ESTABA EN EL SERVER (en `base[id]`) cuando se empezo a editar aca.
+  // Solo para torneos sucios (los limpios ya son esa copia), asi el localStorage no se duplica.
+  // Es lo que permite fusionar por partido cuando el server avanzo (sync.ts/fusion.ts). Las
+  // caches guardadas antes de este campo no lo traen: esos torneos caen al comportamiento de
+  // siempre (server avanzado + sucio = conflicto a resolver a mano), nunca a pisar.
+  baseDatos: Record<string, Torneo>;
+  conflictosDetalle: Record<string, string[]>; // por torneo en conflicto: que partidos chocan (para el aviso)
 };
 
 /**
