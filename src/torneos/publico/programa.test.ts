@@ -1,11 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import type { PartidoGrupo, PartidoLlave, Torneo } from '../engine/tipos';
 import {
-  PROGRAMA, aHora, aMinuto, aplicarAjustes, armarCategoria, categoriasDelEvento, minutoDesde, momentoDeTorneo,
+  aHora, aMinuto, aplicarAjustes, armarCategoria, categoriasDelEvento, construirPrograma, minutoDesde, momentoDeTorneo,
   personasDe, programarEvento,
 } from './programa';
 import { ritmoReal } from './programa';
-import type { CatProg, Fila } from './programa';
+import type { CatProg, Fila, Programa } from './programa';
+
+// Programa de prueba con dos días (VIE/SAB), singles el viernes y el resto el sábado, dos
+// canchas y 20 minutos por partido: el evento de octubre que armó este módulo. Ya no es
+// el de la pantalla (que sale de construirPrograma + rk_programa.config.evento); queda como
+// fixture porque cubre el reparto con dos días y claves de día cortas.
+const PROGRAMA: Programa = {
+  clave: 'prueba',
+  titulo: 'EVENTO DE PRUEBA',
+  colores: ['#F05A28', '#9CCBEE', '#CCFF00'],
+  esDelEvento: (t) => /aniversario/i.test(t.nombre) || /aniversario/i.test(t.evento ?? ''),
+  nombreCorto: (nombre) =>
+    nombre.replace(/\b(aniversario|pickleball city|2026)\b/gi, ' ').replace(/[\s·-]+$/, '').replace(/^[\s·-]+/, '').replace(/\s+/g, ' ').trim()
+    || nombre,
+  diaDe: (nombre) => (/single/i.test(nombre) ? 'VIE' : 'SAB'),
+  dias: [
+    { clave: 'VIE', fecha: '2026-10-09', nombre: 'Viernes 9', inicio: 19 * 60 },
+    { clave: 'SAB', fecha: '2026-10-10', nombre: 'Sábado 10', inicio: 10 * 60 },
+  ],
+  duracion: 20,
+  canchas: ['Cancha 1', 'Cancha 2'],
+  bloque: null,
+  avisoSinCuadros: 'Sin cuadros todavía.',
+};
 
 // ─── Armado de cuadros de prueba ─────────────────────────────────────────────
 
@@ -53,7 +76,7 @@ const linea = (f: Fila) => `${f.dia} ${aHora(f.ini)} ${f.cancha.replace('Cancha 
 
 // ─── El programa del aniversario ─────────────────────────────────────────────
 
-describe('PROGRAMA del aniversario', () => {
+describe('programa de prueba (dos días)', () => {
   it('reconoce los cuadros del evento por el nombre o por la etiqueta de evento', () => {
     expect(PROGRAMA.esDelEvento({ nombre: 'SINGLES FEMENINO ANIVERSARIO' })).toBe(true);
     expect(PROGRAMA.esDelEvento({ nombre: 'DOBLE MIXTO A', evento: 'Aniversario Pickleball City · 9-10 oct' })).toBe(true);
@@ -403,3 +426,87 @@ describe('ritmoReal', () => {
   });
 });
 
+
+
+// ─── Evento configurable desde la web ────────────────────────────────────────
+
+describe('construirPrograma', () => {
+  const ahora = new Date(2026, 10, 11, 15, 30); // miércoles 11/11/2026
+
+  it('sin configuración: hoy, 2 canchas, 20 minutos y sin fechas del pasado', () => {
+    const p = construirPrograma(null, ahora);
+    expect(p.dias).toEqual([{ clave: '2026-11-11', fecha: '2026-11-11', nombre: 'Miércoles 11', inicio: 600 }]);
+    expect(p.canchas).toEqual(['Cancha 1', 'Cancha 2']);
+    expect(p.duracion).toBe(20);
+    expect(p.titulo).toBe('TORNEOS VOLEA');
+    expect(p.avisoSinCuadros).not.toMatch(/octubre|jueves/i);
+  });
+
+  it('antes de las 5 de la mañana el día por defecto sigue siendo el anterior', () => {
+    expect(construirPrograma(undefined, new Date(2026, 10, 12, 1, 0)).dias[0].fecha).toBe('2026-11-11');
+  });
+
+  it('por defecto no excluye por nombre: entra lo tocado en los últimos 3 días', () => {
+    const p = construirPrograma({}, ahora);
+    expect(p.esDelEvento({ nombre: 'SUDAMERICANO ARGENTINA', updatedAt: '2026-11-10T12:00:00Z' })).toBe(true);
+    expect(p.esDelEvento({ nombre: 'Doble libre', updatedAt: null })).toBe(true);
+    expect(p.esDelEvento({ nombre: 'MASCULINO A RACKET ROLL', updatedAt: '2026-08-23T12:00:00Z' })).toBe(false);
+  });
+
+  it('toma días, canchas, título y aviso de la configuración', () => {
+    const p = construirPrograma({
+      titulo: 'Sudamericano de Pickleball',
+      dias: [{ fecha: '2026-11-21', inicio: 9 * 60 }, { fecha: '2026-11-20', nombre: 'Jueves 20', inicio: 18 * 60 }, { fecha: 'mañana' }, { fecha: '2026-11-20' }],
+      canchas: 4,
+      avisoSinCuadros: 'Los cruces se publican el miércoles.',
+    }, ahora);
+    expect(p.titulo).toBe('Sudamericano de Pickleball');
+    expect(p.dias.map((d) => [d.clave, d.nombre, d.inicio])).toEqual([
+      ['2026-11-20', 'Jueves 20', 1080], ['2026-11-21', 'Sábado 21', 540],
+    ]);
+    expect(p.canchas).toEqual(['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4']);
+    expect(p.avisoSinCuadros).toBe('Los cruces se publican el miércoles.');
+    expect(p.diaDe('lo que sea')).toBe('2026-11-20');
+  });
+
+  it('ignora lo que venga roto', () => {
+    const p = construirPrograma({ titulo: 12, colores: ['rojo'], canchas: 99, dias: 'x', torneos: { modo: 'raro' } } as never, ahora);
+    expect(p.titulo).toBe('TORNEOS VOLEA');
+    expect(p.colores[0]).toBe('#CCFF00');
+    expect(p.canchas).toHaveLength(2);
+    expect(p.dias).toHaveLength(1);
+    expect(p.esDelEvento({ nombre: 'x', updatedAt: '2020-01-01T00:00:00Z' })).toBe(false);
+  });
+
+  it('filtra por etiqueta de evento, por texto o deja pasar todo', () => {
+    const porEvento = construirPrograma({ torneos: { modo: 'evento', valor: 'Sudamericano' } }, ahora);
+    expect(porEvento.esDelEvento({ nombre: 'Equipo A', evento: 'Sudamericano 2026 · Montevideo' })).toBe(true);
+    expect(porEvento.esDelEvento({ nombre: 'Sudamericano', evento: null })).toBe(false);
+    const porTexto = construirPrograma({ torneos: { modo: 'texto', valor: 'sudamericano' } }, ahora);
+    expect(porTexto.esDelEvento({ nombre: 'DOBLES SUDAMÉRICANO' })).toBe(true); // sin distinguir tildes ni mayúsculas
+    expect(porTexto.esDelEvento({ nombre: 'Racket Roll', evento: 'VOLEA' })).toBe(false);
+    expect(porTexto.esDelEvento({ nombre: 'Dobles Sudamericano' })).toBe(true);
+    expect(construirPrograma({ torneos: { modo: 'todos' } }, ahora).esDelEvento({ nombre: 'cualquiera', updatedAt: '2019-01-01T00:00:00Z' })).toBe(true);
+    // filtro por texto sin texto: no excluye nada
+    expect(construirPrograma({ torneos: { modo: 'texto', valor: ' ' } }, ahora).esDelEvento({ nombre: 'cualquiera' })).toBe(true);
+  });
+
+  it('saca del nombre de la categoría lo que ya dice el evento', () => {
+    const p = construirPrograma({ titulo: 'Copa Sudamericana', torneos: { modo: 'texto', valor: 'sudamericana' } }, ahora);
+    expect(p.nombreCorto('COPA SUDAMERICANA 2026 · DOBLE MIXTO')).toBe('DOBLE MIXTO');
+    expect(p.nombreCorto('Sudamericana')).toBe('Sudamericana');
+    expect(construirPrograma({}, ahora).nombreCorto('DOBLE MIXTO 2026')).toBe('DOBLE MIXTO 2026');
+  });
+
+  it('el programa construido arma los cuadros y el reparto con las claves de día por fecha', () => {
+    const p = construirPrograma({ dias: [{ fecha: '2026-11-14', inicio: 9 * 60 }] }, ahora);
+    const v = aplicarAjustes(p, null);
+    const t = conGrupoDe4('ARGENTINA', ['a', 'b', 'c', 'd']);
+    const cats = categoriasDelEvento([t], p, v);
+    expect(cats).toHaveLength(1);
+    expect(cats[0].dia).toBe('2026-11-14');
+    const { filas } = programarEvento({ cats, vigente: v, ahora: { dia: null, minuto: 0 }, canchas: { activas: p.canchas, enJuego: [] } });
+    expect(filas[0].dia).toBe('2026-11-14');
+    expect(aHora(filas[0].ini)).toBe('09:00');
+  });
+});
