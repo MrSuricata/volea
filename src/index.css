@@ -18,3 +18,35 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─── Panel admin ───────────────────────────────────────────────────────────
+   Barra de scroll del menú lateral (fondo navy): fina y oscura. Sin esto Windows
+   dibujaba la barra clásica clara (~17px con flechitas) pegada al borde y angostaba
+   el menú. Se ve tenue y se aviva al pasar el mouse; el gutter estable evita que el
+   contenido se corra cuando aparece o desaparece. */
+.barra-oscura {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-gutter: stable;
+}
+.barra-oscura:hover,
+.barra-oscura:focus-within { scrollbar-color: rgba(255, 255, 255, 0.32) transparent; }
+/* Navegadores sin scrollbar-color (Safari): mismas reglas con ::-webkit-scrollbar. */
+.barra-oscura::-webkit-scrollbar { width: 6px; }
+.barra-oscura::-webkit-scrollbar-track { background: transparent; }
+.barra-oscura::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 9999px; }
+.barra-oscura:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.32); }
+
+/* Fila de chips que se desliza en el celular: el borde derecho se esfuma para que se
+   note que hay más a la derecha (antes el último chip quedaba cortado en seco). */
+@media (max-width: 767px) {
+  .desliza-indicio {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+}
+
+/* Barra de scroll de la página dentro del panel (la clase la pone AdminPage). */
+html.panel-admin::-webkit-scrollbar-track { background: #f3f4f6; }
+html.panel-admin::-webkit-scrollbar-thumb { background: #b6bcc6; border-radius: 9999px; }
+html.panel-admin::-webkit-scrollbar-thumb:hover { background: #8a929e; }

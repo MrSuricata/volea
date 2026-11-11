@@ -4,7 +4,7 @@
 // pueden importar módulos compartidos (tienda/store, lib/*, utils/*, services/*),
 // pero NADA de acá se importa estático desde App.tsx.
 
-import { useState, useEffect, useCallback, useMemo, Suspense, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
@@ -220,6 +220,14 @@ export default function AdminPage() {
     return () => { vivo = false; document.removeEventListener('visibilitychange', onVis); };
   }, [isAdmin]);
 
+  // La barra de scroll de la página es la de la web pública (pista navy, cursor lima):
+  // sobre el fondo claro del panel se veía como una franja oscura pegada al borde. Mientras
+  // el panel está abierto se usa una gris (ver .panel-admin en index.css).
+  useEffect(() => {
+    document.documentElement.classList.add('panel-admin');
+    return () => document.documentElement.classList.remove('panel-admin');
+  }, []);
+
   // El menú del celular: Escape lo cierra y el fondo no scrollea mientras está abierto.
   useEffect(() => {
     if (!menuAbierto) return;
@@ -418,6 +426,10 @@ export default function AdminPage() {
   const grupoActual = gruposTabs.find(g => g.items.some(it => it.id === activeTab));
 
   const irA = (id: string, extra?: Record<string, string>) => {
+    // Si se llega a una sección de otro grupo (desde Inicio o un atajo), ese grupo se abre:
+    // antes quedaba plegado y el ítem activo no se veía en la barra.
+    const grupoDestino = gruposTabs.find(g => g.items.some(it => it.id === id));
+    if (grupoDestino && grupoAbierto !== null && grupoAbierto !== grupoDestino.id) setGrupoAbierto(null);
     setActiveTab(id, extra);
     setMenuAbierto(false);
     setBuscarSeccion('');
@@ -434,6 +446,7 @@ export default function AdminPage() {
   const Marca = ({ id }: { id: string }) => activeTab === id
     ? <span aria-hidden className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-lime-400" />
     : null;
+  const claseAccionCuenta = 'flex h-11 w-11 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white';
   const Aviso = ({ n }: { n: number }) => n > 0
     ? <span className="ml-auto rounded-full bg-lime-400 px-2 py-0.5 text-[11px] font-bold tabular-nums text-navy-900">{n}</span>
     : null;
@@ -461,7 +474,7 @@ export default function AdminPage() {
           />
         </div>
       </div>
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-4 pb-4" aria-label="Secciones del panel">
+      <NavDesplazable claveActivo={activeTab} claveGrupo={q === '' ? grupoAbierto : null}>
         {q !== '' ? (
           resultados.length === 0
             ? <p className="px-3 py-3 text-sm text-white/50">Nada con «{buscarSeccion.trim()}»</p>
@@ -483,7 +496,7 @@ export default function AdminPage() {
               const abierto = grupoAbierto === g.id || (grupoAbierto === null && tieneActivo);
               const avisos = avisosDelGrupo(g);
               return (
-                <div key={g.id}>
+                <div key={g.id} data-grupo={g.id}>
                   <button
                     onClick={() => setGrupoAbierto(abierto ? '' : g.id)}
                     aria-expanded={abierto}
@@ -510,35 +523,47 @@ export default function AdminPage() {
             })}
           </>
         )}
-      </nav>
-      <div className="border-t border-white/10 p-4">
-        <div className="mb-2 flex items-center gap-3 px-1">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime-400 font-display text-sm font-black text-navy-900">
+      </NavDesplazable>
+      {/* Usuario + acciones de cuenta en dos renglones (antes eran ~300px de renglones
+          sueltos que dejaban sin lugar al menú en pantallas de 1020px de alto). */}
+      <div className="border-t border-white/10 px-4 pb-3 pt-3">
+        <div className="flex items-center gap-3 px-1">
+          <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime-400 font-display text-sm font-black text-navy-900">
             {(currentAdmin?.name || currentAdmin?.email || '?').trim().charAt(0).toUpperCase()}
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white">{currentAdmin?.name || currentAdmin?.email || 'Admin'}</p>
-            <p className="text-[11px] uppercase tracking-wider text-white/50">{currentAdmin?.role === 'owner' ? 'Dueño' : 'Equipo'}</p>
+            <p className="text-[11px] uppercase tracking-wider text-white/60">{currentAdmin?.role === 'owner' ? 'Dueño' : 'Equipo'}</p>
           </div>
         </div>
-        <Link to="/" className="flex min-h-[40px] items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white">
-          <ExternalLink size={16} /> Ver la web
-        </Link>
-        {useSupabaseAuth && (
-          <button onClick={() => { setMenuAbierto(false); setCambiarPass(true); }} className="flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white">
-            <KeyRound size={16} /> Cambiar mi contraseña
+        <div className="mt-2 flex items-center gap-1">
+          <Link to="/" aria-label="Ver la web" title="Ver la web" className={claseAccionCuenta}>
+            <ExternalLink size={18} />
+          </Link>
+          {useSupabaseAuth && (
+            <button type="button" onClick={() => { setMenuAbierto(false); setCambiarPass(true); }} aria-label="Cambiar mi contraseña" title="Cambiar mi contraseña" className={claseAccionCuenta}>
+              <KeyRound size={18} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setPanelOculto(true)}
+            aria-label="Ocultar panel"
+            title="Ocultar panel: esconde esta columna para transmitir la pantalla limpia"
+            className={cn(claseAccionCuenta, 'hidden lg:flex')}
+          >
+            <EyeOff size={18} />
           </button>
-        )}
-        <button
-          onClick={() => setPanelOculto(true)}
-          className="hidden min-h-[40px] w-full items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-white/5 hover:text-white lg:flex"
-          title="Esconde esta columna para transmitir la pantalla limpia"
-        >
-          <EyeOff size={16} /> Ocultar panel
-        </button>
-        <button onClick={logout} className="flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 text-[13px] font-semibold text-white/65 hover:bg-red-500/10 hover:text-red-300">
-          <LogOut size={16} /> Cerrar sesión
-        </button>
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Cerrar sesión"
+            title="Cerrar sesión"
+            className="ml-auto flex h-11 items-center gap-2 rounded-lg px-3 text-[13px] font-semibold text-white/70 transition-colors hover:bg-red-500/10 hover:text-red-300"
+          >
+            <LogOut size={17} /> Salir
+          </button>
+        </div>
       </div>
     </>
   );
@@ -607,7 +632,7 @@ export default function AdminPage() {
 
             {activeTab === 'inscripciones' && (
               <Suspense fallback={<CargandoFilas />}>
-                <AdminInscripcionesTab events={events} eventoInicialId={inscEventoAtajo} alVerla={() => setInscNuevas(0)} />
+                <AdminInscripcionesTab events={events} eventoInicialId={inscEventoAtajo} alVerla={() => setInscNuevas(0)} crearEvento={() => irA('events', { nuevo: '1' })} />
               </Suspense>
             )}
             {activeTab === 'jugadores' && (
@@ -759,6 +784,60 @@ export default function AdminPage() {
 }
 
 type ItemMenu = { id: string; label: string; icon: ReactNode };
+
+/**
+ * Lista del menú con scroll propio: barra fina oscura (.barra-oscura), degradé arriba/abajo
+ * cuando queda algo fuera de la vista y, al abrir el panel o cambiar de sección, el ítem
+ * activo (o el grupo recién abierto) se acomoda para quedar a la vista. Solo mueve el scroll
+ * del menú, nunca el de la página.
+ */
+function NavDesplazable({ children, claveActivo, claveGrupo }: { children: ReactNode; claveActivo: string; claveGrupo: string | null }) {
+  const ref = useRef<HTMLElement>(null);
+  const interior = useRef<HTMLDivElement>(null);
+  const [borde, setBorde] = useState({ arriba: false, abajo: false });
+  const medir = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const arriba = el.scrollTop > 2;
+    const abajo = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+    setBorde((b) => (b.arriba === arriba && b.abajo === abajo ? b : { arriba, abajo }));
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    medir();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    if (interior.current) ro.observe(interior.current);
+    return () => ro.disconnect();
+  }, [medir]);
+  // Deja `objetivo` dentro de la parte visible (con margen para que no quede bajo el degradé).
+  const mostrar = useCallback((objetivo: HTMLElement | null) => {
+    const el = ref.current;
+    if (!el || !objetivo) return;
+    const margen = 36;
+    const caja = el.getBoundingClientRect();
+    const r = objetivo.getBoundingClientRect();
+    if (r.bottom > caja.bottom - margen) el.scrollTop += Math.min(r.bottom - caja.bottom + margen, r.top - caja.top - 8);
+    else if (r.top < caja.top + margen) el.scrollTop -= caja.top + margen - r.top;
+  }, []);
+  useEffect(() => {
+    mostrar(ref.current?.querySelector<HTMLElement>('[aria-current="page"]') ?? null);
+  }, [claveActivo, mostrar]);
+  useEffect(() => {
+    if (claveGrupo) mostrar(ref.current?.querySelector<HTMLElement>(`[data-grupo="${claveGrupo}"]`) ?? null);
+  }, [claveGrupo, mostrar]);
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <nav ref={ref} onScroll={medir} className="barra-oscura min-h-0 flex-1 overflow-y-auto pb-4 pl-4 pr-2" aria-label="Secciones del panel">
+        <div ref={interior} className="space-y-0.5">{children}</div>
+      </nav>
+      <div aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-navy-900 to-transparent transition-opacity', borde.arriba ? 'opacity-100' : 'opacity-0')} />
+      <div aria-hidden className={cn('pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-navy-900 via-navy-900/70 to-transparent transition-opacity', borde.abajo ? 'opacity-100' : 'opacity-0')} />
+    </div>
+  );
+}
 type GrupoMenu = { id: string; label: string; icon: ReactNode; items: ItemMenu[] };
 
 /** Cambiar la contraseña propia (la escribe la persona; nunca se guarda en ningún lado del front). */
