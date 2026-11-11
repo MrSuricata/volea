@@ -15,6 +15,7 @@ const gestor = require('./escenarios/gestor.cjs');
 const arbitro = require('./escenarios/arbitro.cjs');
 const publico = require('./escenarios/publico.cjs');
 const sinBase = require('./escenarios/sinBase.cjs');
+const opc = require('./escenarios/opc.cjs');
 
 const ESCENARIOS = {};
 for (const id of gestor.idsDeEscenarios()) {
@@ -25,6 +26,7 @@ for (const f of ['cruces4', 'auto', 'copas']) ESCENARIOS[`gestor-${f}-1r-celular
 for (const [id, fn] of Object.entries(arbitro.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'arbitro', fn };
 for (const [id, fn] of Object.entries(publico.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'publico', fn };
 for (const [id, fn] of Object.entries(sinBase.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'sin-base', fn };
+for (const [id, fn] of Object.entries(opc.ESCENARIOS)) ESCENARIOS[id] = { grupo: 'opc', fn };
 
 function arriba() {
   return new Promise((res) => {
