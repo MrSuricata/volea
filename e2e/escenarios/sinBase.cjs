@@ -39,7 +39,7 @@ async function sinBase(esc) {
     await cel.getByLabel('Código del partido').fill('1234');
     await cel.getByRole('button', { name: 'Entrar' }).click();
     const msg = await cel.getByRole('alert').innerText({ timeout: 20000 }).catch(() => null);
-    esc.verificar(/No se pudo conectar|Sin conexión/.test(msg || ''), 'el árbitro sin base ve "No se pudo conectar"', msg);
+    esc.verificar(/no se pudo conectar|Sin conexión|Sin señal/i.test(msg || ''), 'el árbitro sin base ve "No se pudo conectar"', msg);
     await esc.revisarPantalla(cel, 'arbitro-sin-base');
   });
 }

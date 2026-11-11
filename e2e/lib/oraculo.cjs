@@ -114,7 +114,12 @@ function crucesFijos(t, formato) {
   if (formato === 'seis') {
     const gen = tablaGeneral(t);
     const [p1, p2, p3] = gen.filter((f) => f.posicion === 1).map((f) => f.parejaId);
-    const [s1, s2, s3] = gen.filter((f) => f.posicion === 2).map((f) => f.parejaId);
+    const segundos = gen.filter((f) => f.posicion === 2);
+    // Regla nueva: si el peor segundo es del grupo del 3er primero (repetirían el partido de grupo),
+    // baja el 2º mejor segundo en su lugar.
+    const grupoP3 = gen.find((f) => f.parejaId === p3).grupo;
+    if (segundos[2].grupo === grupoP3) [segundos[1], segundos[2]] = [segundos[2], segundos[1]];
+    const [s1, s2, s3] = segundos.map((f) => f.parejaId);
     return { cuartos: [[s1, s2], [p3, s3]], esperanEnSemis: [p1, p2] };
   }
   throw new Error(`formato ${formato} sin cruces fijos`);
