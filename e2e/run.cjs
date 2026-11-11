@@ -5,6 +5,7 @@
 //   node e2e/run.cjs gestor-final-1r ...  → escenarios sueltos
 //   node e2e/run.cjs --listar             → lista de escenarios
 // Levanta el dev server en 127.0.0.1:5311 si no está corriendo (y lo apaga al terminar).
+// Otro puerto: E2E_BASE=http://127.0.0.1:5335 node e2e/run.cjs …
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -41,7 +42,7 @@ async function levantarServidor() {
     if (await arriba()) return proc;
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('No levantó el dev server en 5311');
+  throw new Error(`No levantó el dev server en ${BASE}`);
 }
 
 (async () => {

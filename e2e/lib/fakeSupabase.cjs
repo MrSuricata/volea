@@ -82,7 +82,10 @@ class FakeSupabase {
 
   async instalar(context, etiqueta = 'ctx') {
     context.__etiquetaFake = etiqueta;
-    await context.route((url) => !/^https?:\/\/(127\.0\.0\.1|localhost):5311\//.test(url.href) && !url.href.startsWith('data:') && !url.href.startsWith('blob:'), async (route) => {
+    // La app se sirve en el puerto de E2E_BASE (5311 por defecto): todo lo demás se intercepta.
+    const puerto = new URL(process.env.E2E_BASE || 'http://127.0.0.1:5311').port || '5311';
+    const propia = new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${puerto}/`);
+    await context.route((url) => !propia.test(url.href) && !url.href.startsWith('data:') && !url.href.startsWith('blob:'), async (route) => {
       const req = route.request();
       const u = new URL(req.url());
       if (this.cortados.has(etiqueta)) {
