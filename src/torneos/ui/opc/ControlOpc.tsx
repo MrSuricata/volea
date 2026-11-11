@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, ChevronLeft, ChevronRight, CloudOff, ExternalLink, LayoutGrid, List,
   Loader2, Medal, RotateCcw, RotateCw, SkipForward, Square, Trophy, Undo2,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import type { PropsPaso } from '../../TorneosApp';
 import type { PartidoLlave, Torneo } from '../../engine/tipos';
 import { nombreDe } from '../util';
@@ -26,6 +26,7 @@ import './opc.css';
 const PAUSA_AVANCE_MS = 700; // después de marcar: se ve el ganador y recién ahí pasa al próximo
 
 type Lado = 'a' | 'b';
+type Aviso = { n: number; texto: string; deshacerId: string | null };
 
 export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   const dialogos = useDialogos();
@@ -34,6 +35,8 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   const modelo = useMemo(() => armarModelo(partidos), [partidos]);
   const partidosRef = useRef(partidos);
   partidosRef.current = partidos;
+  const terminadoRef = useRef(torneo.fase === 'terminado');
+  terminadoRef.current = torneo.fase === 'terminado';
   const nombre = (id: string) => nombreDe(torneo, id);
 
   const lugar = useMemo(() => leerLugar(torneo.id), [torneo.id]);
@@ -41,13 +44,42 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   const [cruceId, setCruceId] = useState<string | null>(() => cruceInicial(modelo, lugar.cruceId)?.partido.id ?? null);
   const [ronda, setRonda] = useState<number>(() => (lugar.ronda && modelo.rondas.some((r) => r.ronda === lugar.ronda) ? lugar.ronda : modelo.rondaActual));
   // Después de un toque, un rato sin aceptar otro: el doble toque no marca el cruce siguiente.
+  // El estado `pausa` dibuja el bloqueo; la ref lo hace efectivo aunque dos toques lleguen antes
+  // de que React vuelva a dibujar (los dos verían `pausa === null` en su closure).
   const [pausa, setPausa] = useState<string | null>(null);
+  const pausaRef = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
-  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
+  const cruceIdRef = useRef<string | null>(null);
+  // Aviso de abajo ("Ganó X · Deshacer"): propio de esta pantalla, no el toast global de arriba
+  // (ese tapaba el selector de llaves y el estado del guardado en el celular).
+  const [aviso, setAviso] = useState<Aviso | null>(null);
+  const timerAviso = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    if (timerAviso.current !== null) window.clearTimeout(timerAviso.current);
+  }, []);
+
+  function avisar(texto: string, deshacerId: string | null, ms: number) {
+    if (timerAviso.current !== null) window.clearTimeout(timerAviso.current);
+    setAviso({ n: Date.now(), texto, deshacerId });
+    timerAviso.current = window.setTimeout(() => { timerAviso.current = null; setAviso(null); }, ms);
+  }
+  function cerrarAviso() {
+    if (timerAviso.current !== null) window.clearTimeout(timerAviso.current);
+    timerAviso.current = null;
+    setAviso(null);
+  }
+  function cortarPausa() {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    pausaRef.current = null;
+    setPausa(null);
+  }
 
   useEffect(() => { guardarLugar(torneo.id, { vista, cruceId, ronda }); }, [torneo.id, vista, cruceId, ronda]);
 
   const cruce = modelo.cruces.find((c) => c.partido.id === cruceId) ?? cruceInicial(modelo, null);
+  cruceIdRef.current = cruce?.partido.id ?? null;
 
   // Al abrir, la herramienta queda arriba de todo (debajo de la barra del panel).
   const raiz = useRef<HTMLDivElement>(null);
@@ -81,6 +113,11 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
   }
 
   async function deshacer(partidoId: string) {
+    cerrarAviso();
+    // Con el torneo dado por terminado no se toca nada (el aviso podía seguir a la vista).
+    if (terminadoRef.current) return;
+    // Si todavía no pasó al cruce siguiente, ya no pasa: se queda en el que se deshizo.
+    cortarPausa();
     const actual = armarModelo(partidosRef.current).cruces.find((c) => c.partido.id === partidoId);
     if (!actual || actual.estado !== 'jugado') return;
     if (borradosSiMarco(partidosRef.current, partidoId, null) > 0) {
@@ -94,7 +131,7 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
 
   /** El toque sobre un nombre. `avanzar`: en la vista cruce por cruce, pasar solo al próximo. */
   async function tocar(c: Cruce, lado: Lado, avanzar: boolean) {
-    if (pausa || torneo.fase === 'terminado') return;
+    if (pausaRef.current || terminadoRef.current) return;
     const id = lado === 'a' ? c.idA : c.idB;
     if (!id || c.estado === 'esperando') return;
     if (c.estado === 'jugado') {
@@ -102,30 +139,31 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
       const otro = lado === 'a' ? c.idB! : c.idA!;
       const ok = await confirmarCascada(c.partido.id, lado, 'Cambiar ganador', `Estaba cargado que ganó ${nombre(otro)}. ¿Cambiarlo a ${nombre(id)}?`, 'Cambiar ganador');
       if (!ok) return;
+      // Mientras estaba abierto el diálogo pudo llegar otra versión (otro equipo) o terminarse.
+      if (terminadoRef.current) return;
+      const ahora = armarModelo(partidosRef.current).cruces.find((x) => x.partido.id === c.partido.id);
+      if (!ahora || ahora.idA !== c.idA || ahora.idB !== c.idB) return;
       aplicar(c.partido.id, lado);
-      toast(`Corregido: ganó ${nombre(id)}`, { id: 'opc-marca', duration: 4000 });
+      avisar(`Corregido: ganó ${nombre(id)}`, null, 4000);
       return;
     }
-    const ahora = new Date().toISOString();
-    const despues = armarModelo(marcar(partidosRef.current, c.partido.id, lado, ahora));
+    pausaRef.current = c.partido.id;
     aplicar(c.partido.id, lado);
-    // id fijo: cada toque reemplaza el aviso anterior (no se apilan tapando la barra de arriba)
-    toast(`Ganó ${nombre(id)}`, {
-      id: 'opc-marca',
-      duration: 5000,
-      action: { label: 'Deshacer', onClick: () => void deshacer(c.partido.id) },
-    });
+    // cada toque reemplaza el aviso anterior (no se apilan)
+    avisar(`Ganó ${nombre(id)}`, c.partido.id, 5000);
     setPausa(c.partido.id);
+    if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
+      pausaRef.current = null;
       setPausa(null);
-      if (avanzar) {
-        const prox = proximoListo(despues, c.partido.id);
-        if (prox) { setCruceId(prox.partido.id); setRonda(prox.ronda); } else {
-          const final = despues.cruces[despues.cruces.length - 1];
-          if (final) setCruceId(final.partido.id);
-        }
-      }
+      // Solo si sigue mirando el cruce que marcó (si tocó Anterior/Siguiente o abrió otro en
+      // la pausa, no se lo mueve), y con la llave de AHORA: en 0,7 s pudo llegar otra versión.
+      if (!avanzar || cruceIdRef.current !== c.partido.id) return;
+      const despues = armarModelo(partidosRef.current);
+      const prox = proximoListo(despues, c.partido.id);
+      const destino = prox ?? despues.cruces[despues.cruces.length - 1];
+      if (destino) { setCruceId(destino.partido.id); setRonda(destino.ronda); }
     }, PAUSA_AVANCE_MS);
   }
 
@@ -197,7 +235,14 @@ export default function ControlOpc({ torneo, actualizar }: PropsPaso) {
           onTocar={(lado) => void tocar(cruce, lado, true)}
           onDeshacer={() => void deshacer(cruce.partido.id)}
           onIr={(c) => { setCruceId(c.partido.id); setRonda(c.ronda); }}
+          aviso={aviso && <AvisoMarca aviso={aviso} onDeshacer={(id) => void deshacer(id)} onCerrar={cerrarAviso} />}
         />
+      )}
+      {vista !== 'cruce' && aviso && createPortal(
+        <div className="opc-aviso-flotante pointer-events-none fixed inset-x-0 z-40 mx-auto max-w-xl px-3">
+          <AvisoMarca aviso={aviso} onDeshacer={(id) => void deshacer(id)} onCerrar={cerrarAviso} />
+        </div>,
+        document.body,
       )}
       {vista === 'ronda' && (
         <VistaRonda
@@ -398,7 +443,7 @@ function rolDe(c: Cruce, id: string | null): 'ganador' | 'perdedor' | 'listo' | 
 
 // ─── Vista cruce por cruce ───────────────────────────────────────────────────
 
-function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshacer, onIr }: {
+function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshacer, onIr, aviso }: {
   torneo: Torneo;
   modelo: ModeloOpc;
   cruce: Cruce;
@@ -407,6 +452,8 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
   onTocar: (lado: Lado) => void;
   onDeshacer: () => void;
   onIr: (c: Cruce) => void;
+  /** El aviso "Ganó X · Deshacer": va pegado arriba de Anterior/Siguiente, nunca encima. */
+  aviso: ReactNode;
 }) {
   const ronda = modelo.rondas.find((r) => r.ronda === cruce.ronda)!;
   const i = cruce.orden - 1;
@@ -473,6 +520,10 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
         </div>
       </div>
 
+      {/* Anterior/Siguiente quedan a mano abajo (encima de la barra del panel) y el aviso del
+          último toque aparece justo arriba de ellos, sin taparlos. */}
+      <div className="opc-pie-cruce sticky z-20 -mx-4 space-y-2 bg-gray-50/95 px-4 pb-2 pt-2 backdrop-blur md:mx-0 md:rounded-xl md:px-0">
+      {aviso}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -490,6 +541,7 @@ function VistaCruce({ torneo, modelo, cruce, pausa, bloqueado, onTocar, onDeshac
         >
           Siguiente <ChevronRight size={20} aria-hidden />
         </button>
+      </div>
       </div>
 
       {proximo ? (
@@ -527,6 +579,32 @@ function PasaDirecto({ torneo, modelo, ronda }: { torneo: Torneo; modelo: Modelo
   );
 }
 
+function AvisoMarca({ aviso, onDeshacer, onCerrar }: { aviso: Aviso; onDeshacer: (id: string) => void; onCerrar: () => void }) {
+  return (
+    <div
+      key={aviso.n}
+      role="status"
+      aria-live="polite"
+      data-opc-aviso
+      className="opc-aviso pointer-events-auto flex min-h-[52px] items-center gap-2 rounded-xl border border-lime-400 bg-navy-900 py-1.5 pl-4 pr-1.5 text-white shadow-lg"
+    >
+      <CheckCircle2 size={18} className="shrink-0 text-lime-400" aria-hidden />
+      <p className="opc-nombre min-w-0 flex-1 font-display text-[15px] font-bold leading-tight">{aviso.texto}</p>
+      {aviso.deshacerId ? (
+        <button
+          type="button"
+          onClick={() => onDeshacer(aviso.deshacerId!)}
+          className="opc-toque inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 font-display text-[14px] font-bold text-navy-900"
+        >
+          <Undo2 size={16} aria-hidden /> Deshacer
+        </button>
+      ) : (
+        <button type="button" onClick={onCerrar} className="h-11 shrink-0 rounded-lg px-3 font-display text-[13px] font-bold text-white/80">OK</button>
+      )}
+    </div>
+  );
+}
+
 // ─── Vista por ronda ─────────────────────────────────────────────────────────
 
 function VistaRonda({ torneo, modelo, ronda, setRonda, bloqueado, onTocar, onAbrir }: {
@@ -544,6 +622,13 @@ function VistaRonda({ torneo, modelo, ronda, setRonda, bloqueado, onTocar, onAbr
     correrHasta(pestanas.current, pestanas.current?.querySelector<HTMLElement>('[aria-checked="true"]'));
   }, [ronda]);
   if (!r) return null;
+  // Primero lo que falta jugar (en orden de juego) y abajo lo jugado: con 16 cruces el próximo
+  // queda a la vista sin bajar con el dedo. Cada tarjeta conserva su número de cruce.
+  const pendientes = r.cruces.filter((c) => c.estado !== 'jugado');
+  const jugados = r.cruces.filter((c) => c.estado === 'jugado');
+  const tarjeta = (c: Cruce) => (
+    <TarjetaCruceRonda key={c.partido.id} torneo={torneo} modelo={modelo} c={c} bloqueado={bloqueado} onTocar={onTocar} onAbrir={onAbrir} />
+  );
   return (
     <section aria-label="Ronda" className="space-y-3">
       <div ref={pestanas} role="radiogroup" aria-label="Ronda" className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
@@ -576,36 +661,61 @@ function VistaRonda({ torneo, modelo, ronda, setRonda, bloqueado, onTocar, onAbr
         <p className="font-display text-[14px] font-bold tabular-nums text-gray-600">{r.jugados}/{r.cruces.length} jugados · {r.vivos} jugadores</p>
       </div>
 
-      <ol className="grid gap-3 md:grid-cols-2">
-        {r.cruces.map((c) => (
-          <li key={c.partido.id} className={cn('rounded-xl border bg-white p-2', c.estado === 'listo' ? 'border-navy-700' : 'border-gray-200')}>
-            <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
-              <span className="font-display text-[13px] font-bold uppercase tracking-wide text-gray-500">Cruce {c.numero}</span>
-              <button type="button" onClick={() => onAbrir(c)} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 font-display text-[13px] font-bold text-navy-700">
-                Ver grande <ChevronRight size={16} aria-hidden />
-              </button>
-            </div>
-            <div className="grid gap-1.5">
-              {(['a', 'b'] as const).map((lado) => {
-                const id = lado === 'a' ? c.idA : c.idB;
-                const slot = lado === 'a' ? c.partido.a : c.partido.b;
-                return (
-                  <BotonJugador
-                    key={lado}
-                    nombre={id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}
-                    rol={rolDe(c, id)}
-                    disabled={bloqueado}
-                    onClick={() => onTocar(c, lado)}
-                    etiqueta={id ? `Ganó ${nombreDe(torneo, id)} (cruce ${c.numero})` : 'Todavía no se sabe'}
-                  />
-                );
-              })}
-            </div>
-          </li>
-        ))}
-      </ol>
+      {pendientes.length > 0 && (
+        <ol aria-label="Cruces por jugar" className="grid gap-3 md:grid-cols-2">
+          {pendientes.map(tarjeta)}
+        </ol>
+      )}
+      {jugados.length > 0 && (
+        <>
+          <div role="separator" className="flex items-center gap-3 pt-1 font-display text-[12px] font-bold uppercase tracking-[0.12em] text-gray-500">
+            <span className="h-px flex-1 bg-gray-300" aria-hidden />
+            Jugados · {jugados.length}
+            <span className="h-px flex-1 bg-gray-300" aria-hidden />
+          </div>
+          <ol aria-label="Cruces jugados" className="grid gap-3 md:grid-cols-2">
+            {jugados.map(tarjeta)}
+          </ol>
+        </>
+      )}
       <PasaDirecto torneo={torneo} modelo={modelo} ronda={r} />
     </section>
+  );
+}
+
+function TarjetaCruceRonda({ torneo, modelo, c, bloqueado, onTocar, onAbrir }: {
+  torneo: Torneo;
+  modelo: ModeloOpc;
+  c: Cruce;
+  bloqueado: boolean;
+  onTocar: (c: Cruce, lado: Lado) => void;
+  onAbrir: (c: Cruce) => void;
+}) {
+  return (
+    <li data-cruce={c.numero} className={cn('rounded-xl border bg-white p-2', c.estado === 'listo' ? 'border-navy-700' : 'border-gray-200')}>
+      <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
+        <span className="font-display text-[13px] font-bold uppercase tracking-wide text-gray-500">Cruce {c.numero}</span>
+        <button type="button" onClick={() => onAbrir(c)} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 font-display text-[13px] font-bold text-navy-700">
+          Ver grande <ChevronRight size={16} aria-hidden />
+        </button>
+      </div>
+      <div className="grid gap-1.5">
+        {(['a', 'b'] as const).map((lado) => {
+          const id = lado === 'a' ? c.idA : c.idB;
+          const slot = lado === 'a' ? c.partido.a : c.partido.b;
+          return (
+            <BotonJugador
+              key={lado}
+              nombre={id ? nombreDe(torneo, id) : describirLugar(modelo, slot)}
+              rol={rolDe(c, id)}
+              disabled={bloqueado}
+              onClick={() => onTocar(c, lado)}
+              etiqueta={id ? `Ganó ${nombreDe(torneo, id)} (cruce ${c.numero})` : 'Todavía no se sabe'}
+            />
+          );
+        })}
+      </div>
+    </li>
   );
 }
 
