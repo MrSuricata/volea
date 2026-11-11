@@ -36,7 +36,7 @@ function arriba() {
 async function levantarServidor() {
   if (await arriba()) return null;
   const raiz = path.resolve(__dirname, '..');
-  const proc = spawn('npx', ['vite', '--port', '5311', '--strictPort', '--host', '127.0.0.1'], { cwd: raiz, stdio: 'ignore', detached: true });
+  const proc = spawn('npx', ['vite', '--config', 'e2e/vite.e2e.config.mjs'], { cwd: raiz, stdio: 'ignore', detached: true });
   for (let i = 0; i < 60; i++) {
     if (await arriba()) return proc;
     await new Promise((r) => setTimeout(r, 500));
@@ -52,10 +52,11 @@ async function levantarServidor() {
   }
   let ids = args.length === 0 ? Object.keys(ESCENARIOS) : args.flatMap((a) => (ESCENARIOS[a] ? [a] : Object.keys(ESCENARIOS).filter((id) => ESCENARIOS[id].grupo === a)));
   if (ids.length === 0) { console.error('No hay escenarios con ese nombre. Usá --listar.'); process.exit(2); }
-  const servidor = await levantarServidor();
+  let servidor = await levantarServidor();
   const resumen = [];
   try {
     for (const id of ids) {
+      if (!(await arriba())) { const s2 = await levantarServidor(); if (s2) servidor = s2; }
       const t0 = Date.now();
       process.stdout.write(`▶ ${id} … `);
       const r = await correrEscenario(id, ESCENARIOS[id].fn);
