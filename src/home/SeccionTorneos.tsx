@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Trophy } from 'lucide-react';
-import { listarJugadoresPublicos, listarTorneosPublicos, obtenerConfigPublico } from '../torneos/publico/datos';
+import { listarJugadoresPublicos, obtenerConfigPublico } from '../torneos/publico/datos';
+import { torneosPublicosCompartidos } from './torneosCompartidos';
 import { EncabezadoSeccion } from '../ui/EncabezadoSeccion';
 import { LineasCancha } from '../ui/LineasCancha';
 import { Contador } from '../ui/Contador';
@@ -27,7 +28,7 @@ export default function SeccionTorneos() {
     let vigente = true;
     void (async () => {
       try {
-        const [rt, rj, rc] = await Promise.all([listarTorneosPublicos(), listarJugadoresPublicos(), obtenerConfigPublico()]);
+        const [rt, rj, rc] = await Promise.all([torneosPublicosCompartidos(), listarJugadoresPublicos(), obtenerConfigPublico()]);
         if (!vigente) return;
         if (rt.error || rj.error) { setEstado({ tipo: 'vacio' }); return; }
         const resumen = resumenTorneosHome(rt.torneos, rj.jugadores, rc.config, Date.now());
@@ -136,13 +137,16 @@ const ETIQUETA_STAT = 'font-display text-[10px] font-bold uppercase leading-snug
 
 function FranjaStats({ stats }: { stats: StatsHome }) {
   const items: { valor: number; etiqueta: string }[] = [
-    { valor: stats.jugadores, etiqueta: 'Jugadores con puntos' },
-    { valor: stats.categoriasJugadas, etiqueta: 'Categorías jugadas' },
-    { valor: stats.fechas, etiqueta: 'Fechas' },
-  ];
+    { valor: stats.jugadores, etiqueta: stats.jugadores === 1 ? 'Jugador con puntos' : 'Jugadores con puntos' },
+    { valor: stats.categoriasJugadas, etiqueta: stats.categoriasJugadas === 1 ? 'Categoría jugada' : 'Categorías jugadas' },
+    { valor: stats.fechas, etiqueta: stats.fechas === 1 ? 'Fecha' : 'Fechas' },
+    // Un "0" grande en la primera cifra (p. ej. sin padrón vinculado todavía) se lee como
+    // "acá no juega nadie": las cifras en cero no se muestran, y sin ninguna, no hay franja.
+  ].filter((it) => it.valor > 0);
+  if (items.length === 0) return null;
   return (
     <Reveal className="mb-8 md:mb-12" delay={80}>
-      <dl className="grid grid-cols-3 border-y border-white/10">
+      <dl className={`grid border-y border-white/10 ${items.length === 3 ? 'grid-cols-3' : items.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
         {items.map((it, i) => (
           // dt antes que dd (lo pide el HTML); flex-col-reverse lo muestra número arriba.
           <div key={it.etiqueta} className={`flex flex-col-reverse justify-end gap-2 py-4 md:py-8 ${i === 0 ? 'pr-3' : 'border-l border-white/10 px-3 sm:px-6 md:px-10'}`}>

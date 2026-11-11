@@ -5,6 +5,7 @@ import { LazyMotion, MotionConfig, m, useScroll, useTransform } from 'framer-mot
 import { Reveal, StaggerGrid, StaggerItem } from './ui/movimiento';
 import { EncabezadoSeccion } from './ui/EncabezadoSeccion';
 import { SeccionTorneosDiferida } from './home/SeccionTorneosDiferida';
+import { AvisoTorneoHero } from './home/AvisoTorneoHero';
 import {
   ShoppingCart, Menu, X, Search, Star, MapPin, Calendar, Phone, Mail, Instagram, MessageCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, Package, Users, BarChart3, ArrowRight, Heart, Shield, Zap, Trophy, Eye, ExternalLink, Check, AlertCircle, Home, CalendarDays, Settings, ChevronDown, XCircle, Globe, Newspaper, Loader2, Images, CreditCard, ClipboardList, Truck, Share2,
 } from 'lucide-react';
@@ -1486,6 +1487,15 @@ function HomePage() {
 
         <m.div style={{ y: heroTextY }} className="relative z-10 mx-auto w-full max-w-7xl px-4 py-20 md:py-24">
           <div className="max-w-4xl">
+            {/* Torneo en vivo o el próximo de la agenda, arriba de todo (ver AvisoTorneoHero). */}
+            <AvisoTorneoHero
+              proximo={torneoDestacado ? {
+                etiqueta: torneoEnCurso ? 'Se juega hoy' : 'Se viene',
+                nombre: torneoDestacado.name,
+                fecha: diasCortos(torneoDestacado.date, torneoDestacado.endDate),
+                to: torneoInscribe ? `/inscripcion/${torneoDestacado.id}` : '/eventos',
+              } : null}
+            />
             <p className="hero-enter hero-enter-1 mb-5 inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-400 opacity-0 md:mb-6 md:text-sm">
               <span aria-hidden className="h-px w-8 bg-lime-400" />
               La primera marca de pickleball de Uruguay
@@ -1690,7 +1700,7 @@ function HomePage() {
                     {/* Etiqueta según lo que sea (torneo/clínica/social) y según
                         el momento: mientras se juega no puede decir "próximo". */}
                     <span className="inline-flex items-center gap-2 rounded-full bg-lime-400 px-3 py-1 font-display text-xs font-black uppercase tracking-wider text-navy-900">
-                      {torneoEnCurso ? 'Se está jugando' : `Próximo ${categoriaEvento(torneoDestacado.category)}`}
+                      {torneoEnCurso ? 'Se está jugando' : `${torneoDestacado.category === 'clinic' ? 'Próxima' : 'Próximo'} ${categoriaEvento(torneoDestacado.category)}`}
                     </span>
                     <h2 className="mt-3 font-display text-3xl font-black uppercase leading-none text-white sm:text-4xl">
                       {torneoDestacado.name}
@@ -1733,14 +1743,14 @@ function HomePage() {
                     {waTorneo && torneoDestacado.phone && (
                       <a
                         href={`tel:${torneoDestacado.phone.replace(/\s/g, '')}`}
-                        className="text-center font-display text-sm font-bold text-white transition-colors hover:text-lime-400"
+                        className="py-2 text-center font-display text-sm font-bold text-white transition-colors hover:text-lime-400"
                       >
                         {torneoDestacado.phone}
                       </a>
                     )}
                     <Link
                       to="/eventos"
-                      className="text-center text-xs font-semibold text-gray-400 underline-offset-2 transition-colors hover:text-white hover:underline"
+                      className="py-2.5 text-center text-sm font-semibold text-gray-300 underline-offset-2 transition-colors hover:text-white hover:underline"
                     >
                       Ver todos los eventos
                     </Link>
