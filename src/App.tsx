@@ -1811,6 +1811,9 @@ function HomePage() {
       )}
 
       {/* ── 4. Categorías ───────────────────────────────────────────────── */}
+      {/* Mismo criterio que Destacados: con los datos ya cargados y ninguna categoría con
+          productos, el título quedaba solo sobre un hueco gris. */}
+      {(!datosListos || categoriasConProductos(categories, products).length > 0) && (
       <section className="bg-gray-50 py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
           <EncabezadoSeccion eyebrow="Encontrá lo tuyo" titulo="Explorá por categoría" />
@@ -1857,6 +1860,7 @@ function HomePage() {
           </Reveal>
         </div>
       </section>
+      )}
 
       {/* ── 4b. Torneos: campeones de la última fecha, top 5 del año y números, calculados
           de los resultados reales. Baja su código y sus datos recién al acercarse. ── */}
@@ -2220,7 +2224,7 @@ function ShopPage() {
         <button
           onClick={() => setSelectedCategory('')}
           aria-pressed={!selectedCategory}
-          className={`shrink-0 px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+          className={`shrink-0 min-h-[44px] px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
             !selectedCategory ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
           }`}
         >
@@ -2231,7 +2235,7 @@ function ShopPage() {
             key={cat.id}
             onClick={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
             aria-pressed={selectedCategory === cat.id}
-            className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-full font-display text-sm font-semibold transition-colors ${
+            className={`shrink-0 min-h-[44px] whitespace-nowrap px-4 py-2.5 rounded-full font-display text-sm font-semibold transition-colors ${
               selectedCategory === cat.id ? 'bg-navy-700 text-lime-400' : 'bg-gray-100 text-navy-700 hover:bg-gray-200'
             }`}
           >
@@ -2242,7 +2246,7 @@ function ShopPage() {
 
       {/* Product Grid */}
       {filtered.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">
+        <div className="text-center py-20 text-gray-500">
           {!datosListos && products.length === 0 ? (
             // Los datos siguen viajando (red lenta): decir "no hay" acá sería mentira. Esqueleto
             // con la forma de las tarjetas (no un ícono): la página ya tiene su forma final y
@@ -2258,8 +2262,34 @@ function ShopPage() {
             </div>
           ) : (
             <>
-              <Package size={64} strokeWidth={1} className="mx-auto mb-4" />
-              <p className="font-display text-lg">No encontramos productos con esa búsqueda. Probá otra categoría.</p>
+              <Package size={64} strokeWidth={1} className="mx-auto mb-4 text-gray-400" />
+              {/* Sin búsqueda ni categoría elegida, el problema no es la búsqueda: no hay
+                  productos publicados. Antes decía "probá otra categoría" igual. */}
+              {searchQuery || selectedCategory ? (
+                <>
+                  <p className="font-display text-lg">No encontramos productos con esa búsqueda.</p>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setSelectedCategory(''); }}
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg border border-navy-700 px-5 py-3 font-display text-sm font-bold text-navy-700 hover:bg-navy-50"
+                  >
+                    Ver toda la colección
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="font-display text-lg">Estamos cargando la colección nueva.</p>
+                  <p className="mt-2 text-sm">Mientras tanto, preguntanos por WhatsApp qué hay disponible.</p>
+                  <a
+                    href={`https://wa.me/${WHATSAPP_NUMBER}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg bg-lime-400 px-5 py-3 font-display text-sm font-bold text-navy-900 hover:bg-lime-300"
+                  >
+                    <MessageCircle size={16} /> Escribinos
+                  </a>
+                </>
+              )}
             </>
           )}
         </div>
