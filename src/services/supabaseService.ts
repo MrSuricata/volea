@@ -8,6 +8,7 @@ import type { JugadorPadron } from '../utils/dupr';
 import type { CobroPedido } from '../utils/cobroPedido';
 import type { Cambio, CambioInput } from '../utils/cambios';
 import type { CajaVoleaMov } from '../utils/cajaVolea';
+import type { Cupon, CuponTipo, CuponValido } from '../utils/cupones';
 import type { Product, Event, Order, Category, Club, Announcement, Post, StandingEntry, Inscripcion, InscripcionInput, LedgerEntry, Promo, SocioMove, SocioMoveInput, SocioLiquidacionMove, SocioName, Tenedor, VentaCajaInput, Compra, CompraItem, CompraArchivo, RecepcionItem, Tarea, MiembroEquipo, GastoPendiente, GastoPendienteInput, TanteadorPartido } from '../types';
 
 // ── Techo de 15s para TODAS las escrituras del admin ──
@@ -710,7 +711,7 @@ export const SupabaseService = {
    * Sin isSupabaseConnected(): misma regla que las escrituras del admin — se
    * intenta siempre que haya cliente, el probe frío da falsos negativos.
    */
-  async inscribirEvento(i: InscripcionInput): Promise<{ ok: boolean; actualizada?: boolean; error?: string }> {
+  async inscribirEvento(i: InscripcionInput): Promise<{ ok: boolean; id?: string; actualizada?: boolean; error?: string }> {
     if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
     const { data, error } = await conTechoEscritura(supabase.rpc('inscribir_evento', {
       p_event_id: i.eventId,
@@ -729,6 +730,7 @@ export const SupabaseService = {
     }
     return {
       ok: data?.ok === true,
+      id: typeof data?.id === 'string' ? data.id : undefined,
       actualizada: data?.actualizada === true,
       error: typeof data?.error === 'string' ? data.error : undefined,
     };
@@ -786,6 +788,8 @@ export const SupabaseService = {
       pagoMetodo: row.pago_metodo ?? null,
       pagoDeuda: row.pago_deuda !== null && row.pago_deuda !== undefined ? Number(row.pago_deuda) : null,
       pagoAt: row.pago_at ?? null,
+      cupon: row.cupon ?? null,
+      cuponPercent: row.cupon_percent !== null && row.cupon_percent !== undefined ? Number(row.cupon_percent) : null,
       createdAt: row.created_at || '',
     }));
   },
@@ -979,6 +983,55 @@ export const SupabaseService = {
       if (Array.isArray(j.alias)) for (const a of j.alias) if (typeof a === 'string' && a) out.push(a);
     }
     return out;
+  },
+
+  // ── Cupones (v38) ──
+  // De un solo uso y sin login: la base valida y gasta el código (RPC security definer).
+  /** ¿Sirve este código? No lo gasta. */
+  async consultarCupon(codigo: string, tipo: CuponTipo): Promise<{ ok: true; cupon: CuponValido } | { ok: false; error: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoLectura(supabase.rpc('cupon_consultar', { p_codigo: codigo, p_tipo: tipo }));
+    if (error) {
+      console.error('Error consultando cupón:', error);
+      return { ok: false, error: 'No pudimos verificar el código. Probá de nuevo en un rato.' };
+    }
+    if (data?.ok !== true) return { ok: false, error: typeof data?.error === 'string' ? data.error : 'Código inválido' };
+    return { ok: true, cupon: { codigo: data.codigo, tipo: data.tipo, percent: Number(data.percent), etiqueta: data.etiqueta || '' } };
+  },
+
+  /** Gasta un cupón de tienda en un pedido. */
+  async canjearCuponTienda(codigo: string, pedido: string, nombre: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('cupon_canjear_tienda', { p_codigo: codigo, p_pedido: pedido, p_nombre: nombre }));
+    if (error) { console.error('Error canjeando cupón:', error); return { ok: false, error: 'red' }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  /** Gasta un cupón de inscripción y lo deja anotado en la inscripción (el % lo descuenta el cobro). */
+  async canjearCuponInscripcion(codigo: string, inscripcionId: string): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('cupon_canjear_inscripcion', { p_codigo: codigo, p_inscripcion: inscripcionId }));
+    if (error) { console.error('Error canjeando cupón:', error); return { ok: false, error: 'red' }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
+  },
+
+  /** Panel: todos los cupones con su estado. null = no se pudo leer (¿falta v38?). */
+  async getCupones(): Promise<Cupon[] | null> {
+    if (!supabase) return null;
+    const { data, error } = await conTechoLectura(supabase.from('cupones').select('*').order('codigo'));
+    if (error) { console.error('Error leyendo cupones:', error); return null; }
+    return (data || []).map(r => ({
+      codigo: r.codigo, tipo: r.tipo, percent: Number(r.percent), etiqueta: r.etiqueta || '',
+      vence: r.vence ?? null, usadoAt: r.usado_at ?? null, usadoPor: r.usado_por ?? null, usadoRef: r.usado_ref ?? null,
+    }));
+  },
+
+  /** Panel: marcar un cupón como usado en persona, o liberarlo. */
+  async adminCupon(codigo: string, accion: 'usar' | 'liberar', nombre = '', ref = ''): Promise<{ ok: boolean; error?: string }> {
+    if (!supabase) return { ok: false, error: 'Sin conexión con el servidor' };
+    const { data, error } = await conTechoEscritura(supabase.rpc('admin_cupon', { p_codigo: codigo, p_accion: accion, p_nombre: nombre, p_ref: ref }));
+    if (error) { console.error('Error en cupón:', error); return { ok: false, error: 'No se pudo (¿sesión vencida?)' }; }
+    return { ok: data?.ok === true, error: typeof data?.error === 'string' ? data.error : undefined };
   },
 
   // ── Promos ──

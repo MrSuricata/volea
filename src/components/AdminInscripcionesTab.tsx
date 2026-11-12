@@ -14,6 +14,7 @@ import {
   parejaDe, resumenArmado, MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
 } from '../utils/inscripciones';
 import { distancia, normalizar } from '../utils/nombres';
+import { costoConCupon } from '../utils/cupones';
 import {
   AreaTexto, BarraFiltros, Boton, BotonIcono, Campo, CargandoFilas, Chip, Confirmar, Dialogo, EncabezadoPagina, Entrada,
   EntradaPlata, ErrorEstado, Insignia, Segmentado, Selector, Vacio, type TonoInsignia,
@@ -303,7 +304,7 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
   const enDeuda = activos.reduce((s, i) => s + (i.pagoAt ? (i.pagoDeuda ?? 0) : 0), 0);
   const sinRegistrar = tarifa ? activos.filter(i => !i.pagoAt) : [];
   const sinRegistrarTotal = tarifa
-    ? sinRegistrar.reduce((s, i) => s + costoInscripcion(categoriasDe(i).length, tarifa), 0)
+    ? sinRegistrar.reduce((s, i) => s + costoConCupon(categoriasDe(i).length, tarifa, i.cuponPercent), 0)
     : 0;
   const nCobrados = activos.filter(i => estadoPagoDe(i) === 'cobrados').length;
   const nDeudores = activos.filter(i => estadoPagoDe(i) === 'deudores').length;
@@ -357,7 +358,8 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
 
   const insigniaPago = (i: Inscripcion) => {
     if (!tarifa || i.estado === 'baja') return null;
-    if (!i.pagoAt) return <Insignia>a cobrar {money(costoInscripcion(categoriasDe(i).length, tarifa))}</Insignia>;
+    if (!i.pagoAt && i.cupon && i.cuponPercent === 100) return <Insignia tono="info">cupón: gratis</Insignia>;
+    if (!i.pagoAt) return <Insignia>{i.cupon ? `cupón −${i.cuponPercent}% · ` : ''}a cobrar {money(costoConCupon(categoriasDe(i).length, tarifa, i.cuponPercent))}</Insignia>;
     if (i.pagoMetodo === 'freepass') return <Insignia tono="info">Free pass</Insignia>;
     if ((i.pagoDeuda ?? 0) > 0) return <Insignia tono="atencion">pagó {money(i.pagoMonto ?? 0)} · debe {money(i.pagoDeuda ?? 0)}</Insignia>;
     return <Insignia tono="bien">pagó {money(i.pagoMonto ?? 0)} · {METODO_LBL[i.pagoMetodo ?? ''] ?? i.pagoMetodo}</Insignia>;
@@ -543,12 +545,12 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
                       </div>
                     ))}
                   {[...sinRegistrar]
-                    .sort((a, b) => costoInscripcion(categoriasDe(b).length, tarifa) - costoInscripcion(categoriasDe(a).length, tarifa))
+                    .sort((a, b) => costoConCupon(categoriasDe(b).length, tarifa, b.cuponPercent) - costoConCupon(categoriasDe(a).length, tarifa, a.cuponPercent))
                     .map(i => (
                       <div key={i.id} className="flex min-h-[52px] items-center gap-2 py-1.5 text-sm">
                         <span className="min-w-0 flex-1 truncate font-semibold text-navy-700">{i.nombre}</span>
                         <span className="whitespace-nowrap font-bold tabular-nums text-gray-600">
-                          {money(costoInscripcion(categoriasDe(i).length, tarifa))}
+                          {money(costoConCupon(categoriasDe(i).length, tarifa, i.cuponPercent))}
                         </span>
                         <Boton variante="secundario" icono={<CircleDollarSign size={16} />} onClick={() => setPagando(i)} disabled={cambiando.has(i.id)} className="px-3">
                           Cobrar
@@ -1147,7 +1149,8 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
   onDone: () => void;
 }) {
   const nCats = categoriasDe(inscripcion).length;
-  const costo = costoInscripcion(nCats, tarifa);
+  // v38: con cupón el costo ya viene descontado (el server descuenta lo mismo).
+  const costo = costoConCupon(nCats, tarifa, inscripcion.cuponPercent);
   const extras = Math.max(0, nCats - tarifa.incluye);
   const [metodo, setMetodo] = useState<'efectivo' | 'mp' | 'transferencia' | 'freepass' | null>(null);
   // Plata con EntradaPlata: "1.200" son mil doscientos (el type=number lo leía como 1,2).
@@ -1195,6 +1198,11 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
             {extras > 0 && <> + {extras} × {money(tarifa.extra)}</>}
           </p>
           <p className="mt-0.5 font-display text-2xl font-black tabular-nums text-navy-700">{money(costo)}</p>
+          {inscripcion.cupon && (
+            <p className="mt-1 text-[13px] font-semibold text-lime-800">
+              Cupón {inscripcion.cupon} (−{inscripcion.cuponPercent}%) — sin cupón eran {money(costoInscripcion(nCats, tarifa))}
+            </p>
+          )}
         </div>
 
         <div>

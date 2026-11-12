@@ -263,6 +263,9 @@ export interface Inscripcion {
   pagoMetodo: 'mp' | 'efectivo' | 'transferencia' | 'freepass' | null;
   pagoDeuda: number | null;
   pagoAt: string | null;
+  /** v38: cupón canjeado al inscribirse (el cobro descuenta su %). */
+  cupon?: string | null;
+  cuponPercent?: number | null;
   createdAt: string;
 }
 

@@ -19,6 +19,8 @@ import { quitarPorId, reemplazarOAgregar, type ResultadoBorrado } from './utils/
 import { almacenLocal, almacenSesion } from './utils/almacen';
 import { useStore, StoreContext } from './tienda/store';
 import { usePromo } from './tienda/promo';
+import { CampoCupon } from './tienda/CampoCupon';
+import { costoConCupon, totalesConCupon, type CuponValido } from './utils/cupones';
 import { conFotoPrimero, destacados, fotoDeCategoria, relacionados } from './tienda/catalogo';
 import GaleriaProducto from './tienda/GaleriaProducto';
 import { ajusteFoto } from './tienda/galeria';
@@ -3254,7 +3256,9 @@ function InscripcionPage() {
   // mixto y su categoría de género carga un compañero para cada una.
   const [parejas, setParejas] = useState<Record<string, string>>({});
   const [enviando, setEnviando] = useState(false);
-  const [listo, setListo] = useState<null | { actualizada: boolean }>(null);
+  const [listo, setListo] = useState<null | { actualizada: boolean; cuponAplicado: boolean }>(null);
+  // Cupón de inscripción (v38): se consulta al aplicarlo y se gasta después de inscribirse.
+  const [cupon, setCupon] = useState<CuponValido | null>(null);
   const [inscriptos, setInscriptos] = useState<number | null>(null);
   // OJO: acá NO hay datalist de nombres a propósito (pedido de Brian 17/8):
   // autocompletar en el form PÚBLICO dejaba enumerar todos los nombres del
@@ -3332,7 +3336,16 @@ function InscripcionPage() {
         toast.error(r.error || 'No pudimos enviar tu inscripción. Probá de nuevo.');
         return;
       }
-      setListo({ actualizada: r.actualizada === true });
+      // La inscripción ya quedó: si el cupón falla, se avisa pero no se deshace nada.
+      let cuponAplicado = false;
+      if (cupon && r.id) {
+        const c = await SupabaseService.canjearCuponInscripcion(cupon.codigo, r.id);
+        cuponAplicado = c.ok;
+        if (!c.ok) {
+          toast.error(`Te inscribimos, pero el código ${cupon.codigo} no se pudo aplicar${c.error && c.error !== 'red' ? `: ${c.error}` : ''}. Avisanos por WhatsApp.`);
+        }
+      }
+      setListo({ actualizada: r.actualizada === true, cuponAplicado });
     } catch (err) {
       console.error('Error inscribiendo:', err);
       toast.error('No pudimos enviar tu inscripción. Probá de nuevo.');
@@ -3417,7 +3430,13 @@ function InscripcionPage() {
         </p>
         <p className="text-gray-500 mb-8">
           {tarifa && cats.length > 0 && (
-            <>Tu inscripción: <strong className="text-navy-700">{formatPrice(costoInscripcion(cats.length, tarifa))}</strong>. </>
+            <>
+              Tu inscripción:{' '}
+              <strong className="text-navy-700">
+                {formatPrice(costoConCupon(cats.length, tarifa, listo.cuponAplicado ? cupon?.percent : null))}
+              </strong>
+              {listo.cuponAplicado && cupon && <> (con el código {cupon.codigo})</>}.{' '}
+            </>
           )}
           La organización te va a contactar para coordinar el pago.
         </p>
@@ -3522,8 +3541,11 @@ function InscripcionPage() {
                   {cats.length > 0 && (
                     <p className="mt-1">
                       <span className="font-display font-bold">
-                        Tu inscripción: {formatPrice(costoInscripcion(cats.length, tarifa))}
+                        Tu inscripción: {formatPrice(costoConCupon(cats.length, tarifa, cupon?.percent))}
                       </span>{' '}
+                      {cupon && (
+                        <span className="text-gray-400 line-through">{formatPrice(costoInscripcion(cats.length, tarifa))}</span>
+                      )}{' '}
                       <span className="text-gray-500">
                         ({cats.length} {cats.length === 1 ? 'categoría' : 'categorías'})
                       </span>
@@ -3579,6 +3601,8 @@ function InscripcionPage() {
             className={`${inputCls} resize-none`} />
         </div>
 
+        <CampoCupon tipo="inscripcion" id="insc-cupon" cupon={cupon} onCambio={setCupon} />
+
         <button
           type="submit"
           disabled={!puedeEnviar}
@@ -3613,6 +3637,8 @@ function CheckoutPage() {
     ? { ...customer, address: 'Retiro / entrega a coordinar por WhatsApp', city: '', department: '' }
     : customer;
   const [success, setSuccess] = useState(false);
+  // Cupón de un solo uso (v38): se consulta al aplicarlo y se gasta al mandar el pedido.
+  const [cupon, setCupon] = useState<CuponValido | null>(null);
   // El pedido se registra en la base sin esperar la respuesta (así WhatsApp se abre
   // dentro del toque del cliente); de ese registro sale el aviso automático al
   // equipo. La pantalla de éxito cuenta cómo terminó: si falló, el mensaje de
@@ -3646,7 +3672,12 @@ function CheckoutPage() {
 
   // Con promo vigente el total del pedido es el DESCONTADO — el mismo número que
   // muestra el carrito y que Mercado Pago recalcula del catálogo en el server.
-  const { subtotal, descuento, total } = totalesConPromo(cart, promo);
+  // Con cupón vale el descuento más alto (no se acumulan). El cupón no viaja a MP:
+  // con cupón el pedido se coordina por WhatsApp.
+  const { subtotal, descuento, total, usa } = totalesConCupon(cart, promo, cupon);
+  const rotuloDescuento = usa === 'cupon' && cupon
+    ? `Cupón ${cupon.codigo} (−${cupon.percent}%)`
+    : promo ? `${promo.label} (−${promo.percent}%)` : '';
 
   // El carrito se rehidrata al final de la carga inicial, y la web ahora se muestra a los
   // 4s aunque los datos no hayan llegado. Sin esta guarda, quien vuelve al checkout
@@ -3729,10 +3760,13 @@ function CheckoutPage() {
       toast.error(`No queda stock suficiente de ${shortItem.product.name} — ajustá la cantidad en el carrito.`);
       return null;
     }
+    const conCupon = usa === 'cupon' && cupon;
     return {
       id: idPedidoWeb(),
       items: cart,
-      customer: clienteFinal,
+      customer: conCupon
+        ? { ...clienteFinal, notes: [`🎟 Cupón ${cupon.codigo} (−${cupon.percent}%)`, clienteFinal.notes].filter(Boolean).join(' · ') }
+        : clienteFinal,
       total,
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -3747,6 +3781,12 @@ function CheckoutPage() {
     Promise.resolve(addOrder(order))
       .then(ok => setRegistro(ok ? 'ok' : 'fallo'))
       .catch(() => setRegistro('fallo'));
+    // El cupón se gasta en segundo plano (WhatsApp tiene que abrirse dentro del toque).
+    // Si justo lo usó otro, el pedido igual lleva el código anotado y el equipo lo ve.
+    if (usa === 'cupon' && cupon) {
+      void SupabaseService.canjearCuponTienda(cupon.codigo, order.id, clienteFinal.name.trim())
+        .then(r => { if (!r.ok && r.error !== 'red') toast.error(`El código ${cupon.codigo} no se pudo usar: ${r.error}`); });
+    }
 
     // Build WhatsApp message
     const lines = [
@@ -3767,8 +3807,8 @@ function CheckoutPage() {
       // Con promo, el desglose va explícito en el mensaje: Gastón/Pauli cobran
       // leyendo esto, y un total menor que la suma de los renglones sin
       // explicación parece un error.
-      ...(descuento > 0 && promo
-        ? [`Subtotal: ${formatPrice(subtotal)}`, `🏷 *${promo.label} (−${promo.percent}%): −${formatPrice(descuento)}*`]
+      ...(descuento > 0 && rotuloDescuento
+        ? [`Subtotal: ${formatPrice(subtotal)}`, `🏷 *${rotuloDescuento}: −${formatPrice(descuento)}*`]
         : []),
       `💰 *Total: ${formatPrice(total)}*`,
       ...(promo?.deliveryNote ? [``, `🚚 ${promo.deliveryNote}`] : []),
@@ -3864,17 +3904,20 @@ function CheckoutPage() {
               </div>
             ))}
             <div className="border-t border-gray-200 pt-4 space-y-1">
-              {descuento > 0 && promo && (
+              {descuento > 0 && rotuloDescuento && (
                 <>
                   <div className="flex justify-between items-center text-sm text-gray-500">
                     <span>Subtotal</span>
                     <span className="line-through">{formatPrice(subtotal)}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm font-semibold text-lime-700">
-                    <span>{promo.label} (−{promo.percent}%)</span>
+                    <span>{rotuloDescuento}</span>
                     <span>−{formatPrice(descuento)}</span>
                   </div>
                 </>
+              )}
+              {cupon && usa !== 'cupon' && (
+                <p className="text-xs text-gray-500">Tu código da {cupon.percent}%: vale la promo vigente, que es mayor (no se acumulan).</p>
               )}
               <div className="flex justify-between items-center">
                 <span className="font-display text-lg font-semibold">Total</span>
@@ -4052,6 +4095,7 @@ function CheckoutPage() {
                 placeholder="Horario de entrega, punto de encuentro u otra aclaración"
               />
             </div>
+            <CampoCupon tipo="tienda" id="co-cupon" cupon={cupon} onCambio={setCupon} />
             {/* En celular el resumen queda debajo del formulario: el total se repite acá,
                 al lado del botón, para no mandar el pedido sin ver cuánto es. */}
             <div className="flex items-baseline justify-between rounded-lg bg-gray-50 px-4 py-3 lg:hidden">
@@ -4060,7 +4104,7 @@ function CheckoutPage() {
               </span>
               <span className="font-display text-xl font-bold text-navy-700">{formatPrice(total)}</span>
             </div>
-            {mpDisponible && (
+            {mpDisponible && usa !== 'cupon' && (
               <button
                 type="button"
                 onClick={() => {
@@ -4078,7 +4122,7 @@ function CheckoutPage() {
               disabled={pagandoMP}
               className="pulse-glow w-full bg-lime-400 hover:bg-lime-500 disabled:opacity-60 text-navy-700 font-display font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              <MessageCircle size={20} /> {mpDisponible ? 'O coordinar por WhatsApp' : 'Enviar pedido por WhatsApp'}
+              <MessageCircle size={20} /> {mpDisponible && usa !== 'cupon' ? 'O coordinar por WhatsApp' : 'Enviar pedido por WhatsApp'}
             </button>
           </form>
         </div>

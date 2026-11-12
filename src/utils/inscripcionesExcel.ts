@@ -6,6 +6,7 @@
 
 import type { Event, Inscripcion, TarifaEvento } from '../types';
 import { armarSeccionesCategoria, categoriasDe, costoInscripcion, parejaDe } from './inscripciones';
+import { conDescuento } from './cupones';
 
 /** "Doble Masculino A" → "MASC A" · "Singles Femenino B" → "SINGLE FEM B". */
 export function nivelSheet(categoria: string): string {
@@ -96,7 +97,7 @@ export function armarFilasPagos(inscripciones: Inscripcion[], tarifa: TarifaEven
   for (const i of activos) {
     const cats = categoriasDe(i);
     const freepass = i.pagoMetodo === 'freepass';
-    const deberia = freepass ? 0 : i.pagoCosto ?? (tarifa ? costoInscripcion(cats.length, tarifa) : 0);
+    const deberia = freepass ? 0 : i.pagoCosto ?? (tarifa ? conDescuento(costoInscripcion(cats.length, tarifa), i.cuponPercent) : 0);
     const pago = i.pagoAt ? (i.pagoMonto ?? 0) : 0;
     const debe = !i.pagoAt ? deberia : freepass ? 0 : (i.pagoDeuda ?? 0);
     const estado = !i.pagoAt ? 'SIN REGISTRAR'

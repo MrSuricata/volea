@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound, Repeat } from 'lucide-react';
+import { Menu, X, Search, Mail, ChevronRight, Package, Users, BarChart3, Tag, Trophy, Eye, AlertCircle, Store, CalendarDays, LogOut, Map as MapIcon, Megaphone, Globe, Newspaper, Wallet, Images, EyeOff, ClipboardList, UserRound, Truck, ListChecks, UserCog, Swords, ArrowLeft, Home, ShoppingBag, Landmark, LayoutGrid, ExternalLink, KeyRound, Repeat, Ticket } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Product, SocioName, Tenedor, VentaCajaInput, GastoPendienteInput } from '../types';
 import { SupabaseService } from '../services/supabaseService';
@@ -27,6 +27,7 @@ import { InicioTab } from './tabs/InicioTab';
 import { ProductosTab } from './tabs/ProductosTab';
 import { PedidosClientesTab } from './tabs/PedidosClientesTab';
 import { CambiosTab } from './tabs/CambiosTab';
+import { CuponesTab } from './tabs/CuponesTab';
 import { AnunciosTab, CategoriasTab, ClubesTab, EventosTab } from './tabs/CatalogoWebTabs';
 
 // Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
@@ -383,6 +384,7 @@ export default function AdminPage() {
         { id: 'products', label: 'Productos', icon: <Package size={16} /> },
         { id: 'stock', label: 'Stock', icon: <AlertCircle size={16} /> },
         { id: 'cambios', label: 'Cambios', icon: <Repeat size={16} /> },
+        { id: 'cupones', label: 'Cupones', icon: <Ticket size={16} /> },
         // 'Pedidos' son los de clientes (arriba); 'Compras' las que hacemos nosotros.
         { id: 'compras', label: 'Compras', icon: <Truck size={16} /> },
         { id: 'categories', label: 'Categorías', icon: <Tag size={16} /> },
@@ -627,6 +629,7 @@ export default function AdminPage() {
             {activeTab === 'products' && <ProductosTab editar={editarProducto} />}
             {activeTab === 'orders' && <PedidosClientesTab reportedBy={cajaReportedBy} />}
             {activeTab === 'cambios' && <CambiosTab reportedBy={cajaReportedBy} />}
+            {activeTab === 'cupones' && <CuponesTab />}
             {activeTab === 'categories' && <CategoriasTab />}
             {activeTab === 'events' && <EventosTab verInscriptos={(id) => { setInscEventoAtajo(id); irA('inscripciones'); }} />}
             {activeTab === 'clubs' && <ClubesTab />}
