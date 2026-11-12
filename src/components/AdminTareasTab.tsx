@@ -320,7 +320,7 @@ export default function AdminTareasTab({ adminEmail }: { adminEmail: string }) {
   return (
     <div>
       <EncabezadoPagina
-        rotulo="Equipo"
+        rotulo="Día a día"
         titulo="Tareas"
         descripcion="La agenda compartida: anotá en un renglón y mové cada tarea con un toque."
         acciones={(
@@ -419,7 +419,7 @@ export default function AdminTareasTab({ adminEmail }: { adminEmail: string }) {
         />
       ) : (
         /* Tres columnas en desktop, apiladas en el celular */
-        <div className="grid gap-5 md:grid-cols-3 md:gap-4">
+        <div className="grid gap-5 lg:grid-cols-3 lg:gap-4">
           {COLUMNAS.map(col => {
             const lista = porEstado[col.id];
             const esHecha = col.id === 'hecha';

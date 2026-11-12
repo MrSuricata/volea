@@ -7,14 +7,67 @@
    y sumaba dos conexiones a otros dominios. Mismos pesos que se usaban: Lexend
    400/600/700/900 y Montserrat 400/600/700, con font-display: swap. Cada archivo
    trae todos los alfabetos con unicode-range: el navegador baja solo el latino. */
-@import '@fontsource/lexend/400.css';
-@import '@fontsource/lexend/600.css';
-@import '@fontsource/lexend/700.css';
-@import '@fontsource/lexend/900.css';
-@import '@fontsource/montserrat/400.css';
-@import '@fontsource/montserrat/600.css';
-@import '@fontsource/montserrat/700.css';
+/* Solo el subconjunto latino (11/2026): el sitio es en castellano y los otros (cirílico,
+   vietnamita, latín extendido) eran 20 @font-face y 40 archivos en el build que nadie
+   bajaba. Lo que no esté en el latino (una flecha, un emoji) cae a la fuente del sistema,
+   igual que antes. */
+@import '@fontsource/lexend/latin-400.css';
+@import '@fontsource/lexend/latin-600.css';
+@import '@fontsource/lexend/latin-700.css';
+@import '@fontsource/lexend/latin-900.css';
+@import '@fontsource/montserrat/latin-400.css';
+@import '@fontsource/montserrat/latin-600.css';
+@import '@fontsource/montserrat/latin-700.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─── Panel admin ───────────────────────────────────────────────────────────
+   Barra de scroll del menú lateral (fondo navy): fina y oscura. Sin esto Windows
+   dibujaba la barra clásica clara (~17px con flechitas) pegada al borde y angostaba
+   el menú. Se ve tenue y se aviva al pasar el mouse; el gutter estable evita que el
+   contenido se corra cuando aparece o desaparece. */
+.barra-oscura {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-gutter: stable;
+}
+.barra-oscura:hover,
+.barra-oscura:focus-within { scrollbar-color: rgba(255, 255, 255, 0.32) transparent; }
+/* Navegadores sin scrollbar-color (Safari): mismas reglas con ::-webkit-scrollbar. */
+.barra-oscura::-webkit-scrollbar { width: 6px; }
+.barra-oscura::-webkit-scrollbar-track { background: transparent; }
+.barra-oscura::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 9999px; }
+.barra-oscura:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.32); }
+
+/* Fila de chips que se desliza en el celular: el borde derecho se esfuma para que se
+   note que hay más a la derecha (antes el último chip quedaba cortado en seco). */
+@media (max-width: 767px) {
+  .desliza-indicio {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+}
+
+/* Barra de scroll de la página dentro del panel (la clase la pone AdminPage). */
+html.panel-admin::-webkit-scrollbar-track { background: #f3f4f6; }
+html.panel-admin::-webkit-scrollbar-thumb { background: #b6bcc6; border-radius: 9999px; }
+html.panel-admin::-webkit-scrollbar-thumb:hover { background: #8a929e; }
+
+/* Títulos de página del sitio (un solo sistema): rótulo chico lima + título en mayúsculas
+   Lexend black, el mismo que la home, la tienda y las páginas de torneos. Antes cada página
+   tenía el suyo (título en minúscula con rayita, rótulo lime-600 que no llegaba a AA). */
+@layer components {
+  .eyebrow-pagina {
+    @apply inline-flex items-center gap-3 font-display text-xs font-bold uppercase tracking-[0.25em] text-lime-800;
+  }
+  .eyebrow-pagina::before {
+    content: '';
+    @apply h-px w-6 bg-lime-400;
+  }
+  .titulo-pagina {
+    @apply font-display text-3xl font-black uppercase leading-[0.95] tracking-tight text-navy-700 md:text-5xl;
+    overflow-wrap: anywhere;
+  }
+}

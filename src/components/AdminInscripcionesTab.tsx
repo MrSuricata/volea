@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, BadgeCheck, ChevronDown, CircleDollarSign, ClipboardList, FileDown, Lightbulb, MoreHorizontal, Pencil, Plus,
+  AlertTriangle, BadgeCheck, CalendarDays, ChevronDown, CircleDollarSign, ClipboardList, FileDown, Lightbulb, MoreHorizontal, Pencil, Plus,
   RefreshCw, SlidersHorizontal, UserCheck, UserMinus, UserPlus, Users, Undo2,
 } from 'lucide-react';
 import { alertasDeTopes, asignacionesAGuardar, chequearTope, matchearDupr, parsearDuprPegado, parsearRating, TOPES_APU } from '../utils/dupr';
@@ -125,8 +125,10 @@ function Panel({ icono, titulo, resumen, abierto, alAlternar, children }: {
  * estado, como el viejo modal de Eventos) y vista "spliteada" por categoría
  * con duplas armadas por mención mutua, como la planilla.
  */
-export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla }: {
+export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla, crearEvento }: {
   events: Event[];
+  /** Lleva a Eventos con el editor abierto (el vacío sin eventos ofrece ese paso). */
+  crearEvento?: () => void;
   /** Evento preseleccionado cuando se llega desde el atajo de la pestaña Eventos. */
   eventoInicialId: string | null;
   /** AdminPage apaga el badge de nuevas cuando la pestaña se abre. */
@@ -475,9 +477,13 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
                 },
               ]}
             />
-            <Boton icono={<Plus size={18} />} onClick={() => setEditando('nueva')} disabled={!evt}>
-              Nueva inscripción
-            </Boton>
+            {evt || !crearEvento ? (
+              <Boton icono={<Plus size={18} />} onClick={() => setEditando('nueva')} disabled={!evt}>
+                Nueva inscripción
+              </Boton>
+            ) : (
+              <Boton icono={<Plus size={18} />} onClick={crearEvento}>Nuevo evento</Boton>
+            )}
           </>
         )}
       />
@@ -721,7 +727,14 @@ export default function AdminInscripcionesTab({ events, eventoInicialId, alVerla
           </p>
         )}
 
-        {!evt && <Vacio titulo="No hay eventos todavía" descripcion="Creá un evento con inscripción para empezar a recibir anotados." />}
+        {!evt && (
+          <Vacio
+            icono={<CalendarDays size={22} />}
+            titulo="No hay eventos todavía"
+            descripcion="Las inscripciones cuelgan de un evento: creá uno con la inscripción abierta y acá vas a ver a los anotados."
+            accion={crearEvento && <Boton icono={<Plus size={18} />} onClick={crearEvento}>Crear evento</Boton>}
+          />
+        )}
         {evt && fallo && (
           <ErrorEstado mensaje="No se pudieron cargar. Verificá tu sesión de admin." alReintentar={() => void refrescar()} />
         )}

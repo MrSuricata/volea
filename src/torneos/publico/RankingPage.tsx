@@ -6,6 +6,7 @@ import { listarJugadoresPublicos, listarTorneosPublicos, obtenerConfigPublico } 
 import { RkCargando, RkError } from './Estados';
 import NavPublica from './NavPublica';
 import VitrinaTienda from '../../tienda/VitrinaTienda';
+import { nombrePropio } from '../../home/torneosHome';
 import '../torneos.css';
 
 const NOMBRE_ESCALON: Record<Escalon, string> = {
@@ -64,6 +65,10 @@ export default function RankingPage() {
             <Link className="boton secundario" to="/torneos">Ver torneos</Link>
           </div>
         </header>
+        <p className="bajada">
+          Los puntos salen solos de los resultados de cada torneo VOLEA. Tocá un jugador para ver
+          de qué torneos vienen.
+        </p>
 
         <div className="acciones" style={{ marginBottom: 16 }}>
           <button className={`boton ${historico ? 'secundario' : ''}`} onClick={() => setHistorico(false)}>{anio}</button>
@@ -95,7 +100,8 @@ export default function RankingPage() {
                   <Fragment key={f.jugadorId}>
                     <tr onClick={() => setAbierto(abierto === f.jugadorId ? null : f.jugadorId)} style={{ cursor: 'pointer' }}>
                       <td>{i + 1}</td>
-                      <td className="nombre">{f.nombre}</td>
+                      {/* El padrón se carga en mayúsculas: en la tabla se leía a los gritos. */}
+                      <td className="nombre">{nombrePropio(f.nombre)}</td>
                       <td><strong>{f.puntos}</strong></td>
                       <td>{f.torneosJugados}</td>
                     </tr>

@@ -372,7 +372,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     // pb extra en el celular: la barra fija de "Nueva venta" no tapa el último movimiento.
     <div className="fade-in pb-24 md:pb-0">
       <EncabezadoPagina
-        rotulo="Plata"
+        rotulo="Día a día"
         titulo="Caja"
         descripcion="Ventas y gastos del bot de Telegram y de esta pantalla. Al anular una venta de catálogo, el stock se repone solo."
         acciones={(
@@ -406,9 +406,11 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
 
       {/* Barra fija del celular: vender tiene que estar siempre a un pulgar,
           aunque se haya scrolleado la lista. Portal a <body> porque .fade-in
-          anima con transform y eso rompe el position: fixed mientras dura. */}
+          anima con transform y eso rompe el position: fixed mientras dura. Va apoyada
+          ENCIMA de la barra de accesos del panel (64px): antes se dibujaba sobre ella y
+          desde la Caja no se podía saltar a Pedidos o Torneos. */}
       {createPortal(
-        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-gray-200 bg-white/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+        <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 flex gap-2 border-t border-gray-200 bg-white/95 px-4 py-2.5 backdrop-blur md:hidden">
           <Boton variante="secundario" icono={<TrendingDown size={17} />} onClick={() => setGastoAbierto(true)}>
             Gasto
           </Boton>
@@ -626,7 +628,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                           </p>
                           <p className={cn(
                             'shrink-0 font-display text-sm font-bold tabular-nums',
-                            entry.reverted ? 'text-gray-400 line-through' : esVenta ? 'text-emerald-700' : 'text-red-700',
+                            entry.reverted ? 'text-gray-500 line-through' : esVenta ? 'text-emerald-700' : 'text-red-700',
                           )}>
                             {esVenta ? `+${formatoPlata(entry.amount)}` : formatoPlata(-entry.amount)}
                           </p>

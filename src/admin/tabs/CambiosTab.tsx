@@ -12,7 +12,7 @@ import {
   type Cambio, type MetodoCambio,
 } from '../../utils/cambios';
 import {
-  AreaTexto, Boton, Campo, Chip, Confirmar, Dialogo, EncabezadoPagina, Entrada, EntradaPlata, Insignia,
+  AreaTexto, Boton, Campo, CargandoFilas, Chip, Confirmar, Dialogo, EncabezadoPagina, Entrada, EntradaPlata, ErrorEstado, Insignia,
   Plata, Segmentado, Selector, Tarjeta, Vacio,
 } from '../ui';
 
@@ -225,10 +225,13 @@ export function CambiosTab({ reportedBy }: { reportedBy: string }) {
         acciones={<Boton icono={<Plus size={18} />} onClick={() => setNuevo(true)}>Nuevo cambio</Boton>}
       />
 
+      {/* Mismo patrón que el resto del panel: filas fantasma mientras carga, error con reintento. */}
+      {cambios === undefined && <CargandoFilas filas={3} />}
       {cambios === null && (
-        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          No se pudieron leer los cambios. Recargá la página; si sigue, falta la actualización de la base (v32).
-        </p>
+        <ErrorEstado
+          mensaje="No se pudieron leer los cambios. Si sigue, falta la actualización de la base (v32)."
+          alReintentar={() => { setCambios(undefined); void cargar(); }}
+        />
       )}
 
       {saldos.length > 0 && (
@@ -247,7 +250,12 @@ export function CambiosTab({ reportedBy }: { reportedBy: string }) {
       )}
 
       {cambios && cambios.length === 0 ? (
-        <Vacio icono={<Repeat size={22} />} titulo="Todavía no hay cambios" />
+        <Vacio
+          icono={<Repeat size={22} />}
+          titulo="Todavía no hay cambios"
+          descripcion="Cuando alguien cambia una prenda por otra, se anota acá."
+          accion={<Boton icono={<Plus size={18} />} onClick={() => setNuevo(true)}>Nuevo cambio</Boton>}
+        />
       ) : (
         <ul className="space-y-2">
           {(cambios ?? []).map((c) => (

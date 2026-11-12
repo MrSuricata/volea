@@ -306,7 +306,7 @@ export function EventModal({
                 </Campo>
                 {categorias.length > 0 && (
                   <div>
-                    <p className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-gray-400">
+                    <p className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-gray-500">
                       {categorias.length} {categorias.length === 1 ? 'categoría' : 'categorías'}
                     </p>
                     <div className="flex flex-wrap gap-1.5">

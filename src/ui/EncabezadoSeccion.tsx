@@ -37,7 +37,7 @@ export function EncabezadoSeccion({ eyebrow, titulo, bajada, link, tono = 'claro
       {link && (
         <Link
           to={link.to}
-          className={`group inline-flex shrink-0 items-center gap-2 self-start font-display text-sm font-bold uppercase tracking-wider transition-colors md:self-auto ${
+          className={`group -my-2 inline-flex shrink-0 items-center gap-2 self-start py-2 font-display text-sm font-bold uppercase tracking-wider transition-colors md:self-auto ${
             oscuro ? 'text-white hover:text-lime-400' : 'text-navy-700 hover:text-lime-800'
           }`}
         >

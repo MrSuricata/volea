@@ -142,13 +142,13 @@ export function ProductosTab({ editar }: { editar: (p: Product | null) => void }
           <div className="hidden overflow-hidden rounded-xl border border-gray-200 bg-white md:block">
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 bg-gray-50 text-left">
-                <tr className="font-display text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">
-                  <th className="px-4 py-3">Producto</th>
-                  <th className="px-4 py-3">Categoría</th>
-                  <th className="px-4 py-3 text-right">Precio</th>
-                  <th className="px-4 py-3">Stock</th>
-                  <th className="px-4 py-3">Estado</th>
-                  <th className="w-28 px-2 py-3"><span className="sr-only">Acciones</span></th>
+                <tr className="font-display text-[11px] font-bold uppercase tracking-wider text-gray-600">
+                  <th className="px-4 py-2.5">Producto</th>
+                  <th className="px-4 py-2.5">Categoría</th>
+                  <th className="px-4 py-2.5 text-right">Precio</th>
+                  <th className="px-4 py-2.5">Stock</th>
+                  <th className="px-4 py-2.5">Estado</th>
+                  <th className="w-28 px-2 py-2.5"><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">

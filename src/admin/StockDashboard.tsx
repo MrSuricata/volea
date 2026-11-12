@@ -243,7 +243,7 @@ function FilaStock({ resumen, onEdit }: { resumen: ResumenStock; onEdit: () => v
                     <p className="mb-1.5 flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-gray-600">
                       {hex && <span aria-hidden className="h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ring-black/15" style={{ backgroundColor: hex }} />}
                       {g.color}
-                      <span className="font-semibold normal-case tracking-normal text-gray-400">· {total} u.</span>
+                      <span className="font-semibold normal-case tracking-normal text-gray-500">· {total} u.</span>
                     </p>
                     <ul className="flex flex-wrap gap-1.5">
                       {g.variantes.map(v => (

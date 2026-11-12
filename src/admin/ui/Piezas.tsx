@@ -80,22 +80,24 @@ export function Estadistica({ etiqueta, valor, detalle, tono = 'neutro', icono, 
   const tocable = Boolean(to || onClick);
   const cuerpo = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <p className="font-display text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">{etiqueta}</p>
-        {icono && <span className="text-gray-400">{icono}</span>}
+      {/* Alto fijo del renglón: con íconos de distinta caja el número quedaba a otra altura
+          que en las tarjetas vecinas. */}
+      <div className="flex min-h-[20px] items-start justify-between gap-2">
+        <p className="font-display text-[11px] font-bold uppercase leading-5 tracking-[0.15em] text-gray-500">{etiqueta}</p>
+        {icono && <span aria-hidden className="flex h-5 shrink-0 items-center text-gray-400">{icono}</span>}
       </div>
       <p className={cn('mt-2 truncate font-display text-2xl font-black tabular-nums md:text-3xl', TONO_DATO[tono])}>
         {plata && typeof valor === 'number' ? formatoPlata(valor) : valor}
       </p>
       {(detalle || tocable) && (
-        <p className="mt-1 flex items-center gap-1 text-[13px] text-gray-500">
+        <p className="mt-auto flex items-center gap-1 pt-1 text-[13px] text-gray-500">
           {detalle}
           {tocable && <ArrowRight size={14} className="ml-auto shrink-0 text-gray-400 transition-transform group-hover:translate-x-0.5" />}
         </p>
       )}
     </>
   );
-  const clase = cn('group block rounded-xl border border-gray-200 bg-white p-4 text-left', tocable && 'transition-colors hover:border-navy-700');
+  const clase = cn('group flex flex-col rounded-xl border border-gray-200 bg-white p-4 text-left', tocable && 'transition-colors hover:border-navy-700');
   if (to) return <Link to={to} className={clase}>{cuerpo}</Link>;
   if (onClick) return <button type="button" onClick={onClick} className={cn(clase, 'w-full')}>{cuerpo}</button>;
   return <div className={clase}>{cuerpo}</div>;
@@ -105,7 +107,7 @@ export function Estadistica({ etiqueta, valor, detalle, tono = 'neutro', icono, 
 
 /** Monto con números alineados (tabular-nums) y negativo en rojo. */
 export function Plata({ monto, className, decimales }: { monto: number; className?: string; decimales?: boolean }) {
-  return <span className={cn('tabular-nums', monto < 0 && 'text-red-700', className)}>{formatoPlata(monto, { decimales })}</span>;
+  return <span className={cn('whitespace-nowrap tabular-nums', monto < 0 && 'text-red-700', className)}>{formatoPlata(monto, { decimales })}</span>;
 }
 
 // ─── Insignia ────────────────────────────────────────────────────────────────
@@ -217,7 +219,7 @@ export function BarraFiltros({ busqueda, alBuscar, placeholder = 'Buscar…', ch
           {acciones}
         </div>
       )}
-      {chips && <div className="sin-barra -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">{chips}</div>}
+      {chips && <div className="sin-barra desliza-indicio -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">{chips}</div>}
     </div>
   );
 }

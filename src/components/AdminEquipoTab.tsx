@@ -381,7 +381,7 @@ function FilaMiembro({
               miembro.activo ? 'text-navy-700' : 'text-gray-500',
             )}>
               <span className="min-w-0 truncate">
-                {miembro.name || <span className="font-normal italic text-gray-400">sin nombre</span>}
+                {miembro.name || <span className="font-normal italic text-gray-500">sin nombre</span>}
               </span>
               {soyYo && <Insignia tono="navy">vos</Insignia>}
               <Insignia tono={miembro.activo ? info.tono : 'neutro'}><Icono size={12} /> {info.chip}</Insignia>

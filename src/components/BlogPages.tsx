@@ -92,12 +92,9 @@ export function BlogListPage({ posts }: { posts: Post[] }) {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
-      <p className="font-display text-sm font-bold uppercase tracking-widest text-lime-600 mb-2">
-        NOTICIAS
-      </p>
-      <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700">Blog VOLEA</h1>
-      <div className="w-16 h-1 bg-lime-400 mb-8" />
-      <p className="text-gray-600 max-w-2xl -mt-4 mb-10">
+      <p className="eyebrow-pagina">Noticias</p>
+      <h1 className="titulo-pagina mt-2 mb-4">Blog VOLEA</h1>
+      <p className="text-gray-600 max-w-2xl mb-10">
         Novedades del pickleball en Uruguay, la comunidad y todo lo que pasa en VOLEA.
       </p>
 
@@ -116,7 +113,7 @@ export function BlogListPage({ posts }: { posts: Post[] }) {
             >
               <PostCover post={post} />
               <div className="p-5 flex flex-col flex-1">
-                <p className="text-xs text-gray-400 mb-2">{formatDate(postDate(post))}</p>
+                <p className="text-xs text-gray-500 mb-2">{formatDate(postDate(post))}</p>
                 <h2 className="font-display text-lg font-bold text-navy-700 mb-2 group-hover:text-navy-500 transition-colors">
                   {post.title}
                 </h2>
@@ -131,7 +128,7 @@ export function BlogListPage({ posts }: { posts: Post[] }) {
                 >
                   {post.excerpt}
                 </p>
-                <span className="font-display text-sm font-semibold text-lime-600 group-hover:underline">
+                <span className="font-display text-sm font-semibold text-lime-800 group-hover:underline">
                   Leer más →
                 </span>
               </div>
@@ -173,7 +170,7 @@ export function BlogPostPage({ posts }: { posts: Post[] }) {
     <div className="fade-in max-w-3xl mx-auto px-4 py-12">
       <Link
         to="/blog"
-        className="inline-block font-display text-sm font-semibold text-lime-600 hover:underline mb-6"
+        className="inline-block py-2 font-display text-sm font-semibold text-lime-800 hover:underline mb-4"
       >
         ← Volver al blog
       </Link>
@@ -188,7 +185,7 @@ export function BlogPostPage({ posts }: { posts: Post[] }) {
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         )}
-        <p className="text-sm text-gray-400 mb-2">{formatDate(postDate(post))}</p>
+        <p className="text-sm text-gray-500 mb-2">{formatDate(postDate(post))}</p>
         <h1 className="font-display text-3xl md:text-4xl font-bold text-navy-700">{post.title}</h1>
         <div className="w-16 h-1 bg-lime-400 mb-8" />
         <div>{renderContent(post.content)}</div>
