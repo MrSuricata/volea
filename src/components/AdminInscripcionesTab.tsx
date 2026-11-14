@@ -14,7 +14,8 @@ import {
   parejaDe, resumenArmado, MARCA_INSC_VISTAS, MIN_UNIDADES_VIABLE, marcaVisitaPrevia,
 } from '../utils/inscripciones';
 import { distancia, normalizar } from '../utils/nombres';
-import { costoConCupon } from '../utils/cupones';
+import { costoConCupon, type CuponValido } from '../utils/cupones';
+import { CampoCupon } from '../tienda/CampoCupon';
 import {
   AreaTexto, BarraFiltros, Boton, BotonIcono, Campo, CargandoFilas, Chip, Confirmar, Dialogo, EncabezadoPagina, Entrada,
   EntradaPlata, ErrorEstado, Insignia, Segmentado, Selector, Vacio, type TonoInsignia,
@@ -1149,8 +1150,14 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
   onDone: () => void;
 }) {
   const nCats = categoriasDe(inscripcion).length;
-  // v38: con cupón el costo ya viene descontado (el server descuenta lo mismo).
-  const costo = costoConCupon(nCats, tarifa, inscripcion.cuponPercent);
+  // v38: con cupón el costo ya viene descontado (el server descuenta lo mismo). El código se
+  // puede cargar acá mismo (ej. alguien lo pasa por WhatsApp): se gasta al aplicarlo.
+  const [cupon, setCupon] = useState<{ codigo: string; percent: number } | null>(
+    inscripcion.cupon ? { codigo: inscripcion.cupon, percent: inscripcion.cuponPercent ?? 0 } : null,
+  );
+  const [aplicandoCupon, setAplicandoCupon] = useState(false);
+  const cuponNuevo = !!cupon && !inscripcion.cupon;
+  const costo = costoConCupon(nCats, tarifa, cupon?.percent);
   const extras = Math.max(0, nCats - tarifa.incluye);
   const [metodo, setMetodo] = useState<'efectivo' | 'mp' | 'transferencia' | 'freepass' | null>(null);
   // Plata con EntradaPlata: "1.200" son mil doscientos (el type=number lo leía como 1,2).
@@ -1161,6 +1168,25 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
   const montoOk = Number.isFinite(montoNum) && montoNum >= 0 && montoNum <= costo;
   const deuda = montoOk ? Math.round((costo - montoNum) * 100) / 100 : 0;
   const listo = !!metodo && montoOk && !guardando;
+
+  const aplicarCupon = async (c: CuponValido | null) => {
+    if (!c) return;
+    setAplicandoCupon(true);
+    try {
+      const r = await SupabaseService.canjearCuponInscripcion(c.codigo, inscripcion.id);
+      if (!r.ok) {
+        toast.error(r.error === 'red' || !r.error ? 'No se pudo aplicar el código. Probá de nuevo.' : r.error);
+        return;
+      }
+      setCupon({ codigo: c.codigo, percent: c.percent });
+      setMonto(costoConCupon(nCats, tarifa, c.percent));
+      toast.success(`Cupón ${c.codigo} aplicado a ${inscripcion.nombre}`);
+    } finally {
+      setAplicandoCupon(false);
+    }
+  };
+  // Si se aplicó un cupón y se cierra sin cobrar, igual hay que refrescar la lista (ya quedó gastado).
+  const cerrar = cuponNuevo ? onDone : onClose;
 
   const confirmar = async () => {
     if (!listo || !metodo) return;
@@ -1181,12 +1207,12 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
     <Dialogo
       abierto
       titulo={`Pago — ${inscripcion.nombre}`}
-      alCerrar={onClose}
-      ocupado={guardando}
+      alCerrar={cerrar}
+      ocupado={guardando || aplicandoCupon}
       ancho="sm"
       pie={(
         <>
-          <Boton variante="secundario" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+          <Boton variante="secundario" onClick={cerrar} disabled={guardando}>Cancelar</Boton>
           <Boton onClick={() => void confirmar()} cargando={guardando} disabled={!metodo || !montoOk}>Confirmar pago</Boton>
         </>
       )}
@@ -1198,12 +1224,18 @@ function PagoModal({ inscripcion, tarifa, onClose, onDone }: {
             {extras > 0 && <> + {extras} × {money(tarifa.extra)}</>}
           </p>
           <p className="mt-0.5 font-display text-2xl font-black tabular-nums text-navy-700">{money(costo)}</p>
-          {inscripcion.cupon && (
+          {cupon && (
             <p className="mt-1 text-[13px] font-semibold text-lime-800">
-              Cupón {inscripcion.cupon} (−{inscripcion.cuponPercent}%) — sin cupón eran {money(costoInscripcion(nCats, tarifa))}
+              Cupón {cupon.codigo} (−{cupon.percent}%) — sin cupón eran {money(costoInscripcion(nCats, tarifa))}
             </p>
           )}
         </div>
+
+        {!cupon && (
+          aplicandoCupon
+            ? <p className="text-sm text-gray-600">Aplicando el código…</p>
+            : <CampoCupon tipo="inscripcion" cupon={null} onCambio={c => void aplicarCupon(c)} id="pago-cupon" />
+        )}
 
         <div>
           <p id="pago-metodo" className="mb-1.5 text-[13px] font-semibold text-navy-700">¿Cómo paga?</p>
