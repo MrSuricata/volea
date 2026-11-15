@@ -133,6 +133,12 @@ export default function ArbitroPage() {
   );
 }
 
+/** "… · Mixto (relevo a 11)" → 11; sin relevo → null. */
+function relevoDe(titulo: string | undefined): number | null {
+  const m = /relevo a (\d+)/i.exec(titulo ?? '');
+  return m ? Number(m[1]) : null;
+}
+
 function Marco({ children }: { children: React.ReactNode }) {
   return <main className="min-h-dvh bg-[#001F3F] px-4 py-6 text-white"><div className="mx-auto max-w-md">{children}</div></main>;
 }
@@ -402,6 +408,8 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
     </button>
   );
   const enCierre = cierre === 'enviando' || cierre === 'esperando';
+  // Partidos "relevo a 11" (mixto por equipos): al llegar uno a ese número cambian los 4 jugadores.
+  const relevo = relevoDe(datos?.titulo);
 
   return (
     <Marco>
@@ -432,6 +440,9 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
         </div>
       </div>
       {e.cambiarLado && <p className="mt-2 rounded-lg bg-orange-500 p-2 text-center font-black">CAMBIO DE LADO</p>}
+      {relevo !== null && !e.terminado && Math.max(e.puntos.a, e.puntos.b) === relevo && Math.min(e.puntos.a, e.puntos.b) < relevo && (
+        <p className="mt-2 rounded-lg bg-fuchsia-600 p-2 text-center font-black">RELEVO · entran las otras dos parejas</p>
+      )}
       {e.finDeGame && <p className="mt-2 rounded-lg bg-sky-500 p-2 text-center font-black">FIN DEL GAME {e.game - 1} · cambio de lado</p>}
       {cajaAviso}
       {!sinSenal && cantPendiente > 0 && <p className="mt-2 text-center text-xs opacity-70">Subiendo…</p>}

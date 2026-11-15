@@ -25,7 +25,8 @@ export function nombreCorto(nombre: string): string {
   const jug = jugadoresDe(nombre);
   if (jug.length >= 2) return jug[0].split(/\s+/)[0];
   const palabras = nombre.trim().split(/\s+/).filter(Boolean);
-  return palabras.find((w) => !ARTICULOS.has(w.toLowerCase())) ?? palabras[0] ?? nombre;
+  // Se saltean artículos y lo que no tiene letras (emoji del equipo): "♦️ DIAMANTES (…)" → "DIAMANTES".
+  return palabras.find((w) => /\p{L}/u.test(w) && !ARTICULOS.has(w.toLowerCase())) ?? palabras[0] ?? nombre;
 }
 
 /** Resultado del partido en el cuadro (para comprobar si un "Terminar" sin respuesta llegó igual). */
