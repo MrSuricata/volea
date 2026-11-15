@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormatoArbitraje } from '../engine/tipos';
 import { estadoDe, formatoDelPartido, resultadoFinal, resumen, type Jugada, type Lado } from './motor';
-import { ladosDelPartido, nombreCorto, nombreJugador, resultadoEnCuadro, type PartidoArbitrado } from './partido';
+import { ladosDelPartido, nombreCorto, nombreJugador, plantelDe, resultadoEnCuadro, type PartidoArbitrado } from './partido';
 import { entrar, leerTorneo, marcar, terminar, type PartidoDelArbitro } from './servicio';
 import {
   alEntrar, alEnviar, alResponder, colaGuardada, iguales, jugar as jugarCola, pendiente, proximoEnvio, reconciliar, textoAviso,
@@ -166,11 +166,38 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
   const jugadas = cola.jugadas;
   const f = useMemo(() => formatoDelPartido(base.formato, jugadas), [base.formato, jugadas]);
   const e = useMemo(() => estadoDe(f, base.dobles, jugadas), [f, base.dobles, jugadas]);
+  // Mixto con relevo: cómo terminó la 1ª parte (el marcador cuando uno llegó al número del relevo).
+  const relevoN = relevoDe(datos?.titulo);
+  const parcial = useMemo(() => {
+    if (relevoN === null) return null;
+    let p: { a: number; b: number } | null = null;
+    for (let i = 1; i <= jugadas.length; i++) {
+      const pts = estadoDe(f, base.dobles, jugadas.slice(0, i)).puntos;
+      if (Math.max(pts.a, pts.b) < relevoN) p = null;
+      else if (!p) p = { a: pts.a, b: pts.b };
+    }
+    return p;
+  }, [relevoN, f, base.dobles, jugadas]);
   // Lo último que eligió al empezar, para volver a la pantalla de inicio con eso marcado.
   const [ultimoInicio, setUltimoInicio] = useState<Extract<Jugada, { t: 'inicio' }> | null>(jugadas[0]?.t === 'inicio' ? jugadas[0] : null);
 
   const nombre = (l: Lado) => (l === 'A' ? datos?.a?.nombre : datos?.b?.nombre) ?? (l === 'A' ? 'Equipo A' : 'Equipo B');
-  const jugadores = (l: Lado) => (l === 'A' ? datos?.a?.jugadores : datos?.b?.jugadores) ?? [];
+  const primeros = (l: Lado) => (l === 'A' ? datos?.a?.jugadores : datos?.b?.jugadores) ?? [];
+  // Los del relevo: el resto del plantel del equipo (sin los que arrancaron).
+  const delRelevo = (l: Lado) => {
+    const p = primeros(l);
+    const plantel = plantelDe(nombre(l));
+    if (p.length < 2 || !p.every((j) => plantel.includes(j))) return [];
+    return plantel.filter((j) => !p.includes(j));
+  };
+  // Quiénes están en la cancha ahora (solo si se eligieron del plantel).
+  const enCancha = (l: Lado) => {
+    const p = primeros(l);
+    if (!plantelDe(nombre(l)).length || !p.every((j) => plantelDe(nombre(l)).includes(j))) return [];
+    return parcial && delRelevo(l).length >= 2 ? delRelevo(l) : p;
+  };
+  // En la 2ª parte del relevo sacan y se nombran los que entraron.
+  const jugadores = (l: Lado) => (parcial && delRelevo(l).length >= 2 ? delRelevo(l) : primeros(l));
 
   const setCierre = (c: Cierre) => { cierreRef.current = c; setCierreEstado(c); };
   const setCola = useCallback((c: Cola) => {
@@ -430,6 +457,9 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
             {(['A', 'B'] as Lado[]).map((l) => (
               <div key={l} className={`rounded-2xl p-3 ${e.saca === l ? 'bg-[#CCFF00] text-[#001F3F]' : 'bg-white/10'}`}>
                 <p className="text-xs font-bold uppercase leading-tight">{nombre(l)}</p>
+                {enCancha(l).length >= 2 && (
+                  <p className="text-xs font-semibold opacity-80">{parcial ? 'Relevo: ' : ''}{enCancha(l).join(' y ')}</p>
+                )}
                 <p className="text-6xl font-black tabular-nums">{l === 'A' ? e.puntos.a : e.puntos.b}</p>
                 {e.saca === l && !e.terminado && <p className="text-xs font-bold">Saca {quienSaca(l)}</p>}
               </div>
@@ -441,7 +471,18 @@ function Partido({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
       </div>
       {e.cambiarLado && <p className="mt-2 rounded-lg bg-orange-500 p-2 text-center font-black">CAMBIO DE LADO</p>}
       {relevo !== null && !e.terminado && Math.max(e.puntos.a, e.puntos.b) === relevo && Math.min(e.puntos.a, e.puntos.b) < relevo && (
-        <p className="mt-2 rounded-lg bg-fuchsia-600 p-2 text-center font-black">RELEVO · entran las otras dos parejas</p>
+        <p className="mt-2 rounded-lg bg-fuchsia-600 p-2 text-center font-black">
+          RELEVO · entran {delRelevo('A').length >= 2 && delRelevo('B').length >= 2
+            ? `${delRelevo('A').join(' y ')} vs ${delRelevo('B').join(' y ')}`
+            : 'las otras dos parejas'}
+        </p>
+      )}
+      {parcial && (
+        <p className="mt-2 rounded-lg bg-white/10 p-2 text-center text-sm font-bold">
+          1ª parte: {nombreCorto(nombre('A'))} {parcial.a} – {parcial.b} {nombreCorto(nombre('B'))}
+          {primeros('A').length >= 2 && delRelevo('A').length >= 2 ? ` (${primeros('A').join(' y ')} vs ${primeros('B').join(' y ')})` : ''}
+          {' · '}2ª parte: siguen sumando hasta {f.a}
+        </p>
       )}
       {e.finDeGame && <p className="mt-2 rounded-lg bg-sky-500 p-2 text-center font-black">FIN DEL GAME {e.game - 1} · cambio de lado</p>}
       {cajaAviso}
