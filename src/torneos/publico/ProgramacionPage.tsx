@@ -7,6 +7,7 @@ import { armarCopas } from '../engine/copas';
 import { armarLlaveFormato, formatoEfectivo } from '../engine/formatoLlave';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
+import { nombreConJugadores, plantelDe } from '../arbitraje/partido';
 import { listarTorneosPublicos } from './datos';
 import type { TorneoPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
@@ -154,6 +155,77 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
   return 'Se está editando desde otro lado: probá de nuevo';
 }
 
+// Por equipos: quiénes juegan un partido de grupo (mismo candado optimista que el resultado).
+async function guardarJugadores(torneoId: string, partidoId: string, lado: 'A' | 'B', jugadores: string[]): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  for (let intento = 0; intento < 2; intento++) {
+    const { data: fila, error } = await sb.from('rk_torneos').select('data, updated_at').eq('id', torneoId).maybeSingle();
+    if (error || !fila) return 'No se pudo leer el torneo';
+    const t = fila.data as Torneo;
+    const p = t.partidosGrupo.find((x) => x.id === partidoId);
+    if (!p) return 'El partido ya no existe';
+    if (lado === 'A') p.jugadoresA = jugadores.length ? jugadores : undefined;
+    else p.jugadoresB = jugadores.length ? jugadores : undefined;
+    const { data: upd, error: e2 } = await sb.from('rk_torneos')
+      .update({ data: t, updated_at: new Date().toISOString() })
+      .eq('id', torneoId)
+      .eq('updated_at', fila.updated_at as string)
+      .select('id');
+    if (e2) return 'No se pudo guardar (¿sesión vencida?)';
+    if (upd && upd.length > 0) return null;
+  }
+  return 'Se está editando desde otro lado: probá de nuevo';
+}
+
+// Chips con el plantel de cada equipo para marcar quiénes juegan (2 por equipo; en el relevo, los que arrancan).
+function ElegirJugadores({ torneo, partidoId, onGuardado }: { torneo: Torneo | undefined; partidoId: string; onGuardado: () => void }) {
+  const [ocupado, setOcupado] = useState(false);
+  const p = torneo?.partidosGrupo.find((x) => x.id === partidoId);
+  if (!torneo || !p) return null;
+  const relevo = /relevo/i.test(p.etiqueta ?? '');
+  const lado = (l: 'A' | 'B') => {
+    const plantel = plantelDe(nombreDe(torneo, l === 'A' ? p.aId : p.bId));
+    if (plantel.length < 2) return null;
+    const elegidos = (l === 'A' ? p.jugadoresA : p.jugadoresB) ?? [];
+    const resto = plantel.filter((j) => !elegidos.includes(j));
+    const alternar = async (j: string) => {
+      const nuevos = elegidos.includes(j) ? elegidos.filter((x) => x !== j) : elegidos.length >= 2 ? [elegidos[1], j] : [...elegidos, j];
+      setOcupado(true);
+      const problema = await guardarJugadores(torneo.id, partidoId, l, nuevos);
+      setOcupado(false);
+      if (problema) window.alert(problema);
+      else onGuardado();
+    };
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        {plantel.map((j) => {
+          const on = elegidos.includes(j);
+          return (
+            <button key={j} type="button" disabled={ocupado} onClick={() => void alternar(j)} aria-pressed={on}
+              className={`boton ${on ? '' : 'secundario'}`} style={{ padding: '3px 10px', fontSize: '0.8rem' }}>
+              {j}
+            </button>
+          );
+        })}
+        {relevo && elegidos.length === 2 && <span style={{ fontSize: '0.78rem', opacity: 0.7 }}>relevo: {resto.join(' y ')}</span>}
+      </div>
+    );
+  };
+  const a = lado('A');
+  const b = lado('B');
+  if (!a && !b) return null;
+  return (
+    <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+      <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>
+        {relevo ? 'Arrancan (tocá 2 por equipo; los otros 2 entran en el relevo)' : 'Juegan (tocá 2 por equipo)'}
+      </span>
+      {a}
+      {b}
+    </div>
+  );
+}
+
 // ¿El cuadro ya tiene resultado cargado para este partido? Un marcador de árbitro que quedó
 // "en juego" después de cargado el resultado no es un partido en vivo.
 function tieneResultado(torneos: Torneo[], torneoId: string, partidoId: string): boolean {
@@ -171,7 +243,14 @@ function etiquetaEnCancha(torneos: Torneo[], e: EnCancha, nombreCorto: (n: strin
   if (!t) return null;
   const cat = nombreCorto(t.nombre);
   const pg = t.partidosGrupo.find((p) => p.id === e.partidoId);
-  if (pg) return { cat, a: nombreDe(t, pg.aId), b: nombreDe(t, pg.bId), tipo: 'grupo' };
+  if (pg) {
+    return {
+      cat: pg.etiqueta ? `${cat} · ${pg.etiqueta}` : cat,
+      a: nombreConJugadores(nombreDe(t, pg.aId), pg.jugadoresA),
+      b: nombreConJugadores(nombreDe(t, pg.bId), pg.jugadoresB),
+      tipo: 'grupo',
+    };
+  }
   const llave = t.partidosLlave ?? [];
   const pl = llave.find((p) => p.id === e.partidoId);
   if (pl) {
@@ -1087,6 +1166,9 @@ export default function ProgramacionPage() {
                               ⚠ {choques.map((c) => `${c.jugador} está jugando en ${c.cancha}`).join(' · ')}
                             </div>
                           )}
+                          {f.tipo === 'grupo' && (
+                            <ElegirJugadores torneo={torneos.find((x) => x.id === f.torneoId)} partidoId={f.partidoId} onGuardado={() => void cargar(false)} />
+                          )}
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                             <span style={{ fontSize: '0.75rem', opacity: 0.6, fontWeight: 700 }}>Mandar a</span>
                             {activas.map((nombre) => (
@@ -1174,6 +1256,9 @@ export default function ProgramacionPage() {
                     )}
                     {modoCarga && e?.torneoId && e?.partidoId && (
                       <>
+                        {et.tipo === 'grupo' && (
+                          <ElegirJugadores torneo={torneos.find((x) => x.id === e.torneoId)} partidoId={e.partidoId} onGuardado={() => void cargar(false)} />
+                        )}
                         <CargaResultado
                           partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}
                           onGuardado={() => void cargar(false)}

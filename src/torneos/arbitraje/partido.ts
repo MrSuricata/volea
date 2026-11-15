@@ -44,6 +44,13 @@ export function plantelDe(nombre: string): string[] {
   return lista.length >= 2 ? lista : [];
 }
 
+/** Nombre del equipo con quiénes juegan este partido: "♦️ DIAMANTES (Hernán y Malena)". Sin elegidos, el nombre tal cual. */
+export function nombreConJugadores(nombre: string, elegidos?: string[]): string {
+  if (!elegidos || elegidos.length === 0) return nombre;
+  const equipo = nombre.replace(/\s*\([^)]*\)\s*$/, '');
+  return `${equipo} (${elegidos.join(' y ')})`;
+}
+
 function lado(t: Torneo, parejaId: string | null, elegidos?: string[]): LadoPartido | null {
   if (!parejaId) return null;
   const p = t.parejas.find((x) => x.id === parejaId);

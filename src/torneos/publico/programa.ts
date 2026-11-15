@@ -9,6 +9,7 @@ import { repartirEnCanchas } from '../engine/programacion';
 import type { PartidoAProgramar } from '../engine/programacion';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
+import { nombreConJugadores } from '../arbitraje/partido';
 
 // ─── Programa del evento en curso ────────────────────────────────────────────
 // La pantalla En vivo (/programacion) sale de acá: qué cuadros del gestor son del evento,
@@ -402,15 +403,19 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
       const fase = `Grupo ${g.nombre}`;
       for (const p of t.partidosGrupo.filter((x) => x.grupoId === g.id)) {
         total += 1;
-        const a = nombreDe(t, p.aId);
-        const b = nombreDe(t, p.bId);
+        const equipoA = nombreDe(t, p.aId);
+        const equipoB = nombreDe(t, p.bId);
+        // Por equipos: qué partido es (masculino/femenino/mixto) y quiénes lo juegan, si se eligieron.
+        const a = nombreConJugadores(equipoA, p.jugadoresA);
+        const b = nombreConJugadores(equipoB, p.jugadoresB);
+        const faseP = p.etiqueta ? `${fase} · ${p.etiqueta}` : fase;
         const r = resultadoDe(p);
         if (r) {
           jugados += 1;
-          resultados.push({ fase, a, b, pa: r.a, pb: r.b, wo: p.wo, torneoId: t.id, partidoId: p.id, tipo: 'grupo' });
+          resultados.push({ fase: faseP, a, b, pa: r.a, pb: r.b, wo: p.wo, torneoId: t.id, partidoId: p.id, tipo: 'grupo' });
         } else {
           deGrupo.push({
-            clave: claveDePartido(t.id, p.id), a, b, fase, jugadores: [...personasDe(a), ...personasDe(b)], despuesDe: [], listo: true,
+            clave: claveDePartido(t.id, p.id), a, b, fase: faseP, jugadores: [...personasDe(equipoA), ...personasDe(equipoB)], despuesDe: [], listo: true,
             torneoId: t.id, partidoId: p.id, tipo: 'grupo', grupo: gi, ronda: p.ronda,
           });
         }
