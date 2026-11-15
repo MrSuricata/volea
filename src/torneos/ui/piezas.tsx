@@ -125,7 +125,7 @@ export function EstadoGuardado({ sucio, guardado, alGuardar }: { sucio: boolean;
  * Un partido como dos renglones "nombre ↔ su caja": en el celular queda claro qué caja
  * es de quién (antes: nombre, caja, guion, caja, nombre en una línea que se partía).
  */
-export function FilaMarcador({ nombreA, nombreB, puntosA, puntosB, ganador, valido, aviso, encabezado, onGuardar }: {
+export function FilaMarcador({ nombreA, nombreB, puntosA, puntosB, ganador, valido, aviso, encabezado, pie, onGuardar }: {
   nombreA: string;
   nombreB: string;
   puntosA: number | null;
@@ -135,6 +135,8 @@ export function FilaMarcador({ nombreA, nombreB, puntosA, puntosB, ganador, vali
   /** "empate no vale", etc. (sobre lo guardado). */
   aviso?: string | null;
   encabezado?: ReactNode;
+  /** Debajo del marcador (ej. quiénes juegan, en torneos por equipos). */
+  pie?: ReactNode;
   onGuardar: Guardar;
 }) {
   const b = useBorradorMarcador(puntosA, puntosB, onGuardar);
@@ -177,6 +179,7 @@ export function FilaMarcador({ nombreA, nombreB, puntosA, puntosB, ganador, vali
       </div>
       {b.sucio && <p className="mt-1.5 text-[13px] font-semibold text-amber-800">Sin guardar: tocá ✓, Enter o salí de la fila.</p>}
       {!b.sucio && aviso && <p className="mt-1.5 text-[13px] font-semibold text-red-700">{aviso}</p>}
+      {pie && <div className="mt-2 border-t border-gray-100 pt-2">{pie}</div>}
     </div>
   );
 }

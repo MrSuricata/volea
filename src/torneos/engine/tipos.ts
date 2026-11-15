@@ -20,6 +20,10 @@ export type PartidoGrupo = {
   games?: { a: number; b: number }[];
   // Qué partido es dentro de un cruce por equipos (ej. "Dobles masculino"); solo se muestra.
   etiqueta?: string;
+  // Por equipos: quiénes juegan este partido de cada lado (nombres del plantel del equipo). En un
+  // partido con relevo son los que arrancan; los otros entran en el relevo.
+  jugadoresA?: string[];
+  jugadoresB?: string[];
 };
 
 export type SlotLlave =

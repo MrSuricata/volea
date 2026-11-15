@@ -36,10 +36,19 @@ export function resultadoEnCuadro(t: Torneo, partidoId: string): { puntosA: numb
   return p.games ? { puntosA: p.puntosA, puntosB: p.puntosB, games: p.games } : { puntosA: p.puntosA, puntosB: p.puntosB };
 }
 
-function lado(t: Torneo, parejaId: string | null): LadoPartido | null {
+/** Plantel de un equipo escrito como "♦️ DIAMANTES (Hernán · Malena · Gaby · Eduardo)"; [] si no tiene. */
+export function plantelDe(nombre: string): string[] {
+  const m = /\(([^)]*)\)\s*$/.exec(nombre);
+  if (!m) return [];
+  const lista = m[1].split(/\s*[·,;]\s*/).map((s) => s.trim()).filter(Boolean);
+  return lista.length >= 2 ? lista : [];
+}
+
+function lado(t: Torneo, parejaId: string | null, elegidos?: string[]): LadoPartido | null {
   if (!parejaId) return null;
   const p = t.parejas.find((x) => x.id === parejaId);
-  return p ? { parejaId, nombre: p.nombre, jugadores: jugadoresDe(p.nombre) } : null;
+  if (!p) return null;
+  return { parejaId, nombre: p.nombre, jugadores: elegidos && elegidos.length >= 2 ? elegidos.slice(0, 2) : jugadoresDe(p.nombre) };
 }
 
 const RONDAS: Record<number, string> = { 1: 'Final', 2: 'Semifinal', 4: 'Cuartos', 8: 'Octavos' };
@@ -48,7 +57,7 @@ export function ladosDelPartido(t: Torneo, partidoId: string): PartidoArbitrado 
   const g = t.partidosGrupo.find((p) => p.id === partidoId);
   if (g) {
     const grupo = t.grupos.find((x) => x.id === g.grupoId);
-    return { fase: 'grupo', titulo: `Grupo ${grupo?.nombre ?? ''} · Ronda ${g.ronda}${g.etiqueta ? ` · ${g.etiqueta}` : ''}`, a: lado(t, g.aId), b: lado(t, g.bId), jugado: g.puntosA !== null };
+    return { fase: 'grupo', titulo: `Grupo ${grupo?.nombre ?? ''} · Ronda ${g.ronda}${g.etiqueta ? ` · ${g.etiqueta}` : ''}`, a: lado(t, g.aId, g.jugadoresA), b: lado(t, g.bId, g.jugadoresB), jugado: g.puntosA !== null };
   }
   const llave = t.partidosLlave ?? [];
   const l = llave.find((p) => p.id === partidoId);
@@ -68,7 +77,7 @@ export function formatoDe(t: Torneo, fase: 'grupo' | 'llave'): FormatoArbitraje 
 }
 
 export function esDobles(t: Torneo): boolean {
-  return t.parejas.some((p) => (p.jugadorIds?.length ?? 0) >= 2 || jugadoresDe(p.nombre).length >= 2);
+  return t.parejas.some((p) => (p.jugadorIds?.length ?? 0) >= 2 || jugadoresDe(p.nombre).length >= 2 || plantelDe(p.nombre).length >= 2);
 }
 
 /** Partidos que pueden tener árbitro, en orden de juego (grupos por ronda, llave por ronda). Sin byes. */

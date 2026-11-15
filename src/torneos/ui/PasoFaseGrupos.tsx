@@ -6,6 +6,7 @@ import { conWo, resultadoValido } from '../engine/tipos';
 import { calcularTabla, calcularTablaIndividual } from '../engine/tabla';
 import { ordenDeJuego } from '../engine/canchas';
 import { nombreDe } from './util';
+import { nombreCorto, plantelDe } from '../arbitraje/partido';
 import { useDialogos } from './dialogos';
 import { Boton, Insignia, Segmentado, Selector } from '../../admin/ui';
 import { FilaMarcador, Nota, PiePaso } from './piezas';
@@ -28,6 +29,14 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
 
   function marcarWo(partidoId: string, wo: boolean) {
     actualizar((t) => ({ ...t, partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId ? conWo(p, wo) : p)) }));
+  }
+
+  function elegirJugadores(partidoId: string, lado: 'A' | 'B', jugadores: string[]) {
+    const campo = lado === 'A' ? 'jugadoresA' : 'jugadoresB';
+    actualizar((t) => ({
+      ...t,
+      partidosGrupo: t.partidosGrupo.map((p) => (p.id === partidoId ? { ...p, [campo]: jugadores.length ? jugadores : undefined } : p)),
+    }));
   }
 
   const total = torneo.partidosGrupo.length;
@@ -130,6 +139,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
                           partido={partidoPorId.get(turno.partidoId)!}
                           onCargar={cargarResultado}
                           onWo={marcarWo}
+                          onElegir={elegirJugadores}
                           conGrupo
                           cancha={turno.cancha}
                         />
@@ -153,7 +163,7 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
               {torneo.partidosGrupo
                 .filter((p) => p.grupoId === g.id)
                 .map((p) => (
-                  <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} onWo={marcarWo} />
+                  <FilaPartido key={p.id} torneo={torneo} partido={p} onCargar={cargarResultado} onWo={marcarWo} onElegir={elegirJugadores} />
                 ))}
             </div>
           </div>
@@ -175,11 +185,64 @@ export default function PasoFaseGrupos({ torneo, actualizar }: PropsPaso) {
   );
 }
 
-function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
+/** Por equipos: chips con el plantel de cada lado para marcar quiénes juegan este partido. */
+function QuienesJuegan({ torneo, partido, onElegir }: {
+  torneo: Torneo;
+  partido: PartidoGrupo;
+  onElegir: (id: string, lado: 'A' | 'B', jugadores: string[]) => void;
+}) {
+  const relevo = /relevo/i.test(partido.etiqueta ?? '');
+  const lado = (l: 'A' | 'B') => {
+    const parejaId = l === 'A' ? partido.aId : partido.bId;
+    const plantel = plantelDe(nombreDe(torneo, parejaId));
+    if (plantel.length < 2) return null;
+    const elegidos = (l === 'A' ? partido.jugadoresA : partido.jugadoresB) ?? [];
+    const alternar = (j: string) => {
+      const nuevos = elegidos.includes(j) ? elegidos.filter((x) => x !== j) : elegidos.length >= 2 ? [elegidos[1], j] : [...elegidos, j];
+      onElegir(partido.id, l, nuevos);
+    };
+    const resto = plantel.filter((j) => !elegidos.includes(j));
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+        <span className="w-24 shrink-0 truncate font-semibold text-gray-500">{nombreCorto(nombreDe(torneo, parejaId))}</span>
+        {plantel.map((j) => {
+          const on = elegidos.includes(j);
+          return (
+            <button
+              key={j}
+              type="button"
+              onClick={() => alternar(j)}
+              aria-pressed={on}
+              className={`rounded-full px-2.5 py-1 font-semibold ring-1 transition-colors ${on ? 'bg-navy-700 text-white ring-navy-700' : 'bg-white text-gray-600 ring-gray-300 hover:text-navy-700'}`}
+            >
+              {j}
+            </button>
+          );
+        })}
+        {relevo && elegidos.length === 2 && resto.length > 0 && (
+          <span className="text-gray-500">· relevo: {resto.join(' y ')}</span>
+        )}
+      </div>
+    );
+  };
+  const a = lado('A');
+  const b = lado('B');
+  if (!a && !b) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[12px] font-bold uppercase tracking-wide text-gray-500">{relevo ? 'Arrancan (tocá 2 por equipo)' : 'Juegan (tocá 2 por equipo)'}</p>
+      {a}
+      {b}
+    </div>
+  );
+}
+
+function FilaPartido({ torneo, partido, onCargar, onWo, onElegir, conGrupo, cancha }: {
   torneo: Torneo;
   partido: PartidoGrupo;
   onCargar: (id: string, a: number | null, b: number | null) => void;
   onWo: (id: string, wo: boolean) => void;
+  onElegir: (id: string, lado: 'A' | 'B', jugadores: string[]) => void;
   conGrupo?: boolean;
   cancha?: number;
 }) {
@@ -205,7 +268,7 @@ function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
     <>
       {cancha !== undefined && <Insignia tono="navy" className="bg-navy-700 text-white ring-0">Cancha {cancha}</Insignia>}
       {conGrupo && grupo && <Insignia>Grupo {grupo.nombre}</Insignia>}
-      {partido.etiqueta && <Insignia>{partido.etiqueta}</Insignia>}
+      {partido.etiqueta && <Insignia className="bg-lime-300 font-bold text-navy-900 ring-0">{partido.etiqueta}</Insignia>}
       {botonWo}
     </>
   ) : undefined;
@@ -219,6 +282,7 @@ function FilaPartido({ torneo, partido, onCargar, onWo, conGrupo, cancha }: {
       valido={valido}
       aviso={invalido ? (partido.puntosA === partido.puntosB ? 'Empate: no vale (en pickleball no hay empate).' : 'Resultado que no vale.') : null}
       encabezado={encabezado}
+      pie={<QuienesJuegan torneo={torneo} partido={partido} onElegir={onElegir} />}
       onGuardar={(a, b) => onCargar(partido.id, a, b)}
     />
   );
