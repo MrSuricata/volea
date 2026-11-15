@@ -132,6 +132,21 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
     const lista = tipo === 'grupo' ? t.partidosGrupo : t.partidosLlave ?? [];
     const p = lista.find((x) => x.id === partidoId);
     if (!p) return 'El partido ya no existe (¿se rearmó el cuadro?)';
+    // Mixto con relevo sin la 1ª parte cargada: "11-7" no es el final, es la 1ª parte.
+    // Se guarda como parcial y el partido sigue en cancha (entra el relevo).
+    const relevo = tipo === 'grupo' ? /relevo a (\d+)/i.exec((p as Torneo['partidosGrupo'][number]).etiqueta ?? '') : null;
+    if (relevo && pa !== null && pb !== null && !(p as Torneo['partidosGrupo'][number]).parcial
+      && Math.max(pa, pb) === Number(relevo[1]) && Math.min(pa, pb) < Number(relevo[1])) {
+      (p as Torneo['partidosGrupo'][number]).parcial = { a: pa, b: pb };
+      const { data: upd, error: e2 } = await sb.from('rk_torneos')
+        .update({ data: t, updated_at: new Date().toISOString() })
+        .eq('id', torneoId)
+        .eq('updated_at', fila.updated_at as string)
+        .select('id');
+      if (e2) return 'No se pudo guardar (¿sesión vencida?)';
+      if (upd && upd.length > 0) return null;
+      continue;
+    }
     p.puntosA = pa;
     p.puntosB = pb;
     if (pa !== null && !p.cargadoEl) p.cargadoEl = new Date().toISOString();
