@@ -9,7 +9,7 @@ import { repartirEnCanchas } from '../engine/programacion';
 import type { PartidoAProgramar } from '../engine/programacion';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
-import { nombreConJugadores } from '../arbitraje/partido';
+import { textoPartidoGrupo } from '../arbitraje/partido';
 
 // ─── Programa del evento en curso ────────────────────────────────────────────
 // La pantalla En vivo (/programacion) sale de acá: qué cuadros del gestor son del evento,
@@ -406,9 +406,10 @@ export function armarCategoria(t: Torneo, cfg: { corto: string; dia: string; ord
         const equipoA = nombreDe(t, p.aId);
         const equipoB = nombreDe(t, p.bId);
         // Por equipos: qué partido es (masculino/femenino/mixto) y quiénes lo juegan, si se eligieron.
-        const a = nombreConJugadores(equipoA, p.jugadoresA);
-        const b = nombreConJugadores(equipoB, p.jugadoresB);
-        const faseP = p.etiqueta ? `${fase} · ${p.etiqueta}` : fase;
+        const txt = textoPartidoGrupo(equipoA, equipoB, p);
+        const a = txt.a;
+        const b = txt.b;
+        const faseP = txt.etiqueta ? `${fase} · ${txt.etiqueta}` : fase;
         const r = resultadoDe(p);
         if (r) {
           jugados += 1;

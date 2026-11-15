@@ -7,7 +7,7 @@ import { armarCopas } from '../engine/copas';
 import { armarLlaveFormato, formatoEfectivo } from '../engine/formatoLlave';
 import { normalizar } from '../../utils/nombres';
 import { nombreDe } from '../ui/util';
-import { nombreConJugadores, plantelDe } from '../arbitraje/partido';
+import { nombreCorto, plantelDe, textoPartidoGrupo } from '../arbitraje/partido';
 import { listarTorneosPublicos } from './datos';
 import type { TorneoPublico } from './datos';
 import { RkCargando, RkError } from './Estados';
@@ -156,7 +156,19 @@ async function guardarResultado(torneoId: string, tipo: 'grupo' | 'llave', parti
 }
 
 // Por equipos: quiénes juegan un partido de grupo (mismo candado optimista que el resultado).
-async function guardarJugadores(torneoId: string, partidoId: string, lado: 'A' | 'B', jugadores: string[]): Promise<string | null> {
+function guardarJugadores(torneoId: string, partidoId: string, lado: 'A' | 'B', jugadores: string[]): Promise<string | null> {
+  return cambiarPartidoGrupo(torneoId, partidoId, (p) => {
+    if (lado === 'A') p.jugadoresA = jugadores.length ? jugadores : undefined;
+    else p.jugadoresB = jugadores.length ? jugadores : undefined;
+  });
+}
+
+// Mixto con relevo: cómo terminó la 1ª parte (null = se borra).
+function guardarParcial(torneoId: string, partidoId: string, parcial: { a: number; b: number } | null): Promise<string | null> {
+  return cambiarPartidoGrupo(torneoId, partidoId, (p) => { p.parcial = parcial ?? undefined; });
+}
+
+async function cambiarPartidoGrupo(torneoId: string, partidoId: string, cambio: (p: Torneo['partidosGrupo'][number]) => void): Promise<string | null> {
   const sb = supabase;
   if (!sb) return 'Sin conexión con el servidor';
   for (let intento = 0; intento < 2; intento++) {
@@ -165,8 +177,7 @@ async function guardarJugadores(torneoId: string, partidoId: string, lado: 'A' |
     const t = fila.data as Torneo;
     const p = t.partidosGrupo.find((x) => x.id === partidoId);
     if (!p) return 'El partido ya no existe';
-    if (lado === 'A') p.jugadoresA = jugadores.length ? jugadores : undefined;
-    else p.jugadoresB = jugadores.length ? jugadores : undefined;
+    cambio(p);
     const { data: upd, error: e2 } = await sb.from('rk_torneos')
       .update({ data: t, updated_at: new Date().toISOString() })
       .eq('id', torneoId)
@@ -226,6 +237,49 @@ function ElegirJugadores({ torneo, partidoId, onGuardado }: { torneo: Torneo | u
   );
 }
 
+// Mixto con relevo en cancha: se carga cómo terminó la 1ª parte y el partido pasa a la 2ª
+// (entran los otros dos de cada equipo; el marcador sigue desde ahí hasta el final).
+function ParcialRelevo({ torneo, partidoId, onGuardado }: { torneo: Torneo | undefined; partidoId: string; onGuardado: () => void }) {
+  const [pa, setPa] = useState('');
+  const [pb, setPb] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const p = torneo?.partidosGrupo.find((x) => x.id === partidoId);
+  const m = /relevo a (\d+)/i.exec(p?.etiqueta ?? '');
+  if (!torneo || !p || !m) return null;
+  const tope = Number(m[1]);
+  const guardar = async (valor: { a: number; b: number } | null) => {
+    setOcupado(true);
+    const problema = await guardarParcial(torneo.id, partidoId, valor);
+    setOcupado(false);
+    if (problema) window.alert(problema);
+    else onGuardado();
+  };
+  const corto = (id: string) => nombreCorto(nombreDe(torneo, id));
+  if (p.parcial) {
+    return (
+      <div style={{ marginTop: 8, fontSize: '0.82rem', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700 }}>1ª parte: {corto(p.aId)} {p.parcial.a} – {p.parcial.b} {corto(p.bId)} · ahora juega el relevo</span>
+        <button className="boton secundario" disabled={ocupado} style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+          onClick={() => void guardar(null)}>Volver a la 1ª parte</button>
+      </div>
+    );
+  }
+  const a = Number(pa);
+  const b = Number(pb);
+  const valido = pa !== '' && pb !== '' && Number.isInteger(a) && Number.isInteger(b) && Math.max(a, b) === tope && Math.min(a, b) < tope && Math.min(a, b) >= 0;
+  return (
+    <form style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, fontSize: '0.8rem' }}
+      onSubmit={(ev) => { ev.preventDefault(); if (valido) void guardar({ a, b }); }}>
+      <span style={{ fontWeight: 700, opacity: 0.8 }}>Terminó la 1ª parte (a {tope}):</span>
+      <span>{corto(p.aId)}</span>
+      <input inputMode="numeric" value={pa} onChange={(ev) => setPa(ev.target.value.replace(/\D/g, ''))} style={{ width: 48 }} aria-label={`1ª parte ${corto(p.aId)}`} />
+      <input inputMode="numeric" value={pb} onChange={(ev) => setPb(ev.target.value.replace(/\D/g, ''))} style={{ width: 48 }} aria-label={`1ª parte ${corto(p.bId)}`} />
+      <span>{corto(p.bId)}</span>
+      <button className="boton" type="submit" disabled={!valido || ocupado} style={{ padding: '3px 10px', fontSize: '0.78rem' }}>Pasar al relevo</button>
+    </form>
+  );
+}
+
 // ¿El cuadro ya tiene resultado cargado para este partido? Un marcador de árbitro que quedó
 // "en juego" después de cargado el resultado no es un partido en vivo.
 function tieneResultado(torneos: Torneo[], torneoId: string, partidoId: string): boolean {
@@ -244,12 +298,8 @@ function etiquetaEnCancha(torneos: Torneo[], e: EnCancha, nombreCorto: (n: strin
   const cat = nombreCorto(t.nombre);
   const pg = t.partidosGrupo.find((p) => p.id === e.partidoId);
   if (pg) {
-    return {
-      cat: pg.etiqueta ? `${cat} · ${pg.etiqueta}` : cat,
-      a: nombreConJugadores(nombreDe(t, pg.aId), pg.jugadoresA),
-      b: nombreConJugadores(nombreDe(t, pg.bId), pg.jugadoresB),
-      tipo: 'grupo',
-    };
+    const txt = textoPartidoGrupo(nombreDe(t, pg.aId), nombreDe(t, pg.bId), pg);
+    return { cat: txt.etiqueta ? `${cat} · ${txt.etiqueta}` : cat, a: txt.a, b: txt.b, tipo: 'grupo' };
   }
   const llave = t.partidosLlave ?? [];
   const pl = llave.find((p) => p.id === e.partidoId);
@@ -1257,7 +1307,10 @@ export default function ProgramacionPage() {
                     {modoCarga && e?.torneoId && e?.partidoId && (
                       <>
                         {et.tipo === 'grupo' && (
-                          <ElegirJugadores torneo={torneos.find((x) => x.id === e.torneoId)} partidoId={e.partidoId} onGuardado={() => void cargar(false)} />
+                          <>
+                            <ElegirJugadores torneo={torneos.find((x) => x.id === e.torneoId)} partidoId={e.partidoId} onGuardado={() => void cargar(false)} />
+                            <ParcialRelevo torneo={torneos.find((x) => x.id === e.torneoId)} partidoId={e.partidoId} onGuardado={() => void cargar(false)} />
+                          </>
                         )}
                         <CargaResultado
                           partido={{ a: et.a, b: et.b, torneoId: e.torneoId, partidoId: e.partidoId, tipo: et.tipo }}

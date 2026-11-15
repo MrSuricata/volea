@@ -24,6 +24,8 @@ export type PartidoGrupo = {
   // partido con relevo son los que arrancan; los otros entran en el relevo.
   jugadoresA?: string[];
   jugadoresB?: string[];
+  // Partido con relevo: cómo terminó la 1ª parte (cuando uno llegó al número del relevo).
+  parcial?: { a: number; b: number };
 };
 
 export type SlotLlave =

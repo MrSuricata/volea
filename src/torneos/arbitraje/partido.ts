@@ -51,6 +51,34 @@ export function nombreConJugadores(nombre: string, elegidos?: string[]): string 
   return `${equipo} (${elegidos.join(' y ')})`;
 }
 
+/** Los del relevo: el resto del plantel, si los que arrancan se eligieron del plantel. */
+export function relevoDeEquipo(nombre: string, arrancan?: string[]): string[] {
+  const plantel = plantelDe(nombre);
+  if (!arrancan || arrancan.length < 2 || !arrancan.every((j) => plantel.includes(j))) return [];
+  return plantel.filter((j) => !arrancan.includes(j));
+}
+
+/**
+ * Cómo se muestra un partido de grupo en En vivo y la tele: equipos con quiénes juegan y qué partido es.
+ * En un mixto con relevo y la 1ª parte cargada, ya figuran los que entraron y "2ª parte (11-7)".
+ */
+export function textoPartidoGrupo(
+  equipoA: string,
+  equipoB: string,
+  p: { etiqueta?: string; jugadoresA?: string[]; jugadoresB?: string[]; parcial?: { a: number; b: number } },
+): { a: string; b: string; etiqueta?: string } {
+  if (p.parcial && /relevo/i.test(p.etiqueta ?? '')) {
+    const ra = relevoDeEquipo(equipoA, p.jugadoresA);
+    const rb = relevoDeEquipo(equipoB, p.jugadoresB);
+    return {
+      a: nombreConJugadores(equipoA, ra),
+      b: nombreConJugadores(equipoB, rb),
+      etiqueta: `${p.etiqueta} · 2ª parte (${p.parcial.a}-${p.parcial.b})`,
+    };
+  }
+  return { a: nombreConJugadores(equipoA, p.jugadoresA), b: nombreConJugadores(equipoB, p.jugadoresB), etiqueta: p.etiqueta };
+}
+
 function lado(t: Torneo, parejaId: string | null, elegidos?: string[]): LadoPartido | null {
   if (!parejaId) return null;
   const p = t.parejas.find((x) => x.id === parejaId);
