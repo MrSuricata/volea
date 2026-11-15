@@ -107,6 +107,16 @@ export default function ArbitroPage() {
     setSesion({ codigo: c, partido, cola, datos, leido: t === 'red' ? 'red' : t ? 'ok' : 'no', aviso, sinSenal: false, confirmada: true });
   }
 
+  // Link directo al partido (/arbitro?c=123456): entra solo, sin escribir el código.
+  useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get('c')?.trim() ?? '';
+    if (!c) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (!sesion || sesion.codigo !== c) { setCodigo(c); void ingresar(c); }
+    // solo al abrir la página
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (sesion) {
     return <Partido key={sesion.codigo} sesion={sesion} onSalir={() => { olvidarUltimo(); setSesion(null); setCodigo(''); setError(null); }} />;
   }
