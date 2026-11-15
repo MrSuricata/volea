@@ -953,7 +953,7 @@ export default function ProgramacionPage() {
 
         {modoCarga && (
           <PanelEvento
-            key={ajustes ? 'cargado' : 'vacio'}
+            key={ajustes ? 'evento-cargado' : 'evento-vacio'}
             evento={ajustes?.evento}
             programa={programa}
             onGuardar={(evento) => guardarAjustes({ ...(ajustes ?? {}), evento })}
@@ -963,13 +963,13 @@ export default function ProgramacionPage() {
           <AjustesHorarios
             // se rearma solo si aparece o desaparece una categoría: al guardar (que puede
             // cambiarles el orden) tiene que seguir abierto y mostrando la confirmación
-            key={cats.map((c) => c.torneoId).sort().join(',')}
+            key={'horarios-' + cats.map((c) => c.torneoId).sort().join(',')}
             vigente={vigente} cats={cats} onGuardar={guardarAjustes}
           />
         )}
         {modoCarga && (
           <PanelTv
-            key={ajustes ? 'cargado' : 'vacio'}
+            key={ajustes ? 'tv-cargado' : 'tv-vacio'}
             tv={ajustes?.tv}
             onGuardar={(tv) => guardarAjustes({ ...(ajustes ?? {}), tv })}
           />
