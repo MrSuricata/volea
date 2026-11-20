@@ -24,6 +24,8 @@ import PantallaTv from './PantallaTv';
 import PanelTv from './PanelTv';
 import PanelEvento from './PanelEvento';
 import NavPublica from './NavPublica';
+import { PantallaOpcTv, SeccionOpc } from './OpcEnVivo';
+import { esOpc, planOpc } from './opcCanchas';
 import { MarcadorVivo, claveMarcador, useMarcadores } from '../arbitraje/MarcadorVivo';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
@@ -906,7 +908,20 @@ export default function ProgramacionPage() {
   }
   const [color1, color2, color3] = programa.colores;
 
+  // One Point Challenge del evento (si hay más de uno, el último que se tocó): tiene su propio
+  // tablero por cancha. En la tele ocupa toda la pantalla mientras se juega y hasta 30 minutos
+  // después de la final (?tv&opc=0 lo saca).
+  const torneoOpc = torneos
+    .filter((t) => esOpc(t) && programa.esDelEvento(t))
+    .sort((x, y) => (y.updatedAt ?? '').localeCompare(x.updatedAt ?? ''))[0];
+  const opc = torneoOpc ? planOpc(torneoOpc) : null;
+  const opcEnTv = !!opc && new URLSearchParams(window.location.search).get('opc') !== '0'
+    && (opc.terminadoEl === null || Date.now() - opc.terminadoEl < 30 * 60 * 1000);
+
   // Modo TV (/programacion?tv): pantalla completa para la tele del club, sin controles.
+  if (esTv && opc && opcEnTv) {
+    return <PantallaOpcTv plan={opc} colores={programa.colores} ahora={new Date()} tv={ajustes?.tv} />;
+  }
   if (esTv) {
     const diaTv = momento.dia ?? dia;
     const canchasTv = activas.map((nombre) => {
@@ -1040,7 +1055,9 @@ export default function ProgramacionPage() {
           />
         )}
 
-        {cats.length === 0 ? (
+        {opc && <SeccionOpc plan={opc} modoCarga={modoCarga} onCambio={() => void cargar(false)} />}
+
+        {cats.length === 0 ? (opc ? null :
           <div style={{ ...carta, borderColor: 'var(--lima)', textAlign: 'center', padding: '30px 20px' }}>
             <p style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>{programa.avisoSinCuadros}</p>
             <p style={{ margin: '10px 0 0', opacity: 0.75 }}>

@@ -41,7 +41,7 @@ const chip: CSSProperties = {
 };
 
 // Publicidad VOLEA: lo que hay en stock de la tienda, destacados primero (se relee cada 10 min).
-function useVidriera(): Product[] {
+export function useVidriera(): Product[] {
   const [lista, setLista] = useState<Product[]>([]);
   useEffect(() => {
     let vivo = true;
@@ -57,7 +57,7 @@ function useVidriera(): Product[] {
   return lista;
 }
 
-function Vidriera({ productos }: { productos: Product[] }) {
+export function Vidriera({ productos }: { productos: Product[] }) {
   if (productos.length === 0) return null;
   return (
     <section style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr', alignItems: 'stretch', background: '#fff', borderRadius: '0.6em', overflow: 'hidden', border: `2px solid ${LIMA}` }}>
@@ -83,7 +83,7 @@ function Vidriera({ productos }: { productos: Product[] }) {
   );
 }
 
-function TiraSponsors({ sponsors }: { sponsors: SponsorTv[] }) {
+export function TiraSponsors({ sponsors }: { sponsors: SponsorTv[] }) {
   return (
     <section style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr', alignItems: 'stretch', background: '#fff', borderRadius: '0.6em', overflow: 'hidden', border: `2px solid ${LIMA}`, minHeight: '4.1em' }}>
       <div style={{ background: NAVY, color: LIMA, padding: '0.35em 0.9em', display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.05 }}>
@@ -100,7 +100,7 @@ function TiraSponsors({ sponsors }: { sponsors: SponsorTv[] }) {
 }
 
 // Elige qué cartel toca: cada `cada` minutos se muestra uno (rotando) durante `segundos`.
-function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerrar: () => void } {
+export function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerrar: () => void } {
   const cada = Math.max(0, tv?.cada ?? 8);
   const anuncios: AnuncioTv[] = tv?.anuncios && tv.anuncios.length > 0 ? tv.anuncios : [{ tipo: 'gracias' }];
   // ?tv&cartel arranca mostrando el primer cartel (para probar cómo se ve).
@@ -129,7 +129,7 @@ function useCartel(tv: ConfigTv | undefined): { anuncio: AnuncioTv | null; cerra
   return { anuncio: actual, cerrar: () => setActual(null) };
 }
 
-function Cartel({ anuncio, sponsors, colores, cerrar }: { anuncio: AnuncioTv; sponsors: SponsorTv[]; colores: string[]; cerrar: () => void }) {
+export function Cartel({ anuncio, sponsors, colores, cerrar }: { anuncio: AnuncioTv; sponsors: SponsorTv[]; colores: string[]; cerrar: () => void }) {
   const [c1, c2, c3] = colores;
   return (
     <div

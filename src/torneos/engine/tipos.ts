@@ -99,6 +99,9 @@ export type Torneo = {
   // One Point Challenge: parejaIds de los que no se presentaron. Sus cruces listos se resuelven
   // solos por W.O. a favor del rival (ver ui/opc/ausentes). Ausente o vacío ⇒ como siempre.
   ausentes?: string[];
+  // One Point Challenge en En vivo: en cuántas canchas se reparten las primeras rondas y hasta qué
+  // ronda (después sigue todo en la Cancha 1). Ausente ⇒ 3 canchas mientras la ronda tenga 3 cruces o más.
+  opc?: { canchas?: number; hastaRonda?: number };
 };
 
 export function nuevoId(): string {
