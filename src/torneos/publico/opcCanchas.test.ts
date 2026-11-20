@@ -42,6 +42,37 @@ describe('planOpc', () => {
     expect(plan.partidos.filter((p) => p.ronda >= 2).every((p) => p.cancha === 1)).toBe(true);
   });
 
+  it('las canchas elegidas para una ronda mandan sobre la regla automática', () => {
+    const base = torneo(64); // 32, 16, 8, 4, 2, 1
+    const plan = planOpc({ ...base, opc: { porRonda: { 2: 2, 3: 1, 4: 1 } } });
+    const canchasDe = (ronda: number) => new Set(plan.partidos.filter((p) => p.ronda === ronda).map((p) => p.cancha)).size;
+    expect([1, 2, 3, 4, 5, 6].map(canchasDe)).toEqual([3, 2, 1, 1, 1, 1]);
+    expect(plan.rondas.map((r) => r.canchas)).toEqual([3, 2, 1, 1, 1, 1]);
+    expect(plan.rondas.map((r) => r.maximo)).toEqual([3, 3, 3, 3, 2, 1]);
+    // nunca más canchas que cruces, ni más de las disponibles; un valor roto se ignora
+    const raro = planOpc({ ...base, opc: { porRonda: { 5: 3, 1: 0, 2: 2.5 } } });
+    expect(raro.rondas.map((r) => r.canchas)).toEqual([3, 3, 3, 3, 2, 1]);
+  });
+
+  it('con canchas distintas por ronda se juega entero sin trabarse, aunque se cambien en el medio', () => {
+    let t: Torneo = { ...torneo(64), opc: { porRonda: { 3: 2, 4: 1 } } };
+    let toques = 0;
+    for (;;) {
+      const plan = planOpc(t);
+      if (plan.campeon) break;
+      // a mitad de la ronda 1 se baja a 2 canchas; a mitad de la 2, a 1
+      if (toques === 15) t = { ...t, opc: { porRonda: { ...t.opc?.porRonda, 1: 2 } } };
+      if (toques === 40) t = { ...t, opc: { porRonda: { ...t.opc?.porRonda, 2: 1 } } };
+      const conCruce = planOpc(t).canchas.filter((c) => c.ahora);
+      expect(conCruce.length).toBeGreaterThan(0);
+      for (const c of conCruce) {
+        t = { ...t, partidosLlave: marcar(t.partidosLlave ?? [], c.ahora!.id, toques % 2 ? 'a' : 'b', new Date(Date.UTC(2026, 10, 20, 0, 0, toques)).toISOString()) };
+        toques += 1;
+      }
+    }
+    expect(toques).toBe(63);
+  });
+
   it('se juega entero tocando siempre el cruce de cada cancha', () => {
     for (const n of [6, 20, 37]) {
       let t = torneo(n);

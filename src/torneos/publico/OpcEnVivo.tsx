@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { almacenLocal } from '../../utils/almacen';
 import { promoOpcVigente, type ConfigTv, type PromoOpcVigente } from './programa';
 import { Cartel, TiraSponsors, Vidriera, useCartel, useVidriera } from './PantallaTv';
-import { marcarOpcEnServidor, type CanchaOpc, type PartidoOpc, type PlanOpc } from './opcCanchas';
+import { canchasOpcEnServidor, marcarOpcEnServidor, type CanchaOpc, type PartidoOpc, type PlanOpc } from './opcCanchas';
 
 const LIMA = '#CCFF00';
 const NAVY = '#001328';
@@ -233,6 +233,19 @@ export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: 
     timer.current = window.setTimeout(() => { timer.current = null; setOcupado(false); }, problema ? 0 : 900);
   }
 
+  async function elegirCanchas(ronda: number, canchas: number) {
+    if (ocupado) return;
+    setOcupado(true);
+    setError('');
+    const problema = await canchasOpcEnServidor(plan.torneoId, ronda, canchas);
+    if (problema) setError(problema);
+    onCambio();
+    setOcupado(false);
+  }
+  // Rondas a las que todavía se les puede cambiar la cantidad de canchas: las que no terminaron
+  // y tienen más de un cruce.
+  const rondasAbiertas = plan.rondas.filter((r) => r.jugados < r.cruces && r.maximo > 1);
+
   const visibles = modoCarga && miCancha && plan.canchas.some((c) => c.numero === miCancha)
     ? plan.canchas.filter((c) => c.numero === miCancha)
     : plan.canchas;
@@ -277,6 +290,29 @@ export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: 
           ))}
           <button className={`boton ${miCancha === null ? '' : 'secundario'}`} style={chip(miCancha === null)} onClick={() => setMiCancha(null)}>Todas</button>
         </div>
+      )}
+      {modoCarga && !plan.campeon && rondasAbiertas.length > 0 && (
+        <details data-opc-canchas style={{ border: '1px solid var(--borde)', borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: '0.9rem' }}>
+            Canchas por ronda <span style={{ opacity: 0.7, fontWeight: 600 }}>· {rondasAbiertas.map((r) => r.canchas).join(' → ')}</span>
+          </summary>
+          <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+            {rondasAbiertas.map((r) => (
+              <div key={r.ronda} role="group" aria-label={`Canchas de ${r.nombre}`} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ flex: '1 1 9rem', fontSize: '0.86rem', fontWeight: 700 }}>
+                  {r.nombre} <span style={{ opacity: 0.65, fontWeight: 600 }}>· {r.jugados > 0 ? `faltan ${r.cruces - r.jugados} de ${r.cruces}` : `${r.cruces} cruces`}</span>
+                </span>
+                {Array.from({ length: r.maximo }, (_, i) => i + 1).map((n) => (
+                  <button key={n} type="button" className={`boton ${r.canchas === n ? '' : 'secundario'}`} style={{ ...chip(r.canchas === n), minWidth: 44 }}
+                    aria-pressed={r.canchas === n} aria-label={`${r.nombre} en ${n} cancha${n > 1 ? 's' : ''}`} disabled={ocupado} onClick={() => void elegirCanchas(r.ronda, n)}>{n}</button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <p style={{ margin: '8px 0 0', fontSize: '0.75rem', opacity: 0.7 }}>
+            Elegí en cuántas canchas se juega cada ronda. Si cambiás la ronda que se está jugando, los cruces que faltan se reparten de nuevo.
+          </p>
+        </details>
       )}
       {error && <div role="alert" style={{ color: '#ff8fa8', fontWeight: 700, marginBottom: 10 }}>{error}</div>}
 

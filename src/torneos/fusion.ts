@@ -33,14 +33,16 @@ export type ResultadoFusion = { ok: true; torneo: Torneo } | { ok: false; choque
 // Campos del torneo que se fusionan uno por uno (no cambian qué partidos hay ni entre quiénes).
 // `ausentes` (OPC: los que no se presentaron) también es suelto, pero se fusiona como conjunto
 // (fusionarAusentes): dos equipos que marcan a distintos ausentes no chocan.
-const CAMPOS_SUELTOS = new Set(['nombre', 'fase', 'visible', 'categoria', 'cuentaParaRanking', 'evento', 'canchas', 'arbitraje', 'ausentes']);
+// `opc` (en cuántas canchas va cada ronda del One Point Challenge) se cambia desde En vivo mientras
+// el gestor carga resultados: no cambia qué cruces hay, así que no es estructura.
+const CAMPOS_SUELTOS = new Set(['nombre', 'fase', 'visible', 'categoria', 'cuentaParaRanking', 'evento', 'canchas', 'arbitraje', 'ausentes', 'opc']);
 const LISTAS = ['partidosGrupo', 'partidosLlave'] as const;
 // Campos de un partido que son "el resultado"; todo lo demás del partido es estructura.
 const CAMPOS_RESULTADO = ['puntosA', 'puntosB', 'wo', 'games'] as const;
 
 const ETIQUETA_CAMPO: Record<string, string> = {
   nombre: 'el nombre del torneo', fase: 'el paso del torneo', visible: 'si lo ve el público', categoria: 'la categoría',
-  cuentaParaRanking: 'si cuenta para el ranking', evento: 'el evento', canchas: 'las canchas', arbitraje: 'el formato de árbitro',
+  cuentaParaRanking: 'si cuenta para el ranking', evento: 'el evento', canchas: 'las canchas', arbitraje: 'el formato de árbitro', opc: 'las canchas del One Point Challenge',
 };
 
 // Igualdad de JSON: lo que importa es lo que se guarda en rk_torneos.data. Claves con valor

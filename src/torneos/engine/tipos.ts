@@ -101,7 +101,8 @@ export type Torneo = {
   ausentes?: string[];
   // One Point Challenge en En vivo: en cuántas canchas se reparten las primeras rondas y hasta qué
   // ronda (después sigue todo en la Cancha 1). Ausente ⇒ 3 canchas mientras la ronda tenga 3 cruces o más.
-  opc?: { canchas?: number; hastaRonda?: number };
+  // `porRonda` (ronda → canchas) manda sobre lo anterior: se elige desde En vivo, ronda por ronda.
+  opc?: { canchas?: number; hastaRonda?: number; porRonda?: Record<string, number> };
 };
 
 export function nuevoId(): string {

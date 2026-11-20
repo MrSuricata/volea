@@ -42,9 +42,23 @@ export type CanchaOpc = {
   pendientes: number;
 };
 
+export type RondaOpc = {
+  ronda: number;
+  nombre: string;
+  /** Cruces que se juegan (sin los que pasan directo). */
+  cruces: number;
+  jugados: number;
+  /** En cuántas canchas se reparte. */
+  canchas: number;
+  /** Hasta cuántas se puede elegir (nunca más canchas que cruces). */
+  maximo: number;
+};
+
 export type PlanOpc = {
   torneoId: string;
   nombre: string;
+  /** Todas las rondas con cruces, en orden. */
+  rondas: RondaOpc[];
   partidos: PartidoOpc[];
   /** Canchas con cruces por jugar (vacío cuando terminó). */
   canchas: CanchaOpc[];
@@ -71,8 +85,21 @@ export function esOpc(t: Torneo): boolean {
 }
 
 /** En cuántas canchas se juega una ronda con `cruces` partidos reales. */
+export const MAX_CANCHAS_OPC = 6;
+
+/** Cuántas canchas hay disponibles para el One Point Challenge (3 si el torneo no dice otra cosa). */
+export function canchasDisponibles(t: Pick<Torneo, 'opc'>): number {
+  const n = Math.floor(Number(t.opc?.canchas ?? 3));
+  return Number.isFinite(n) ? Math.min(MAX_CANCHAS_OPC, Math.max(1, n)) : 3;
+}
+
 export function canchasDeRonda(t: Pick<Torneo, 'opc'>, ronda: number, cruces: number): number {
-  const n = Math.min(6, Math.max(1, Math.floor(t.opc?.canchas ?? 3)));
+  const n = canchasDisponibles(t);
+  // Lo que se eligió a mano para esa ronda manda sobre la regla automática.
+  const elegidas = t.opc?.porRonda?.[String(ronda)];
+  if (typeof elegidas === 'number' && Number.isInteger(elegidas) && elegidas >= 1) {
+    return Math.min(MAX_CANCHAS_OPC, elegidas, Math.max(1, cruces));
+  }
   const hasta = t.opc?.hastaRonda;
   const varias = typeof hasta === 'number' ? ronda <= hasta : cruces >= 3;
   return varias ? Math.min(n, Math.max(1, cruces)) : 1;
@@ -97,6 +124,7 @@ export function planOpc(t: Torneo): PlanOpc {
 
   const rondas = [...new Set(orden.map((p) => p.ronda))].sort((x, y) => x - y);
   const partidos: PartidoOpc[] = [];
+  const rondasPlan: RondaOpc[] = [];
   const pasanDirecto: string[] = [];
   for (const r of rondas) {
     const deRonda = orden.filter((p) => p.ronda === r);
@@ -121,6 +149,13 @@ export function planOpc(t: Torneo): PlanOpc {
         wo: jugado && !!p.wo, cargadoEl: p.cargadoEl ?? null,
       });
     });
+    if (reales.length > 0) {
+      rondasPlan.push({
+        ronda: r, nombre: nombreRonda, cruces: reales.length,
+        jugados: partidos.filter((x) => x.ronda === r && x.estado === 'jugado').length,
+        canchas, maximo: Math.min(canchasDisponibles(t), reales.length),
+      });
+    }
   }
 
   const instante = (p: PartidoOpc) => (p.cargadoEl ? Date.parse(p.cargadoEl) : 0);
@@ -144,7 +179,7 @@ export function planOpc(t: Torneo): PlanOpc {
   const { campeon, subcampeon } = podio(llave);
   const final = partidos[partidos.length - 1];
   return {
-    torneoId: t.id, nombre: t.nombre, partidos, canchas,
+    torneoId: t.id, nombre: t.nombre, rondas: rondasPlan, partidos, canchas,
     ronda: rondaActual !== undefined && deActual.length > 0
       ? { nombre: deActual[0].nombreRonda, jugados: deActual.filter((p) => p.estado === 'jugado').length, total: deActual.length }
       : null,
@@ -192,4 +227,30 @@ export async function marcarOpcEnServidor(torneoId: string, partidoId: string, l
     await new Promise((r) => setTimeout(r, 120 + Math.random() * 250));
   }
   return 'Se está cargando desde otro lado: tocá de nuevo.';
+}
+
+/**
+ * Elige en cuántas canchas se juega una ronda (se puede cambiar con la ronda empezada: los cruces
+ * que faltan se reparten de nuevo). Misma escritura cuidada que un toque: fila fresca y reintento.
+ */
+export async function canchasOpcEnServidor(torneoId: string, ronda: number, canchas: number): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  if (!Number.isInteger(ronda) || !Number.isInteger(canchas) || canchas < 1 || canchas > MAX_CANCHAS_OPC) return 'Cantidad de canchas inválida';
+  for (let intento = 0; intento < 5; intento++) {
+    const { data: fila, error } = await sb.from('rk_torneos').select('data, updated_at').eq('id', torneoId).maybeSingle();
+    if (error || !fila) return 'No se pudo leer el torneo';
+    const t = fila.data as Torneo;
+    if (t.opc?.porRonda?.[String(ronda)] === canchas) return null;
+    t.opc = { ...(t.opc ?? {}), porRonda: { ...(t.opc?.porRonda ?? {}), [String(ronda)]: canchas } };
+    const { data: upd, error: e2 } = await sb.from('rk_torneos')
+      .update({ data: t, updated_at: new Date().toISOString() })
+      .eq('id', torneoId)
+      .eq('updated_at', fila.updated_at as string)
+      .select('id');
+    if (e2) return 'No se pudo guardar (¿sesión vencida?)';
+    if (upd && upd.length > 0) return null;
+    await new Promise((r) => setTimeout(r, 120 + Math.random() * 250));
+  }
+  return 'Se está cargando desde otro lado: probá de nuevo.';
 }
