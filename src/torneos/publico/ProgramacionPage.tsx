@@ -15,7 +15,7 @@ import { supabase } from '../../services/supabaseClient';
 import { almacenLocal } from '../../utils/almacen';
 import {
   BLOQUE_OPC, CLAVE_PROGRAMA, aHora, construirPrograma, aMinuto, aplicarAjustes, categoriasDelEvento, claveDePartido, minutoDesde,
-  momentoDeTorneo, programarEvento,
+  momentoDeTorneo, programarEvento, promoOpcVigente,
   ritmoReal,
 } from './programa';
 import type { AjustesPrograma, CatProg, DiaPrograma, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
@@ -1055,7 +1055,7 @@ export default function ProgramacionPage() {
           />
         )}
 
-        {opc && <SeccionOpc plan={opc} modoCarga={modoCarga} onCambio={() => void cargar(false)} />}
+        {opc && <SeccionOpc plan={opc} modoCarga={modoCarga} onCambio={() => void cargar(false)} promo={promoOpcVigente(ajustes?.tv)} />}
 
         {cats.length === 0 ? (opc ? null :
           <div style={{ ...carta, borderColor: 'var(--lima)', textAlign: 'center', padding: '30px 20px' }}>

@@ -1,9 +1,9 @@
 // One Point Challenge en En vivo: la pantalla gigante (/programacion?tv) y el tablero de
 // /programacion, donde cada árbitro carga su cancha con UN toque sobre el que ganó el punto.
 // Qué cruce va en qué cancha lo decide ./opcCanchas (planOpc); acá solo se pinta y se toca.
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { almacenLocal } from '../../utils/almacen';
-import type { ConfigTv } from './programa';
+import { promoOpcVigente, type ConfigTv, type PromoOpcVigente } from './programa';
 import { Cartel, TiraSponsors, Vidriera, useCartel, useVidriera } from './PantallaTv';
 import { marcarOpcEnServidor, type CanchaOpc, type PartidoOpc, type PlanOpc } from './opcCanchas';
 
@@ -31,14 +31,17 @@ export function PantallaOpcTv({ plan, colores, ahora, tv }: { plan: PlanOpc; col
   }, [sponsors.length]);
   const hora = ahora.toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', hour12: false });
   const n = plan.canchas.length;
+  // La promo vale mientras se juega: con campeón ya no se anuncia.
+  const promo = plan.campeon ? null : promoOpcVigente(tv);
   // Con una sola cancha (semis y final) el cruce ocupa toda la pantalla: letra más grande.
   const escala = n <= 1 ? 1.75 : n === 2 ? 1.25 : 1;
-  const colaMax = n <= 1 ? 6 : 5;
+  // Con la banda de promo hay menos alto: la cola se acorta para que los nombres sigan grandes.
+  const colaMax = n <= 1 ? 6 : promo ? 3 : 5;
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999, background: NAVY, color: '#fff', overflow: 'hidden', cursor: 'none',
       fontSize: 'min(1.5vw, 2.7vh)', fontFamily: 'Lexend, Montserrat, system-ui, sans-serif',
-      display: 'grid', gridTemplateRows: 'auto 1fr auto auto', gap: '0.7em', padding: '0.9em 1.2em 1em',
+      display: 'grid', gridTemplateRows: promo ? 'auto auto 1fr auto auto' : 'auto 1fr auto auto', gap: '0.7em', padding: '0.9em 1.2em 1em',
     }}>
       <div aria-hidden style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -72,6 +75,18 @@ export function PantallaOpcTv({ plan, colores, ahora, tv }: { plan: PlanOpc; col
           <div style={{ fontSize: '1.6em', fontWeight: 900, fontVariantNumeric: 'tabular-nums' }}>{hora}</div>
         </div>
       </header>
+
+      {promo && (
+        <section data-opc-promo style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '0.9em', background: LIMA, color: NAVY, borderRadius: '0.6em', padding: '0.3em 0.9em 0.3em 0.35em', overflow: 'hidden' }}>
+          {promo.titulo && (
+            <span style={{ flexShrink: 0, background: NAVY, color: LIMA, fontWeight: 900, fontSize: '1.7em', lineHeight: 1, padding: '0.22em 0.5em', borderRadius: '0.3em', whiteSpace: 'nowrap', textTransform: 'uppercase' }}>{promo.titulo}</span>
+          )}
+          <span style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: '1.05em', lineHeight: 1.12, textTransform: 'uppercase', letterSpacing: '0.01em' }}>{promo.texto}</span>
+          {promo.nota && (
+            <span style={{ flexShrink: 0, maxWidth: '24%', textAlign: 'right', fontWeight: 700, fontSize: '0.62em', lineHeight: 1.2, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.85 }}>{promo.nota}</span>
+          )}
+        </section>
+      )}
 
       {plan.campeon ? (
         <section style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: CARTA, border: `3px solid ${LIMA}`, borderRadius: '0.8em', boxShadow: `0 0 2em ${LIMA}44`, padding: '1em' }}>
@@ -135,16 +150,12 @@ function CanchaTv({ c, escala, colaMax, unica }: { c: CanchaOpc; escala: number;
         {p && <span style={{ ...rotulo, color: '#fff', opacity: 0.8, fontSize: '0.7em' }}>{p.nombreRonda} · {p.numero}/{p.deRonda}</span>}
       </div>
       {p ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', margin: '0.3em 0', fontWeight: 900, fontSize: '2.1em', lineHeight: 1.08, textTransform: 'uppercase', textAlign: 'center', overflowWrap: 'anywhere' }}>
-          <div>{p.a}</div>
-          <div style={{ color: LIMA, fontSize: '0.5em', fontWeight: 800, margin: '0.35em 0' }}>VS</div>
-          <div>{p.b}</div>
-        </div>
+        <NombresTv a={p.a} b={p.b} />
       ) : (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2em', fontWeight: 800, opacity: 0.7 }}>Esperando el cruce anterior…</div>
       )}
       {cola.length > 0 && (
-        <div style={{ borderTop: `1px solid ${BORDE}`, paddingTop: '0.35em', minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ borderTop: `1px solid ${BORDE}`, paddingTop: '0.35em', flexShrink: 0, overflow: 'hidden' }}>
           <div style={{ ...rotulo, fontSize: '0.68em', marginBottom: '0.2em' }}>Siguen en esta cancha{conNombre.length > cola.length ? ` (+${conNombre.length - cola.length} más)` : ''}</div>
           <div style={{ display: 'grid', gridTemplateColumns: unica ? '1fr 1fr' : '1fr', gap: '0.12em 1.2em' }}>
             {cola.map((s, i) => (
@@ -159,11 +170,47 @@ function CanchaTv({ c, escala, colaMax, unica }: { c: CanchaOpc; escala: number;
   );
 }
 
+// Los dos nombres del cruce en juego, lo más grande que entre: con nombres de tres o cuatro
+// palabras (o con la banda de promo y la vidriera puestas) se achican hasta caber, nunca se cortan.
+function NombresTv({ a, b }: { a: string; b: string }) {
+  const caja = useRef<HTMLDivElement>(null);
+  const texto = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const c = caja.current;
+    const t = texto.current;
+    if (!c || !t) return;
+    const ajustar = () => {
+      let escala = 1;
+      t.style.fontSize = '2.1em';
+      while (escala > 0.4 && (t.scrollHeight > c.clientHeight || t.scrollWidth > c.clientWidth)) {
+        escala -= 0.04;
+        t.style.fontSize = `${(2.1 * escala).toFixed(3)}em`;
+      }
+    };
+    ajustar();
+    // La tipografía puede llegar después del primer dibujo y cambia las medidas.
+    void document.fonts?.ready.then(ajustar);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(ajustar);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [a, b]);
+  return (
+    <div ref={caja} style={{ flex: '1 1 0', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', margin: '0.3em 0' }}>
+      <div ref={texto} style={{ fontWeight: 900, fontSize: '2.1em', lineHeight: 1.08, textTransform: 'uppercase', textAlign: 'center', overflowWrap: 'anywhere' }}>
+        <div>{a}</div>
+        <div style={{ color: LIMA, fontSize: '0.5em', fontWeight: 800, margin: '0.35em 0' }}>VS</div>
+        <div>{b}</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tablero de /programacion (público y carga de los árbitros) ──────────────
 
 const CLAVE_CANCHA = 'volea_opc_mi_cancha';
 
-export function SeccionOpc({ plan, modoCarga, onCambio }: { plan: PlanOpc; modoCarga: boolean; onCambio: () => void }) {
+export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: PlanOpc; modoCarga: boolean; onCambio: () => void; promo?: PromoOpcVigente | null }) {
   const [miCancha, setMiCanchaEstado] = useState<number | null>(() => {
     const v = Number(almacenLocal.leer(CLAVE_CANCHA));
     return Number.isInteger(v) && v > 0 ? v : null;
@@ -202,6 +249,16 @@ export function SeccionOpc({ plan, modoCarga, onCambio }: { plan: PlanOpc; modoC
           </span>
         )}
       </div>
+
+      {promo && !plan.campeon && (
+        <div data-opc-promo style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--lima)', color: '#001328', borderRadius: 10, padding: '8px 12px 8px 8px', marginBottom: 12 }}>
+          {promo.titulo && <span style={{ flexShrink: 0, background: '#001328', color: 'var(--lima)', fontWeight: 900, fontSize: '1.15rem', lineHeight: 1, padding: '7px 9px', borderRadius: 7, whiteSpace: 'nowrap', textTransform: 'uppercase' }}>{promo.titulo}</span>}
+          <span style={{ minWidth: 0, lineHeight: 1.2 }}>
+            <span style={{ display: 'block', fontWeight: 800, fontSize: '0.86rem' }}>{promo.texto}</span>
+            {promo.nota && <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, opacity: 0.8, marginTop: 2 }}>{promo.nota}</span>}
+          </span>
+        </div>
+      )}
 
       {plan.campeon && (
         <div style={{ textAlign: 'center', padding: '14px 8px' }}>
