@@ -1,1 +1,3 @@
 Pruebas de la base del tanteador (v35+v36+v37) en un Postgres local descartable, nunca en Supabase: `supabase/pruebas/correr.sh "host=/tmp port=5432 user=postgres"` (crea una base nueva, aplica `base_minima.sql` y las migraciones, corre `arbitraje.sql` y `paridad_motor.sql` —regenerable con `npx vite-node supabase/pruebas/generar_paridad.ts > supabase/pruebas/paridad_motor.sql`— y la borra).
+
+Link de árbitros del One Point Challenge (v39): sobre una base nueva, `base_minima.sql` + `migraciones_propuestas/v39_opc_link_arbitros.sql` (dos veces: es idempotente) y después `opc_link.sql`.

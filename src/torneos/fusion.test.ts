@@ -165,6 +165,15 @@ describe('fusionarTorneo: datos sueltos del torneo', () => {
     const r = fusionarTorneo(base, { ...copia(base), canchas: 4 }, conResultado(base, 's1', 11, 2));
     expect(r.ok && r.torneo.canchas).toBe(4);
   });
+
+  it('cambiar las canchas del One Point Challenge en En vivo no choca con resultados cargados en el gestor', () => {
+    const base = torneo();
+    const remoto = { ...copia(base), opc: { porRonda: { 1: 2 } } };
+    const r = fusionarTorneo(base, conResultado(base, 's1', 11, 2), remoto);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.torneo.opc).toEqual({ porRonda: { 1: 2 } });
+    expect(r.ok && r.torneo.partidosLlave?.find((p) => p.id === 's1')?.puntosA).toBe(11);
+  });
 });
 
 describe('fusionarTorneo: estructura', () => {

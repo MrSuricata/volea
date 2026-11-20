@@ -15,7 +15,7 @@ import { supabase } from '../../services/supabaseClient';
 import { almacenLocal } from '../../utils/almacen';
 import {
   BLOQUE_OPC, CLAVE_PROGRAMA, aHora, construirPrograma, aMinuto, aplicarAjustes, categoriasDelEvento, claveDePartido, minutoDesde,
-  momentoDeTorneo, programarEvento,
+  momentoDeTorneo, programarEvento, promoOpcVigente,
   ritmoReal,
 } from './programa';
 import type { AjustesPrograma, CatProg, DiaPrograma, Fila, ProgramaVigente, RefPartido, ResultadoItem } from './programa';
@@ -24,8 +24,8 @@ import PantallaTv from './PantallaTv';
 import PanelTv from './PanelTv';
 import PanelEvento from './PanelEvento';
 import NavPublica from './NavPublica';
-import { PantallaOpcTv, SeccionOpc } from './OpcEnVivo';
-import { esOpc, planOpc } from './opcCanchas';
+import { CLAVE_CANCHA, PantallaOpcTv, SeccionOpc } from './OpcEnVivo';
+import { entrarConClaveOpc, esOpc, planOpc } from './opcCanchas';
 import { MarcadorVivo, claveMarcador, useMarcadores } from '../arbitraje/MarcadorVivo';
 
 // ─── Programación en vivo del evento ─────────────────────────────────────────
@@ -657,6 +657,33 @@ export default function ProgramacionPage() {
     void supabase?.auth.getSession().then(({ data }) => setEsAdmin(!!data.session));
   }, []);
 
+  // Link de árbitro del One Point Challenge (/programacion?arbitro=CLAVE&cancha=N): deja cargar ese
+  // torneo sin sesión. La clave queda en el celular para que recargar o volver a entrar no la pierda.
+  const [claveOpc, setClaveOpc] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const q = new URLSearchParams(window.location.search);
+    const deLink = (q.get('arbitro') ?? '').trim();
+    if (deLink) {
+      almacenLocal.guardar('volea_opc_clave', deLink);
+      const cancha = Number(q.get('cancha'));
+      if (Number.isInteger(cancha) && cancha > 0) almacenLocal.guardar(CLAVE_CANCHA, String(cancha));
+      return deLink;
+    }
+    return almacenLocal.leer('volea_opc_clave') ?? '';
+  });
+  const [torneoDeClave, setTorneoDeClave] = useState<string | null>(null);
+  const [linkVencido, setLinkVencido] = useState(false);
+  useEffect(() => {
+    if (!claveOpc) return;
+    let vivo = true;
+    void entrarConClaveOpc(claveOpc).then((id) => {
+      if (!vivo) return;
+      if (id === null) { almacenLocal.guardar('volea_opc_clave', ''); setClaveOpc(''); setLinkVencido(true); return; }
+      if (id) setTorneoDeClave(id);
+    });
+    return () => { vivo = false; };
+  }, [claveOpc]);
+
   const [enCancha, setEnCancha] = useState<EnCancha[]>([]);
   const esTv = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('tv');
 
@@ -1055,7 +1082,18 @@ export default function ProgramacionPage() {
           />
         )}
 
-        {opc && <SeccionOpc plan={opc} modoCarga={modoCarga} onCambio={() => void cargar(false)} />}
+        {linkVencido && !modoCarga && (
+          <div role="alert" style={{ border: '1px solid #ff8fa8', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontWeight: 700 }}>
+            Este link de árbitro ya no sirve: pedile uno nuevo al organizador.
+          </div>
+        )}
+        {opc && (
+          <SeccionOpc
+            plan={opc} onCambio={() => void cargar(false)} promo={promoOpcVigente(ajustes?.tv)}
+            modoCarga={modoCarga || (!!claveOpc && torneoDeClave === opc.torneoId)} admin={modoCarga}
+            clave={modoCarga ? undefined : claveOpc || undefined}
+          />
+        )}
 
         {cats.length === 0 ? (opc ? null :
           <div style={{ ...carta, borderColor: 'var(--lima)', textAlign: 'center', padding: '30px 20px' }}>

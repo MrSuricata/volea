@@ -4,7 +4,7 @@ import {
   aHora, aMinuto, aplicarAjustes, armarCategoria, categoriasDelEvento, construirPrograma, minutoDesde, momentoDeTorneo,
   personasDe, programarEvento,
 } from './programa';
-import { ritmoReal } from './programa';
+import { promoOpcVigente, ritmoReal } from './programa';
 import type { CatProg, Fila, Programa } from './programa';
 
 // Programa de prueba con dos días (VIE/SAB), singles el viernes y el resto el sábado, dos
@@ -508,5 +508,24 @@ describe('construirPrograma', () => {
     const { filas } = programarEvento({ cats, vigente: v, ahora: { dia: null, minuto: 0 }, canchas: { activas: p.canchas, enJuego: [] } });
     expect(filas[0].dia).toBe('2026-11-14');
     expect(aHora(filas[0].ini)).toBe('09:00');
+  });
+});
+
+describe('promoOpcVigente', () => {
+  it('sin configurar o apagada no sale', () => {
+    expect(promoOpcVigente(undefined)).toBeNull();
+    expect(promoOpcVigente({})).toBeNull();
+    expect(promoOpcVigente({ promoOpc: { titulo: '15% OFF', texto: 'En la tienda' } })).toBeNull();
+    expect(promoOpcVigente({ promoOpc: { activa: false, titulo: '15% OFF' } })).toBeNull();
+  });
+  it('prendida devuelve los textos limpios y recortados', () => {
+    expect(promoOpcVigente({ promoOpc: { activa: true, titulo: ' 15%  OFF ', texto: 'En toda la\ntienda', nota: 'No acumulable' } }))
+      .toEqual({ titulo: '15% OFF', texto: 'En toda la tienda', nota: 'No acumulable' });
+    expect(promoOpcVigente({ promoOpc: { activa: true, titulo: 'x'.repeat(60) } })?.titulo).toHaveLength(24);
+  });
+  it('prendida pero vacía, o con datos rotos de la base, no sale', () => {
+    expect(promoOpcVigente({ promoOpc: { activa: true, titulo: ' ', texto: '' } })).toBeNull();
+    expect(promoOpcVigente({ promoOpc: { activa: true, titulo: 5, texto: null } as never })).toBeNull();
+    expect(promoOpcVigente({ promoOpc: { activa: 'si', titulo: '15% OFF' } as never })).toBeNull();
   });
 });

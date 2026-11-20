@@ -186,7 +186,30 @@ export type ConfigTv = {
   anuncios?: AnuncioTv[];
   /** Marca de tiempo (ms) del botón "Correr publicidad": la TV arranca el cartel al verla cambiar. */
   lanzar?: number;
+  /** Promo de la tienda que se anuncia mientras se juega el One Point Challenge. */
+  promoOpc?: PromoOpc;
 };
+
+/** Banda de promo del One Point Challenge (tele y /programacion). Sale solo con `activa`. */
+export type PromoOpc = { activa?: boolean; titulo?: string; texto?: string; nota?: string };
+/** Lo que propone el panel la primera vez; se puede cambiar o vaciar desde ahí. */
+export const PROMO_OPC_SUGERIDA = {
+  titulo: '15% OFF',
+  texto: 'Descuento One Point Challenge · en toda la tienda física mientras dure el One Point Challenge',
+  nota: 'No acumulable con otras promociones',
+};
+export type PromoOpcVigente = { titulo: string; texto: string; nota: string };
+
+/** La promo a mostrar, o null si está apagada o no dice nada. Lo que venga roto de la base se ignora. */
+export function promoOpcVigente(tv: ConfigTv | null | undefined): PromoOpcVigente | null {
+  const p = tv?.promoOpc;
+  if (!p || p.activa !== true) return null;
+  const limpio = (x: unknown, max: number) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+  const titulo = limpio(p.titulo, 24);
+  const texto = limpio(p.texto, 140);
+  if (!titulo && !texto) return null;
+  return { titulo, texto, nota: limpio(p.nota, 90) };
+}
 
 export type ProgramaVigente = {
   duracion: number;

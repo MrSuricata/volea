@@ -1,7 +1,7 @@
 // "Pantalla TV" en En vivo (modo carga): qué publicidad pasa la tele y cada cuánto, sin SQL.
 // Guarda en rk_programa.config.tv (lo mismo que lee PantallaTv).
 import { useState, type CSSProperties } from 'react';
-import type { AnuncioTv, ConfigTv, SponsorTv } from './programa';
+import { PROMO_OPC_SUGERIDA, type AnuncioTv, type ConfigTv, type SponsorTv } from './programa';
 import { SupabaseService } from '../../services/supabaseService';
 
 const caja: CSSProperties = { border: '1px solid var(--borde)', borderRadius: 14, background: 'var(--navy-1)', padding: '12px 14px', marginBottom: 14 };
@@ -25,6 +25,11 @@ export default function PanelTv({ tv, onGuardar }: {
   const [anuncios, setAnuncios] = useState<AnuncioTv[]>(tv?.anuncios ?? []);
   const [sponsors, setSponsors] = useState<SponsorTv[]>(tv?.sponsors ?? []);
   const [nuevoSponsor, setNuevoSponsor] = useState('');
+  // Promo del One Point Challenge: la primera vez propone el texto sugerido, apagada.
+  const [promoActiva, setPromoActiva] = useState(tv?.promoOpc?.activa === true);
+  const [promoTitulo, setPromoTitulo] = useState(tv?.promoOpc ? tv.promoOpc.titulo ?? '' : PROMO_OPC_SUGERIDA.titulo);
+  const [promoTexto, setPromoTexto] = useState(tv?.promoOpc ? tv.promoOpc.texto ?? '' : PROMO_OPC_SUGERIDA.texto);
+  const [promoNota, setPromoNota] = useState(tv?.promoOpc ? tv.promoOpc.nota ?? '' : PROMO_OPC_SUGERIDA.nota);
   const [subiendo, setSubiendo] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
@@ -56,7 +61,8 @@ export default function PanelTv({ tv, onGuardar }: {
   async function guardar() {
     const c = Math.max(0, Math.min(120, Math.trunc(Number(cada) || 0)));
     const s = Math.max(5, Math.min(120, Math.trunc(Number(segundos) || 15)));
-    const problema = await onGuardar({ ...(tv ?? {}), cada: c, segundos: s, anuncios, sponsors });
+    const promoOpc = { activa: promoActiva, titulo: promoTitulo.trim(), texto: promoTexto.trim(), nota: promoNota.trim() };
+    const problema = await onGuardar({ ...(tv ?? {}), cada: c, segundos: s, anuncios, sponsors, promoOpc });
     setAviso(problema ?? 'Guardado: la TV lo toma sola.');
   }
 
@@ -127,6 +133,29 @@ export default function PanelTv({ tv, onGuardar }: {
             <input type="text" value={nuevoSponsor} onChange={(e) => setNuevoSponsor(e.target.value)} placeholder="Nombre del sponsor" aria-label="Nombre del sponsor" style={{ flex: '1 1 12rem' }} />
             <button className="boton secundario" type="submit">Agregar sponsor</button>
           </form>
+        </div>
+
+        <div>
+          <div style={{ ...etiqueta, textTransform: 'uppercase', marginBottom: 8 }}>Promo durante el One Point Challenge</div>
+          <label style={{ ...fila, cursor: 'pointer', marginBottom: 8 }}>
+            <input type="checkbox" checked={promoActiva} onChange={(e) => setPromoActiva(e.target.checked)} />
+            <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>Mostrar la promo en la tele y en En vivo mientras se juega</span>
+          </label>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={etiqueta}>En grande (ej.: 15% OFF)</span>
+              <input type="text" maxLength={24} value={promoTitulo} onChange={(e) => setPromoTitulo(e.target.value)} style={{ maxWidth: 220 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={etiqueta}>Texto</span>
+              <input type="text" maxLength={140} value={promoTexto} onChange={(e) => setPromoTexto(e.target.value)} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={etiqueta}>Letra chica</span>
+              <input type="text" maxLength={90} value={promoNota} onChange={(e) => setPromoNota(e.target.value)} />
+            </label>
+          </div>
+          <div style={{ ...etiqueta, marginTop: 6 }}>Sale arriba de las canchas. Se va sola cuando se carga la final.</div>
         </div>
 
         <div style={fila}>
