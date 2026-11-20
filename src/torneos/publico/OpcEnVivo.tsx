@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { almacenLocal } from '../../utils/almacen';
 import { promoOpcVigente, type ConfigTv, type PromoOpcVigente } from './programa';
 import { Cartel, TiraSponsors, Vidriera, useCartel, useVidriera } from './PantallaTv';
-import { canchasOpcEnServidor, marcarOpcEnServidor, type CanchaOpc, type PartidoOpc, type PlanOpc } from './opcCanchas';
+import { apagarLinksOpc, canchasOpcEnServidor, claveArbitrosOpc, linkArbitro, marcarOpcEnServidor, type CanchaOpc, type PartidoOpc, type PlanOpc } from './opcCanchas';
 
 const LIMA = '#CCFF00';
 const NAVY = '#001328';
@@ -170,6 +170,77 @@ function CanchaTv({ c, escala, colaMax, unica }: { c: CanchaOpc; escala: number;
   );
 }
 
+// Links para repartir: uno por cancha (abre En vivo listo para cargar, sin usuario) y el de la tele.
+function LinksArbitros({ plan }: { plan: PlanOpc }) {
+  const [clave, setClave] = useState<string | null>(null);
+  const [aviso, setAviso] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const origen = typeof window !== 'undefined' ? window.location.origin : '';
+  const canchas = Math.max(1, ...plan.rondas.map((r) => r.maximo));
+  const links = clave
+    ? [
+      ...Array.from({ length: canchas }, (_, i) => ({ nombre: `Árbitro Cancha ${i + 1}`, url: linkArbitro(origen, clave, i + 1) })),
+      { nombre: 'Tele', url: `${origen}/programacion?tv` },
+    ]
+    : [];
+
+  async function pedir(renovar: boolean) {
+    if (renovar && !window.confirm('¿Renovar los links? Los que ya repartiste dejan de servir.')) return;
+    setOcupado(true);
+    setAviso('');
+    const r = await claveArbitrosOpc(plan.torneoId, renovar);
+    setOcupado(false);
+    if ('error' in r) { setAviso(r.error); return; }
+    setClave(r.clave);
+    if (renovar) setAviso('Links renovados: repartí los nuevos.');
+  }
+  async function apagar() {
+    if (!window.confirm('¿Apagar los links? Los árbitros ya no van a poder cargar con ellos.')) return;
+    setOcupado(true);
+    const problema = await apagarLinksOpc(plan.torneoId);
+    setOcupado(false);
+    if (problema) { setAviso(problema); return; }
+    setClave(null);
+    setAviso('Links apagados.');
+  }
+  async function copiar(texto: string, que: string) {
+    try { await navigator.clipboard.writeText(texto); setAviso(`Copiado: ${que}.`); } catch { setAviso('No se pudo copiar: mantené apretado el link y copialo a mano.'); }
+  }
+  const todo = links.map((l) => `${l.nombre}: ${l.url}`).join('\n');
+  const chico: CSSProperties = { padding: '5px 12px', fontSize: '0.82rem' };
+
+  return (
+    <details data-opc-links style={{ border: '1px solid var(--borde)', borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}
+      onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open && !clave && !ocupado) void pedir(false); }}>
+      <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: '0.9rem' }}>
+        Links para los árbitros <span style={{ opacity: 0.7, fontWeight: 600 }}>· sin usuario ni contraseña</span>
+      </summary>
+      <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+        {links.map((l) => (
+          <div key={l.nombre} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ flex: '0 0 8.5rem', fontSize: '0.86rem', fontWeight: 700 }}>{l.nombre}</span>
+            <input type="text" readOnly value={l.url} aria-label={`Link ${l.nombre}`} onFocus={(e) => e.currentTarget.select()} style={{ flex: '1 1 12rem', minWidth: 0, fontSize: '0.78rem' }} />
+            <button type="button" className="boton secundario" style={chico} onClick={() => void copiar(l.url, l.nombre)}>Copiar</button>
+          </div>
+        ))}
+        {clave && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button type="button" className="boton" style={chico} onClick={() => void copiar(todo, 'todos los links')}>Copiar todos</button>
+            <a className="boton secundario" style={chico} href={`https://wa.me/?text=${encodeURIComponent(`${plan.nombre}\n${todo}`)}`} target="_blank" rel="noreferrer">Mandar por WhatsApp</a>
+            <button type="button" className="boton secundario" style={chico} disabled={ocupado} onClick={() => void pedir(true)}>Renovar</button>
+            <button type="button" className="boton secundario" style={chico} disabled={ocupado} onClick={() => void apagar()}>Apagar</button>
+          </div>
+        )}
+        {!clave && <button type="button" className="boton" style={{ ...chico, justifySelf: 'start' }} disabled={ocupado} onClick={() => void pedir(false)}>{ocupado ? 'Creando…' : 'Crear links'}</button>}
+        {aviso && <div role="status" style={{ fontSize: '0.82rem', fontWeight: 700 }}>{aviso}</div>}
+        <p style={{ margin: 0, fontSize: '0.75rem', opacity: 0.7 }}>
+          El que abre un link de árbitro puede cargar resultados de este One Point Challenge y nada más. Si un link se escapa, tocá Renovar.
+        </p>
+      </div>
+    </details>
+  );
+}
+
 // Los dos nombres del cruce en juego, lo más grande que entre: con nombres de tres o cuatro
 // palabras (o con la banda de promo y la vidriera puestas) se achican hasta caber, nunca se cortan.
 function NombresTv({ a, b }: { a: string; b: string }) {
@@ -208,9 +279,15 @@ function NombresTv({ a, b }: { a: string; b: string }) {
 
 // ─── Tablero de /programacion (público y carga de los árbitros) ──────────────
 
-const CLAVE_CANCHA = 'volea_opc_mi_cancha';
+export const CLAVE_CANCHA = 'volea_opc_mi_cancha';
 
-export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: PlanOpc; modoCarga: boolean; onCambio: () => void; promo?: PromoOpcVigente | null }) {
+/**
+ * `modoCarga`: se pueden tocar los ganadores. `admin`: además se eligen las canchas por ronda y se
+ * crean los links (sesión del equipo). `clave`: el árbitro entró por el link, sin sesión.
+ */
+export function SeccionOpc({ plan, modoCarga, onCambio, promo = null, admin = modoCarga, clave }: {
+  plan: PlanOpc; modoCarga: boolean; onCambio: () => void; promo?: PromoOpcVigente | null; admin?: boolean; clave?: string;
+}) {
   const [miCancha, setMiCanchaEstado] = useState<number | null>(() => {
     const v = Number(almacenLocal.leer(CLAVE_CANCHA));
     return Number.isInteger(v) && v > 0 ? v : null;
@@ -227,7 +304,7 @@ export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: 
     if (ocupado) return;
     setOcupado(true);
     setError('');
-    const problema = await marcarOpcEnServidor(plan.torneoId, p.id, lado, wo);
+    const problema = await marcarOpcEnServidor(plan.torneoId, p.id, lado, wo, clave);
     if (problema) setError(problema);
     onCambio();
     timer.current = window.setTimeout(() => { timer.current = null; setOcupado(false); }, problema ? 0 : 900);
@@ -291,7 +368,13 @@ export function SeccionOpc({ plan, modoCarga, onCambio, promo = null }: { plan: 
           <button className={`boton ${miCancha === null ? '' : 'secundario'}`} style={chip(miCancha === null)} onClick={() => setMiCancha(null)}>Todas</button>
         </div>
       )}
-      {modoCarga && !plan.campeon && rondasAbiertas.length > 0 && (
+      {modoCarga && !admin && !plan.campeon && (
+        <div data-opc-arbitro style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--lima)', marginBottom: 10 }}>
+          ✓ Modo árbitro: tocá al que ganó cada punto.
+        </div>
+      )}
+      {admin && !plan.campeon && <LinksArbitros plan={plan} />}
+      {admin && !plan.campeon && rondasAbiertas.length > 0 && (
         <details data-opc-canchas style={{ border: '1px solid var(--borde)', borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}>
           <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: '0.9rem' }}>
             Canchas por ronda <span style={{ opacity: 0.7, fontWeight: 600 }}>· {rondasAbiertas.map((r) => r.canchas).join(' → ')}</span>

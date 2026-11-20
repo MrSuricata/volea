@@ -195,7 +195,13 @@ export function planOpc(t: Torneo): PlanOpc {
  * Un toque del árbitro: `lado` ganó el punto (se guarda 1-0); null = deshacer. Lee la fila fresca
  * y guarda solo si nadie la tocó en el medio (tres árbitros cargan a la vez: reintenta).
  */
-export async function marcarOpcEnServidor(torneoId: string, partidoId: string, lado: 'a' | 'b' | null, wo = false): Promise<string | null> {
+export const LINK_VENCIDO = 'Este link ya no sirve: pedile uno nuevo al organizador.';
+
+/**
+ * Con `clave` (el árbitro entró por el link, sin sesión) se guarda por la función de la base, que
+ * solo deja cambiar resultados de la llave de ese torneo (v39).
+ */
+export async function marcarOpcEnServidor(torneoId: string, partidoId: string, lado: 'a' | 'b' | null, wo = false, clave?: string): Promise<string | null> {
   const sb = supabase;
   if (!sb) return 'Sin conexión con el servidor';
   for (let intento = 0; intento < 5; intento++) {
@@ -217,6 +223,16 @@ export async function marcarOpcEnServidor(torneoId: string, partidoId: string, l
       return 'Todavía no se puede cargar ese cruce.';
     }
     t.partidosLlave = marcados.map((x) => (x.id === partidoId ? conWo(x, lado !== null && wo) : x));
+    if (clave) {
+      const { data: r, error: e3 } = await sb.rpc('opc_arbitro_guardar', { p_clave: clave, p_torneo_id: torneoId, p_updated_at: fila.updated_at, p_llave: t.partidosLlave });
+      const res = r as { ok?: boolean; error?: string } | null;
+      if (e3 || !res) return 'No se pudo guardar: revisá la conexión y tocá de nuevo.';
+      if (res.ok) return null;
+      if (res.error === 'clave') return LINK_VENCIDO;
+      if (res.error !== 'conflicto') return 'No se pudo guardar ese cruce.';
+      await new Promise((r2) => setTimeout(r2, 120 + Math.random() * 250));
+      continue;
+    }
     const { data: upd, error: e2 } = await sb.from('rk_torneos')
       .update({ data: t, updated_at: new Date().toISOString() })
       .eq('id', torneoId)
@@ -253,4 +269,41 @@ export async function canchasOpcEnServidor(torneoId: string, ronda: number, canc
     await new Promise((r) => setTimeout(r, 120 + Math.random() * 250));
   }
   return 'Se está cargando desde otro lado: probá de nuevo.';
+}
+
+/**
+ * ¿De qué torneo es la clave del link? `null` = la clave no sirve (renovada o borrada);
+ * `undefined` = no se pudo preguntar (sin conexión, o la base todavía no tiene la v39).
+ */
+export async function entrarConClaveOpc(clave: string): Promise<string | null | undefined> {
+  const sb = supabase;
+  if (!sb || !clave) return undefined;
+  const { data, error } = await sb.rpc('opc_arbitro_entrar', { p_clave: clave });
+  const r = data as { ok?: boolean; torneo_id?: string } | null;
+  if (error || !r) return undefined;
+  return r.ok && typeof r.torneo_id === 'string' ? r.torneo_id : null;
+}
+
+/** La clave del link de árbitros del torneo (solo el equipo). `renovar` la cambia: los links viejos dejan de servir. */
+export async function claveArbitrosOpc(torneoId: string, renovar = false): Promise<{ clave: string } | { error: string }> {
+  const sb = supabase;
+  if (!sb) return { error: 'Sin conexión con el servidor' };
+  const { data, error } = await sb.rpc('admin_opc_clave', { p_torneo_id: torneoId, p_renovar: renovar });
+  const r = data as { ok?: boolean; clave?: string } | null;
+  if (error || !r) return { error: 'No se pudieron crear los links (¿falta aplicar la migración v39?)' };
+  if (!r.ok || !r.clave) return { error: 'No se pudieron crear los links (¿sesión vencida?)' };
+  return { clave: r.clave };
+}
+
+/** Apaga los links de árbitros del torneo. */
+export async function apagarLinksOpc(torneoId: string): Promise<string | null> {
+  const sb = supabase;
+  if (!sb) return 'Sin conexión con el servidor';
+  const { data, error } = await sb.rpc('admin_opc_clave_borrar', { p_torneo_id: torneoId });
+  return error || !(data as { ok?: boolean } | null)?.ok ? 'No se pudieron apagar los links' : null;
+}
+
+/** El link que abre En vivo listo para cargar una cancha, sin usuario. */
+export function linkArbitro(origen: string, clave: string, cancha: number): string {
+  return `${origen}/programacion?arbitro=${encodeURIComponent(clave)}&cancha=${cancha}`;
 }

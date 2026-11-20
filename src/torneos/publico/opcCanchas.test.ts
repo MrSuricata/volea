@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Torneo } from '../engine/tipos';
 import { armarLlave } from '../engine/llave';
 import { marcar } from '../ui/opc/modelo';
-import { planOpc } from './opcCanchas';
+import { linkArbitro, planOpc } from './opcCanchas';
 
 function torneo(n: number): Torneo {
   const parejas = Array.from({ length: n }, (_, i) => ({ id: `j${i + 1}`, nombre: `JUGADOR ${i + 1}` }));
@@ -96,5 +96,11 @@ describe('planOpc', () => {
       expect(fin.subcampeon).not.toBeNull();
       expect(fin.resultados[0].nombreRonda).toBe('Final');
     }
+  });
+});
+
+describe('linkArbitro', () => {
+  it('abre En vivo con la clave y la cancha', () => {
+    expect(linkArbitro('https://volea.uy', 'abc123def4567890', 2)).toBe('https://volea.uy/programacion?arbitro=abc123def4567890&cancha=2');
   });
 });
