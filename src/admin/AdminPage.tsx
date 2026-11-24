@@ -28,6 +28,7 @@ import { ProductosTab } from './tabs/ProductosTab';
 import { PedidosClientesTab } from './tabs/PedidosClientesTab';
 import { CambiosTab } from './tabs/CambiosTab';
 import { CuponesTab } from './tabs/CuponesTab';
+import { LiquidacionesTab } from './tabs/LiquidacionesTab';
 import { AnunciosTab, CategoriasTab, ClubesTab, EventosTab } from './tabs/CatalogoWebTabs';
 
 // Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
@@ -396,6 +397,7 @@ export default function AdminPage() {
         { id: 'torneos', label: 'Gestor de torneos', icon: <Trophy size={16} /> },
         { id: 'tanteador', label: 'Tanteador', icon: <Swords size={16} /> },
         { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
+        { id: 'liquidaciones', label: 'Liquidaciones', icon: <Wallet size={16} /> },
         { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
         { id: 'events', label: 'Eventos', icon: <CalendarDays size={16} /> },
         { id: 'standings', label: 'Clasificación', icon: <BarChart3 size={16} /> },
@@ -630,6 +632,7 @@ export default function AdminPage() {
             {activeTab === 'orders' && <PedidosClientesTab reportedBy={cajaReportedBy} />}
             {activeTab === 'cambios' && <CambiosTab reportedBy={cajaReportedBy} />}
             {activeTab === 'cupones' && <CuponesTab />}
+            {activeTab === 'liquidaciones' && <LiquidacionesTab events={events} />}
             {activeTab === 'categories' && <CategoriasTab />}
             {activeTab === 'events' && <EventosTab verInscriptos={(id) => { setInscEventoAtajo(id); irA('inscripciones'); }} />}
             {activeTab === 'clubs' && <ClubesTab />}
@@ -791,7 +794,7 @@ export default function AdminPage() {
 type ItemMenu = { id: string; label: string; icon: ReactNode };
 
 /** Secciones de tablas/listas largas que aprovechan el ancho a partir de 1536px. */
-const SECCIONES_ANCHAS = new Set(['products', 'stock', 'orders', 'caja', 'inscripciones', 'compras', 'socios', 'jugadores']);
+const SECCIONES_ANCHAS = new Set(['products', 'stock', 'orders', 'caja', 'inscripciones', 'compras', 'socios', 'jugadores', 'liquidaciones']);
 
 /**
  * Lista del menú con scroll propio: barra fina oscura (.barra-oscura), degradé arriba/abajo
