@@ -4,6 +4,8 @@
 // propio porcentaje. Lógica pura: la pantalla (admin/tabs/LiquidacionesTab) solo la dibuja.
 
 export const SOCIOS_LIQ = ['Brian', 'Paula', 'Gastón'] as const;
+/** Qué parte de las ganancias de VOLEA es de cada socio (la misma que usa Socios: utils/socios CUOTA). */
+export const CUOTA_SOCIO: Record<(typeof SOCIOS_LIQ)[number], number> = { Brian: 0.5, Paula: 0.25, 'Gastón': 0.25 };
 /** Quién puso la plata de un gasto: la caja de VOLEA, un socio de su bolsillo o el club. */
 export type Pagador = 'volea' | 'club' | (typeof SOCIOS_LIQ)[number];
 
@@ -102,8 +104,8 @@ export type ResultadoLiquidacion = {
   gastosPagadosPor: Record<string, number>;
   /** Gastos que todavía se le deben a un proveedor. */
   aProveedores: { concepto: string; proveedor: string; monto: number }[];
-  /** Cada socio: lo que puso de su bolsillo y lo que le toca (su tercio del neto + lo que puso). */
-  socios: { nombre: string; puso: number; parte: number; recibe: number }[];
+  /** Cada socio: su cuota, lo que puso de su bolsillo y lo que le toca (su cuota del neto + lo que puso). */
+  socios: { nombre: string; cuota: number; puso: number; parte: number; recibe: number }[];
 };
 
 export function calcularLiquidacion(l: LiquidacionTorneo): ResultadoLiquidacion {
@@ -140,11 +142,11 @@ export function calcularLiquidacion(l: LiquidacionTorneo): ResultadoLiquidacion 
   const saldoClub = r2(netoClub + pusoClub - (a.cobro === 'club' ? total : 0));
   // Lo que falta cobrar: si cobra VOLEA, la parte del club de eso todavía no se le debe; si cobra el club, al revés.
   const saldoClubPendiente = r2(a.cobro === 'club' ? -(r2(total - cobrado) - basePendiente * p) : basePendiente * p);
-  const n = SOCIOS_LIQ.length;
   const socios = SOCIOS_LIQ.map((nombre) => {
     const puso = gastosPagadosPor[nombre] ?? 0;
-    const parte = r2(netoVolea / n);
-    return { nombre, puso, parte, recibe: r2(parte + puso) };
+    const cuota = CUOTA_SOCIO[nombre];
+    const parte = r2(netoVolea * cuota);
+    return { nombre, cuota, puso, parte, recibe: r2(parte + puso) };
   });
   return {
     inscriptos: l.inscripciones.length, totalInscripciones: r2(total), cobrado: r2(cobrado), porCobrar: r2(total - cobrado), deudores,

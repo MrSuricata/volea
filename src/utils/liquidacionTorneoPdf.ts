@@ -71,8 +71,8 @@ export function htmlLiquidacion(l: LiquidacionTorneo, para: 'club' | 'interno'):
     </table>
     <h2>Entre socios</h2>
     <table class="angosta">
-      <thead><tr><th>Socio</th><th class="n">Su parte</th><th class="n">Puso de su bolsillo</th><th class="n">Le toca</th></tr></thead>
-      <tbody>${r.socios.map((s) => fila([esc(s.nombre), s.parte, s.puso, s.recibe])).join('')}</tbody>
+      <thead><tr><th>Socio</th><th class="n">Cuota</th><th class="n">Su parte</th><th class="n">Puso de su bolsillo</th><th class="n">Le toca</th></tr></thead>
+      <tbody>${r.socios.map((s) => fila([esc(s.nombre), `${s.cuota * 100} %`, s.parte, s.puso, s.recibe])).join('')}</tbody>
     </table>
     ${r.deudores.length ? `<h2>Falta cobrar</h2><table class="angosta"><tbody>${r.deudores.map((d) => fila([esc(d.nombre), d.debe])).join('')}${fila(['Total', r.porCobrar], 'total')}</tbody></table>` : ''}
     ${r.aProveedores.length ? `<h2>Falta pagar a proveedores</h2><table class="angosta"><tbody>${r.aProveedores.map((p) => fila([`${esc(p.proveedor)} · ${esc(p.concepto)}`, p.monto])).join('')}</tbody></table>` : ''}

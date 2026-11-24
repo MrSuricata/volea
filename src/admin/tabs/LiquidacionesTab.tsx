@@ -406,7 +406,7 @@ function Editor({ fila, alVolver }: { fila: Fila; alVolver: () => void }) {
         </Tarjeta>
         <Tarjeta titulo="Entre socios">
           <Renglones filas={r.socios.flatMap((s): Renglon[] => [
-            [s.puso > 0 ? `${s.nombre} (su parte + ${Math.round(s.puso).toLocaleString('es-UY')} que puso)` : s.nombre, s.recibe, true],
+            [s.puso > 0 ? `${s.nombre} · ${s.cuota * 100} % + ${Math.round(s.puso).toLocaleString('es-UY')} que puso` : `${s.nombre} · ${s.cuota * 100} %`, s.recibe],
           ])} />
           {r.aProveedores.length > 0 && (
             <div className="border-t border-gray-100 px-4 py-3 text-sm md:px-5">

@@ -50,7 +50,9 @@ describe('calcularLiquidacion', () => {
     expect(r.saldoClub).toBe(2134);
     expect(r.saldoClubPendiente).toBe(220);
     expect(r.saldoClubAhora).toBe(1914);
-    expect(r.socios.map((s) => s.parte)).toEqual([1882, 1882, 1882]);
+    // Brian 50 %, Paula 25 %, Gastón 25 %
+    expect(r.socios.map((s) => [s.nombre, s.parte])).toEqual([['Brian', 2823], ['Paula', 1411.5], ['Gastón', 1411.5]]);
+    expect(r.socios.reduce((s, x) => s + x.parte, 0)).toBe(r.netoVolea);
   });
 
   it('un gasto que puso el club se le devuelve en el saldo', () => {
@@ -74,7 +76,7 @@ describe('calcularLiquidacion', () => {
     l.gastos[0] = gasto('medallas', 1, 800, { pagadoPor: 'Brian' });
     l.gastos[3] = gasto('llaveros', 8, 30, { pagado: false, proveedor: 'Imprenta' });
     const r = calcularLiquidacion(l);
-    expect(r.socios.find((s) => s.nombre === 'Brian')).toEqual({ nombre: 'Brian', puso: 800, parte: 1882, recibe: 2682 });
+    expect(r.socios.find((s) => s.nombre === 'Brian')).toEqual({ nombre: 'Brian', cuota: 0.5, puso: 800, parte: 2823, recibe: 3623 });
     expect(r.aProveedores).toEqual([{ concepto: 'llaveros', proveedor: 'Imprenta', monto: 240 }]);
   });
 
