@@ -168,7 +168,7 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
       { header: 'Fecha', width: 17 }, { header: 'Tipo', width: 8 },
       { header: 'Detalle', width: 38 }, { header: 'Variante', width: 18 },
       { header: 'Cant.', width: 7 }, { header: 'Monto ($)', width: 12 },
-      { header: 'Método', width: 14 }, { header: 'Debe / cobrado', width: 22 },
+      { header: 'Método', width: 14 }, { header: 'Quién pagó / debe', width: 26 },
       { header: 'Registró', width: 12 }, { header: 'Pagó (socio)', width: 13 },
       { header: 'Anulado', width: 9 },
       { header: 'Liquidado a socios', width: 15 },
@@ -178,7 +178,7 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
         ? (e.settledAt
           ? `Debía ${e.debtorName || '—'} · cobrado${e.settledMethod ? ` (${METODO_LBL[e.settledMethod]})` : ''}`
           : `Debe ${e.debtorName || '—'}`)
-        : '';
+        : (e.kind === 'venta' && e.debtorName ? `Pagó ${e.debtorName}` : '');
       const row = ws.addRow([
         fmtFechaHora(e.createdAt), e.kind === 'venta' ? 'Venta' : 'Gasto', e.label,
         e.variantKey ? e.variantKey.split('|').filter(Boolean).join(' · ') : '',

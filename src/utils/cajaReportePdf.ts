@@ -107,7 +107,7 @@ ${movimientos.length === 0 ? '<p class="nota">No hay movimientos en estas fechas
 <table>
   <thead><tr><th>Fecha</th><th>Detalle</th><th>Pago</th><th>Registró</th><th class="n">Monto</th></tr></thead>
   <tbody>
-    ${movimientos.map((e) => `<tr class="${e.reverted ? 'anulado' : ''}"><td>${dmy(diaMvd(e.createdAt))} ${hora(e.createdAt)}</td><td>${esc(e.label)}${e.qty > 1 ? ` ×${e.qty}` : ''}${e.variantKey ? ` <small>· ${esc(e.variantKey.split('|').filter(Boolean).join(' · '))}</small>` : ''}${e.reverted ? ' <small>(anulado)</small>' : ''}</td><td>${e.kind === 'venta' ? esc(NOMBRE_METODO[metodoDe(e)]) + (e.paymentMethod === 'debe' && e.debtorName ? ` <small>· ${esc(e.debtorName)}</small>` : '') : e.paidBy ? `pagó ${esc(NOMBRES_TENEDOR[e.paidBy])}` : ''}</td><td>${esc(e.reportedBy)}</td><td class="n">${plata(e.kind === 'venta' ? e.amount : -e.amount)}</td></tr>`).join('')}
+    ${movimientos.map((e) => `<tr class="${e.reverted ? 'anulado' : ''}"><td>${dmy(diaMvd(e.createdAt))} ${hora(e.createdAt)}</td><td>${esc(e.label)}${e.qty > 1 ? ` ×${e.qty}` : ''}${e.variantKey ? ` <small>· ${esc(e.variantKey.split('|').filter(Boolean).join(' · '))}</small>` : ''}${e.reverted ? ' <small>(anulado)</small>' : ''}</td><td>${e.kind === 'venta' ? esc(NOMBRE_METODO[metodoDe(e)]) + (e.debtorName ? ` <small>· ${esc(e.debtorName)}</small>` : '') : e.paidBy ? `pagó ${esc(NOMBRES_TENEDOR[e.paidBy])}` : ''}</td><td>${esc(e.reportedBy)}</td><td class="n">${plata(e.kind === 'venta' ? e.amount : -e.amount)}</td></tr>`).join('')}
   </tbody>
 </table>`}
 </body></html>`;

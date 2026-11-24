@@ -402,7 +402,13 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
       }
       return <Insignia tono={TONO_METODO.debe} punto>Debe {entry.debtorName || '—'}</Insignia>;
     }
-    return <Insignia tono={TONO_METODO[entry.paymentMethod]}>{PAYMENT_LABELS[entry.paymentMethod]}</Insignia>;
+    // El nombre de quién compró / de quién vino la transferencia, cuando se anotó.
+    return (
+      <>
+        <Insignia tono={TONO_METODO[entry.paymentMethod]}>{PAYMENT_LABELS[entry.paymentMethod]}</Insignia>
+        {entry.debtorName && <span className="font-semibold text-navy-700">de {entry.debtorName}</span>}
+      </>
+    );
   };
 
   return (
@@ -1292,14 +1298,14 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
           productId: producto!.id,
           variantKey: variante,
           qty,
-          debtor: metodo === 'debe' ? deudor.trim() : null,
+          debtor: deudor.trim() || null,
           jugadorId: compradorVinculado?.id ?? null,
         }
       : {
           label: nombreSuelto.trim(),
           amount: montoNum,
           payment: metodo,
-          debtor: metodo === 'debe' ? deudor.trim() : null,
+          debtor: deudor.trim() || null,
           jugadorId: compradorVinculado?.id ?? null,
         };
     setRegistrando(true);
@@ -1600,7 +1606,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
           {(metodo !== null || deudor !== '') && (
             <div className="mt-4">
               <label htmlFor="venta-deudor" className={claseRotulo}>
-                {metodo === 'debe' ? '¿Quién debe?' : '¿Quién compró? (opcional)'}
+                {metodo === 'debe' ? '¿Quién debe?' : '¿Quién compró o pagó? (opcional)'}
               </label>
               {deudor.trim() === '' && deudoresAbiertos.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
@@ -1649,7 +1655,7 @@ function VentaModal({ products, registrar, deudoresAbiertos, nombresSugeridos, p
                 <p className="mt-1.5 text-[13px] text-gray-500">
                   {metodo === 'debe'
                     ? 'Elegí un nombre sugerido si ya existe (así la deuda se acumula en la misma persona).'
-                    : 'Si elegís un jugador del padrón, la compra queda en su historial.'}
+                    : 'El nombre queda anotado en el movimiento. Si es un jugador del padrón, además va a su historial.'}
                 </p>
               )}
             </div>
