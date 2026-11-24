@@ -67,11 +67,13 @@ const pct = (n: unknown) => Math.min(100, Math.max(0, num(n)));
 
 /**
  * Parte de una inscripción que se reparte con el club. Si paga el precio completo (o más), la
- * base del acuerdo; si paga menos (cupón, precio especial), en la misma proporción.
+ * base del acuerdo; si paga menos (cupón, precio especial), en la misma proporción. La base puesta
+ * a mano manda y puede pasar lo que pagó: es el caso de un cupón que regaló VOLEA (el club cobra
+ * su parte completa y la diferencia la absorbe VOLEA).
  */
 export function baseDeLinea(l: LineaInscripcion, a: AcuerdoTorneo): number {
   const total = Math.max(0, num(l.total));
-  if (typeof l.base === 'number' && Number.isFinite(l.base)) return Math.min(total, Math.max(0, l.base));
+  if (typeof l.base === 'number' && Number.isFinite(l.base)) return Math.max(0, l.base);
   const precio = num(a.precio);
   const base = Math.max(0, num(a.baseInscripcion));
   if (precio <= 0 || total >= precio) return Math.min(total, base);

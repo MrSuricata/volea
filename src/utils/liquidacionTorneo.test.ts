@@ -15,8 +15,8 @@ const palos = (): LiquidacionTorneo => ({
   inscripciones: [
     ...Array.from({ length: 11 }, (_, i) => linea(`j${i}`, 700, 700)),
     linea('malena', 700, 0),
-    linea('valentina', 300, 300, 300), linea('luis', 300, 300, 300), // sin remera: todo es inscripción
-    linea('federica', 350, 350), linea('gabriela', 350, 350), // cupón 50 %
+    linea('valentina', 300, 300, 0), linea('luis', 300, 300, 0), // son del club: pagan solo la remera
+    linea('federica', 350, 350, 400), linea('gabriela', 350, 350, 400), // cupón 50 % que regaló VOLEA: el club cobra completo
   ],
   gastos: [gasto('medallas', 1, 800), gasto('alfajores', 8, 50), gasto('cervezas', 4, 120), gasto('llaveros', 8, 30)],
 });
@@ -25,9 +25,9 @@ describe('baseDeLinea', () => {
   const a = ACUERDO_DEFECTO;
   it('precio completo: la base del acuerdo', () => expect(baseDeLinea(linea('x', 700, 700), a)).toBe(400));
   it('con descuento: en proporción', () => expect(baseDeLinea(linea('x', 350, 350), a)).toBe(200));
-  it('ajustada a mano manda, sin pasar el total', () => {
-    expect(baseDeLinea(linea('x', 300, 300, 300), a)).toBe(300);
-    expect(baseDeLinea(linea('x', 300, 300, 900), a)).toBe(300);
+  it('ajustada a mano manda, aunque pase lo que pagó (cupón que absorbe VOLEA)', () => {
+    expect(baseDeLinea(linea('x', 300, 300, 0), a)).toBe(0);
+    expect(baseDeLinea(linea('x', 350, 350, 400), a)).toBe(400);
   });
 });
 
@@ -38,20 +38,20 @@ describe('calcularLiquidacion', () => {
     expect(r.totalInscripciones).toBe(9700);
     expect(r.cobrado).toBe(9000);
     expect(r.deudores).toEqual([{ nombre: 'MALENA', debe: 700 }]);
-    expect(r.base).toBe(5800);
-    expect(r.remeras).toBe(3900);
-    expect(r.clubInscripciones).toBe(3190);
+    expect(r.base).toBe(5600);
+    expect(r.remeras).toBe(4100);
+    expect(r.clubInscripciones).toBe(3080);
     expect(r.gastos).toBe(1920);
     expect(r.clubGastos).toBe(1056);
     expect(r.voleaGastos).toBe(864);
-    expect(r.netoClub).toBe(2134);
-    expect(r.netoVolea).toBe(5646);
+    expect(r.netoClub).toBe(2024);
+    expect(r.netoVolea).toBe(5756);
     expect(r.netoClub + r.netoVolea).toBe(r.totalInscripciones - r.gastos);
-    expect(r.saldoClub).toBe(2134);
+    expect(r.saldoClub).toBe(2024);
     expect(r.saldoClubPendiente).toBe(220);
-    expect(r.saldoClubAhora).toBe(1914);
+    expect(r.saldoClubAhora).toBe(1804);
     // Brian 50 %, Paula 25 %, Gastón 25 %
-    expect(r.socios.map((s) => [s.nombre, s.parte])).toEqual([['Brian', 2823], ['Paula', 1411.5], ['Gastón', 1411.5]]);
+    expect(r.socios.map((s) => [s.nombre, s.parte])).toEqual([['Brian', 2878], ['Paula', 1439], ['Gastón', 1439]]);
     expect(r.socios.reduce((s, x) => s + x.parte, 0)).toBe(r.netoVolea);
   });
 
@@ -59,15 +59,15 @@ describe('calcularLiquidacion', () => {
     const l = palos();
     l.gastos[2] = gasto('cervezas', 4, 120, { pagadoPor: 'club' });
     const r = calcularLiquidacion(l);
-    expect(r.netoClub).toBe(2134); // el reparto no cambia
-    expect(r.saldoClub).toBe(2134 + 480);
+    expect(r.netoClub).toBe(2024); // el reparto no cambia
+    expect(r.saldoClub).toBe(2024 + 480);
   });
 
   it('si cobró el club, es el club el que le paga a VOLEA', () => {
     const l = palos();
     l.acuerdo.cobro = 'club';
     const r = calcularLiquidacion(l);
-    expect(r.saldoClub).toBe(2134 - 9700);
+    expect(r.saldoClub).toBe(2024 - 9700);
     expect(r.saldoClub).toBe(-r.netoVolea - r.gastos);
   });
 
@@ -76,7 +76,7 @@ describe('calcularLiquidacion', () => {
     l.gastos[0] = gasto('medallas', 1, 800, { pagadoPor: 'Brian' });
     l.gastos[3] = gasto('llaveros', 8, 30, { pagado: false, proveedor: 'Imprenta' });
     const r = calcularLiquidacion(l);
-    expect(r.socios.find((s) => s.nombre === 'Brian')).toEqual({ nombre: 'Brian', cuota: 0.5, puso: 800, parte: 2823, recibe: 3623 });
+    expect(r.socios.find((s) => s.nombre === 'Brian')).toEqual({ nombre: 'Brian', cuota: 0.5, puso: 800, parte: 2878, recibe: 3678 });
     expect(r.aProveedores).toEqual([{ concepto: 'llaveros', proveedor: 'Imprenta', monto: 240 }]);
   });
 

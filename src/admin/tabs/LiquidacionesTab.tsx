@@ -325,7 +325,7 @@ function Editor({ fila, alVolver }: { fila: Fila; alVolver: () => void }) {
         </div>
         <p className="px-4 pb-4 pt-2 text-xs text-gray-500 md:px-5">
           «Se reparte con el club» vacío = automático: <Plata monto={a.baseInscripcion} /> si paga completo y en proporción si paga menos (cupón).
-          Si alguien no llevó remera, poné ahí todo lo que pagó.
+          Si alguien pagó solo la remera poné 0; si usó un cupón que regaló VOLEA poné la inscripción completa (<Plata monto={a.baseInscripcion} />): el club cobra su parte entera y la diferencia la absorbe VOLEA.
         </p>
       </Tarjeta>
 

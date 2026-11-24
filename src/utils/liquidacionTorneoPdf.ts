@@ -64,7 +64,7 @@ export function htmlLiquidacion(l: LiquidacionTorneo, para: 'club' | 'interno'):
     <table class="angosta">
       <tbody>
         ${fila([`${100 - a.pctClub} % de las inscripciones`, r.base - r.clubInscripciones])}
-        ${fila(['Remeras (todo VOLEA)', r.remeras])}
+        ${fila(['Remeras y resto de la inscripción (todo VOLEA)', r.remeras])}
         ${fila(['Su parte de gastos y premios', -r.voleaGastos])}
         ${fila(['Neto de VOLEA', r.netoVolea], 'total')}
       </tbody>
