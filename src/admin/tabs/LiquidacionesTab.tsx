@@ -92,7 +92,7 @@ export function LiquidacionesTab({ events }: { events: Event[] }) {
   return (
     <div className="space-y-5">
       <EncabezadoPagina
-        rotulo="Torneos"
+        rotulo="Plata"
         titulo="Liquidaciones"
         descripcion="Cuánto le toca al club y cuánto a VOLEA de cada campeonato: inscripciones, gastos y premios con sus porcentajes."
         acciones={<Boton icono={<Plus size={18} />} onClick={() => setCreando(true)} disabled={filas === null}>Nueva liquidación</Boton>}

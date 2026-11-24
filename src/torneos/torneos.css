@@ -311,8 +311,9 @@
 .rk.rk--admin ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 /* ── Páginas públicas (UX): fondo continuo, pestañas, tablas y partidos en celular ── */
-.nav-publica { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--borde, rgba(147,169,196,0.22)); }
-.nav-publica a { padding: 10px 14px; min-height: 40px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: none; color: var(--texto-suave, #93a9c4); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.nav-publica { display: flex; gap: 2px; margin: 0 0 14px; border-bottom: 1px solid var(--borde, rgba(147,169,196,0.22)); overflow-x: auto; scrollbar-width: none; }
+.nav-publica::-webkit-scrollbar { display: none; }
+.nav-publica a { flex: 0 0 auto; white-space: nowrap; padding: 10px 12px; min-height: 40px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: none; color: var(--texto-suave, #93a9c4); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .nav-publica a:hover { color: var(--lima, #ccff00); }
 .nav-publica a.activa { color: var(--lima, #ccff00); border-bottom-color: var(--lima, #ccff00); }
 .rk .chip-filtro { min-height: 40px; max-width: 240px; display: inline-flex; align-items: center; gap: 4px; padding: 8px 14px !important; flex: 0 0 auto; }

@@ -31,6 +31,18 @@ function fechaEscrita(iso: string): string {
 const ChipFase = ({ fase }: { fase: Torneo['fase'] }) => <span className={`chip chip-fase fase-${fase}`}>{ETIQUETA_FASE[fase]}</span>;
 
 /**
+ * Un torneo que nadie cerró en el gestor quedaba «En curso» o «Llave en juego» para siempre
+ * (el Aniversario de octubre seguía así en noviembre). Pasados estos días desde su fecha y
+ * sin partidos en vivo, para el público ya terminó.
+ */
+const DIAS_VIGENTE = 4;
+const yaPaso = (fechaIso: string, ahoraMs: number) => {
+  const t = Date.parse(fechaIso);
+  return !Number.isNaN(t) && ahoraMs - t > DIAS_VIGENTE * 24 * 60 * 60 * 1000;
+};
+const ChipFinalizado = () => <span className="chip chip-fase fase-terminado">Finalizado</span>;
+
+/**
  * Lista pública de torneos agrupada por EVENTO (pedido de Brian): una carta por
  * torneo real (Racket Roll, +50, etc.); entrás y ves sus categorías. Los que no
  * pertenecen a un evento siguen como carta directa. El buscador salta el
@@ -89,7 +101,7 @@ export default function TorneosListaPage() {
         <Link className="titulo-torneo" to={`/torneos/${t.id}`}>
           <strong>{t.nombre}</strong>
           <span className="meta-torneo">
-            <ChipFase fase={t.fase} />
+            {t.fase !== 'terminado' && !enVivo && yaPaso(t.creadoEl, ahoraMs) ? <ChipFinalizado /> : <ChipFase fase={t.fase} />}
             <span>{fechaEscrita(t.creadoEl)}</span>
             <span>{individual ? plural(t.parejas.length, 'jugador', 'jugadores') : plural(t.parejas.length, 'pareja', 'parejas')}</span>
             <span>{ETIQUETA_FORMATO[t.formato ?? 'grupos']}</span>
@@ -110,10 +122,6 @@ export default function TorneosListaPage() {
         <NavPublica activa="torneos" />
         <header className="cabecera">
           <h1><span className="marca">TORNEOS</span> VOLEA</h1>
-          <div className="acciones">
-            <Link className="boton secundario" to="/programacion">Programación</Link>
-            <Link className="boton secundario" to="/ranking">Ver ranking</Link>
-          </div>
         </header>
 
         <input
@@ -157,16 +165,21 @@ export default function TorneosListaPage() {
                 <>
                   <strong>{ev.nombre}</strong>
                   <span className="meta-torneo">
-                    {ev.suelto
-                      ? <ChipFase fase={unico.fase} />
-                      : <span className={`chip chip-fase fase-${ev.terminado ? 'terminado' : ev.enVivo ? 'llave' : 'faseGrupos'}`}>{ev.terminado ? 'Terminado' : ev.enVivo ? 'En juego' : 'En curso'}</span>}
+                    {!ev.terminado && !ev.enVivo && yaPaso(ev.ultimaFecha, ahoraMs)
+                      ? <ChipFinalizado />
+                      : ev.suelto
+                        ? <ChipFase fase={unico.fase} />
+                        : <span className={`chip chip-fase fase-${ev.terminado ? 'terminado' : ev.enVivo ? 'llave' : 'faseGrupos'}`}>{ev.terminado ? 'Terminado' : ev.enVivo ? 'En juego' : 'En curso'}</span>}
                     <span>{fechaEscrita(ev.ultimaFecha)}</span>
                     {ev.suelto
                       ? <span>{individualUnico ? plural(unico.parejas.length, 'jugador', 'jugadores') : plural(unico.parejas.length, 'pareja', 'parejas')}</span>
                       : <>
                         <span>{plural(ev.torneos.length, 'categoría', 'categorías')}</span>
-                        {jugadores > 0 && <span>{plural(jugadores, 'jugador', 'jugadores')}</span>}
-                        <span>{plural(equipos, 'equipo/pareja', 'equipos/parejas')}</span>
+                        {/* Un solo número de gente: jugadores si están vinculados al padrón; si no, equipos.
+                            Mostrar los dos daba cosas como «1 jugador · 4 equipos/parejas». */}
+                        {jugadores >= equipos
+                          ? <span>{plural(jugadores, 'jugador', 'jugadores')}</span>
+                          : <span>{plural(equipos, 'equipo o pareja', 'equipos y parejas')}</span>}
                       </>}
                   </span>
                 </>

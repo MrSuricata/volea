@@ -832,10 +832,12 @@ function Navbar() {
     // 'Clasificación' (Camino al Mundial) fuera del menú por pedido de Brian (2026-08-05,
     // "quitalo por ahora"): la ruta /clasificacion y la pestaña del admin siguen vivas;
     // para volverla a mostrar alcanza con re-agregar la entrada acá y MOSTRAR_CAMINO_MUNDIAL.
-    { to: '/ranking', label: 'Ranking' },
+    // Reordenado 24/11 (pedido de Brian: "están entreveradas algunas cosas"): Ranking y Eventos
+    // ya no son entradas sueltas. Todo lo de competencia entra por «Torneos», que adentro tiene
+    // las pestañas Torneos · Agenda · En vivo · Ranking (NavPublica y PestanasTorneosClaras).
+    // Las rutas /ranking y /eventos siguen vivas (links compartidos, pie de página).
     { to: '/galeria', label: 'Galería' },
-    { to: '/eventos', label: 'Eventos' },
-    { to: '/mapa', label: 'Mapa' },
+    { to: '/mapa', label: 'Dónde jugar' },
     { to: '/contacto', label: 'Contacto' },
   ];
 
@@ -2662,6 +2664,34 @@ function ProductDetailPage() {
 
 // ─── 10. EventsPage ──────────────────────────────────────────────────────────
 
+/**
+ * Las mismas pestañas que las páginas de torneos (torneos/publico/NavPublica), en su versión
+ * clara para la Agenda. Van acá y no importando NavPublica para no meter torneos.css en el
+ * JS de la tienda.
+ */
+function PestanasTorneosClaras() {
+  const pestanas = [
+    { to: '/torneos', texto: 'Torneos' },
+    { to: '/eventos', texto: 'Agenda' },
+    { to: '/programacion', texto: 'En vivo' },
+    { to: '/ranking', texto: 'Ranking' },
+  ];
+  return (
+    <nav aria-label="Torneos" className="sin-barra -mx-4 mb-8 flex gap-1 overflow-x-auto border-b border-gray-200 px-4">
+      {pestanas.map(p => (
+        <Link
+          key={p.to}
+          to={p.to}
+          aria-current={p.to === '/eventos' ? 'page' : undefined}
+          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 font-display text-[13px] font-bold uppercase tracking-wider ${p.to === '/eventos' ? 'border-navy-700 text-navy-700' : 'border-transparent text-gray-500 hover:text-navy-700'}`}
+        >
+          {p.texto}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 function EventsPage() {
   const { events, datosListos } = useStore();
   const [filter, setFilter] = useState<string>('all');
@@ -2692,8 +2722,9 @@ function EventsPage() {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-12">
+      <PestanasTorneosClaras />
       <p className="eyebrow-pagina">Agenda VOLEA</p>
-      <h1 className="titulo-pagina mt-2 mb-8">Eventos y torneos</h1>
+      <h1 className="titulo-pagina mt-2 mb-8">Próximos eventos</h1>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-10">
@@ -4307,9 +4338,9 @@ function Footer() {
                 { to: '/tienda', label: 'Tienda' },
                 { to: '/torneos', label: 'Torneos' },
                 { to: '/ranking', label: 'Ranking' },
-                { to: '/eventos', label: 'Eventos' },
+                { to: '/eventos', label: 'Agenda e inscripciones' },
                 { to: '/blog', label: 'Blog' },
-                { to: '/mapa', label: 'Mapa' },
+                { to: '/mapa', label: 'Dónde jugar' },
                 { to: '/contacto', label: 'Contacto' },
               ].map(link => (
                 <li key={link.to}>

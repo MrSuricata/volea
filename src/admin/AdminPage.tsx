@@ -29,6 +29,7 @@ import { PedidosClientesTab } from './tabs/PedidosClientesTab';
 import { CambiosTab } from './tabs/CambiosTab';
 import { CuponesTab } from './tabs/CuponesTab';
 import { LiquidacionesTab } from './tabs/LiquidacionesTab';
+import { PlataResumenTab } from './tabs/PlataResumenTab';
 import { AnunciosTab, CategoriasTab, ClubesTab, EventosTab } from './tabs/CatalogoWebTabs';
 
 // Gestor de torneos: ~42 KB gzip que solo usa el admin. Lazy para que la tienda publica
@@ -394,18 +395,23 @@ export default function AdminPage() {
     {
       id: 'g-torneos', label: 'Torneos', icon: <Trophy size={18} />,
       items: [
-        { id: 'torneos', label: 'Gestor de torneos', icon: <Trophy size={16} /> },
-        { id: 'tanteador', label: 'Tanteador', icon: <Swords size={16} /> },
-        { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
-        { id: 'liquidaciones', label: 'Liquidaciones', icon: <Wallet size={16} /> },
-        { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
+        // En el orden en que se arma un campeonato: se crea el evento, se anotan, se arman
+        // los cuadros y se juega. La liquidación es plata: va en «Plata».
         { id: 'events', label: 'Eventos', icon: <CalendarDays size={16} /> },
+        { id: 'inscripciones', label: 'Inscripciones', icon: <ClipboardList size={16} /> },
+        { id: 'torneos', label: 'Cuadros y resultados', icon: <Trophy size={16} /> },
+        { id: 'tanteador', label: 'Tanteador', icon: <Swords size={16} /> },
+        { id: 'jugadores', label: 'Jugadores', icon: <UserRound size={16} /> },
         { id: 'standings', label: 'Clasificación', icon: <BarChart3 size={16} /> },
       ],
     },
     {
       id: 'g-plata', label: 'Plata', icon: <Landmark size={18} />,
-      items: [{ id: 'socios', label: 'Socios', icon: <Users size={16} /> }],
+      items: [
+        { id: 'plata', label: 'Resumen', icon: <Landmark size={16} /> },
+        { id: 'socios', label: 'Cuentas entre socios', icon: <Users size={16} /> },
+        { id: 'liquidaciones', label: 'Liquidar torneos', icon: <Wallet size={16} /> },
+      ],
     },
     {
       id: 'g-web', label: 'Web', icon: <Globe size={18} />,
@@ -633,6 +639,14 @@ export default function AdminPage() {
             {activeTab === 'cambios' && <CambiosTab reportedBy={cajaReportedBy} />}
             {activeTab === 'cupones' && <CuponesTab />}
             {activeTab === 'liquidaciones' && <LiquidacionesTab events={events} />}
+            {activeTab === 'plata' && (
+              <PlataResumenTab
+                irA={irA}
+                loadLedgerFull={loadLedgerFull}
+                loadGastosPendientes={SupabaseService.getGastosPendientes}
+                loadSocioMoves={SupabaseService.getSocioMoves}
+              />
+            )}
             {activeTab === 'categories' && <CategoriasTab />}
             {activeTab === 'events' && <EventosTab verInscriptos={(id) => { setInscEventoAtajo(id); irA('inscripciones'); }} />}
             {activeTab === 'clubs' && <ClubesTab />}
@@ -794,7 +808,7 @@ export default function AdminPage() {
 type ItemMenu = { id: string; label: string; icon: ReactNode };
 
 /** Secciones de tablas/listas largas que aprovechan el ancho a partir de 1536px. */
-const SECCIONES_ANCHAS = new Set(['products', 'stock', 'orders', 'caja', 'inscripciones', 'compras', 'socios', 'jugadores', 'liquidaciones']);
+const SECCIONES_ANCHAS = new Set(['products', 'stock', 'orders', 'caja', 'inscripciones', 'compras', 'socios', 'jugadores', 'liquidaciones', 'plata']);
 
 /**
  * Lista del menú con scroll propio: barra fina oscura (.barra-oscura), degradé arriba/abajo
