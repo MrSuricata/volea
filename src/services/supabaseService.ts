@@ -265,14 +265,24 @@ export const SupabaseService = {
     if (!session) return null;
     // Reintento único como las lecturas públicas: el primer intento tras abrir
     // la pestaña a veces muere con la conexión trabada y el segundo anda.
-    const { data, error } = await conReintento(
-      () => conTechoLectura(supabase!.from('bot_ledger').select('*')
-        .order('created_at', { ascending: false })
-        .limit(limit)),
-      r => !!r.error,
-    );
-    if (error) { console.error('Error fetching ledger:', error); return null; }
-    return (data || []).map(row => ({
+    // La API devuelve como mucho 1000 filas por pedido: lo que pase de ahí se trae de a
+    // tandas (el reporte por fechas y el Excel necesitan el historial entero).
+    const TANDA = 1000;
+    const data: Record<string, any>[] = [];
+    for (let desde = 0; desde < limit; desde += TANDA) {
+      const hasta = Math.min(desde + TANDA, limit) - 1;
+      const { data: filas, error } = await conReintento(
+        () => conTechoLectura(supabase!.from('bot_ledger').select('*')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(desde, hasta)),
+        r => !!r.error,
+      );
+      if (error) { console.error('Error fetching ledger:', error); return null; }
+      data.push(...(filas || []));
+      if (!filas || filas.length < hasta - desde + 1) break;
+    }
+    return data.map(row => ({
       id: row.id,
       kind: row.kind === 'gasto' ? 'gasto' as const : 'venta' as const,
       productId: row.product_id ?? null,

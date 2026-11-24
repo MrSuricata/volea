@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, FileDown, Plus, Minus, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil, Check, RotateCcw } from 'lucide-react';
+import { Wallet, RefreshCw, TrendingUp, TrendingDown, Scale, Undo2, FileDown, FileText, Plus, Minus, Search, Shirt, Trash2, CalendarClock, AlertTriangle, Pencil, Check, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LedgerEntry, Product, SocioMove, SocioName, Tenedor, VentaCajaInput, GastoPendiente, GastoPendienteInput } from '../types';
 import { NOMBRES_TENEDOR, TENEDORES } from '../utils/socios';
 import { exportCajaExcel } from '../utils/cajaExcel';
+import { abrirReporteCaja } from '../utils/cajaReportePdf';
+import { diaMvd, enRango, estadisticasCaja, mesAnterior, rangoAnterior, rangoDePeriodo, sumarDias, textoRango, type PeriodoCaja } from '../utils/cajaReporte';
+import { CajaEstadisticas } from '../admin/tabs/CajaEstadisticas';
 import { fechaHumana } from '../utils/fechas';
 import { formatVariant, normalizarVentasRapidas, resumenCarrito, stockTotal, variantesConStock, VENTAS_RAPIDAS } from '../utils/caja';
 import EditorVentasRapidas from './EditorVentasRapidas';
@@ -75,15 +78,22 @@ const ICONO_VENC: Record<EstadoVenc, string> = {
   sinFecha: 'bg-gray-100 text-gray-500',
 };
 
-type PeriodFilter = 'hoy' | '7d' | '30d' | 'todo';
+type PeriodFilter = PeriodoCaja;
 type KindFilter = 'todos' | 'venta' | 'gasto';
 
 const PERIODS: { valor: PeriodFilter; texto: string }[] = [
   { valor: 'hoy', texto: 'Hoy' },
   { valor: '7d', texto: '7 días' },
   { valor: '30d', texto: '30 días' },
+  { valor: 'mes', texto: 'Este mes' },
   { valor: 'todo', texto: 'Todo' },
+  { valor: 'rango', texto: 'Elegir fechas' },
 ];
+
+/** Cuántos movimientos se muestran de entrada en la lista (el resto, con «Ver más»). */
+const TANDA_LISTA = 200;
+/** Tope de lo que se trae para los períodos largos y los reportes. */
+const TOPE_HISTORIAL = 5000;
 
 const KINDS: { id: KindFilter; label: string }[] = [
   { id: 'todos', label: 'Todos' },
@@ -152,6 +162,15 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   // jornada; la semana queda a un toque.
   const [period, setPeriod] = useState<PeriodFilter>('hoy');
   const [kind, setKind] = useState<KindFilter>('todos');
+  // Fechas a mano (período «Elegir fechas»), en YYYY-MM-DD como las da el input.
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const [vista, setVista] = useState<'movs' | 'stats'>('movs');
+  const [verHasta, setVerHasta] = useState(TANDA_LISTA);
+  // «Hoy» y «7 días» alcanzan con los últimos 500; lo demás necesita el historial entero.
+  const amplio = period !== 'hoy' && period !== '7d';
+  const hoyMvd = dayInMontevideo(new Date());
+  const rango = useMemo(() => rangoDePeriodo(period, hoyMvd, desde, hasta), [period, hoyMvd, desde, hasta]);
   // Buscador de movimientos (pedido de Brian): matchea etiqueta, deudor, quién
   // lo registró y la variante, sin tildes. No toca los totales de arriba.
   const [buscarMov, setBuscarMov] = useState('');
@@ -189,7 +208,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     setLoading(true);
     // Los pendientes viajan con la caja: casi todo lo que los cambia (pagar un
     // gasto) toca las dos cosas, y separar los fetches deja la pantalla incoherente.
-    const [data, pend] = await Promise.all([loadLedger(), loadGastosPendientes()]);
+    const [data, pend] = await Promise.all([amplio ? loadLedgerFull() : loadLedger(), loadGastosPendientes()]);
     if (seq !== fetchSeq.current) return; // llegó tarde: ya hay un fetch más nuevo
     // null = falló la lectura: se deja la lista anterior en vez de vaciarla, que
     // sería decir "no hay nada que pagar" sin saberlo.
@@ -203,9 +222,21 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
     }
     setLoading(false);
     setCargandoInicial(false);
-  }, [loadLedger, loadGastosPendientes]);
+  }, [loadLedger, loadLedgerFull, loadGastosPendientes, amplio]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const elegirPeriodo = (p: PeriodFilter) => {
+    // Al pasar a «Elegir fechas» se arranca con lo que se estaba mirando (o el mes en curso).
+    if (p === 'rango' && !desde && !hasta) {
+      const actual = rangoDePeriodo(period === 'todo' || period === 'hoy' ? 'mes' : period, hoyMvd);
+      setDesde(actual.desde ?? ''); setHasta(actual.hasta ?? hoyMvd);
+    }
+    setPeriod(p);
+    setVerHasta(TANDA_LISTA);
+  };
+
+  const ponerFechas = (d: string, h: string) => { setDesde(d); setHasta(h); setVerHasta(TANDA_LISTA); };
 
   const handleExport = async () => {
     if (exporting) return;
@@ -228,8 +259,6 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
   };
 
   const filtered = useMemo(() => {
-    const now = new Date();
-    const todayMvd = dayInMontevideo(now);
     const q = normalizar(buscarMov.trim());
     return entries.filter(e => {
       if (kind !== 'todos' && e.kind !== kind) return false;
@@ -237,39 +266,46 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         const texto = `${e.label} ${e.debtorName ?? ''} ${e.reportedBy ?? ''} ${e.variantKey ? formatVariant(e.variantKey) : ''}`;
         if (!normalizar(texto).includes(q)) return false;
       }
-      if (period === 'todo') return true;
-      const created = new Date(e.createdAt);
-      if (isNaN(created.getTime())) return true;
-      if (period === 'hoy') return dayInMontevideo(created) === todayMvd;
-      const days = period === '7d' ? 7 : 30;
-      return now.getTime() - created.getTime() <= days * 24 * 60 * 60 * 1000;
+      return enRango(e.createdAt, rango);
     });
-  }, [entries, period, kind, buscarMov]);
+  }, [entries, rango, kind, buscarMov]);
 
-  // Totales del período (ignoran el filtro de tipo para que el balance siempre cierre)
-  const totals = useMemo(() => {
-    const now = new Date();
-    const todayMvd = dayInMontevideo(now);
-    let ventas = 0, gastos = 0, count = 0, countVentas = 0, countGastos = 0;
-    for (const e of entries) {
-      if (e.reverted) continue;
-      if (period !== 'todo') {
-        const created = new Date(e.createdAt);
-        if (!isNaN(created.getTime())) {
-          if (period === 'hoy') {
-            if (dayInMontevideo(created) !== todayMvd) continue;
-          } else {
-            const days = period === '7d' ? 7 : 30;
-            if (now.getTime() - created.getTime() > days * 24 * 60 * 60 * 1000) continue;
-          }
-        }
-      }
-      count++;
-      if (e.kind === 'venta') { ventas += e.amount; countVentas++; }
-      else { gastos += e.amount; countGastos++; }
+  // Números del período (ignoran el filtro de tipo y el buscador, así el balance siempre cierra).
+  const stats = useMemo(() => estadisticasCaja(entries, rango), [entries, rango]);
+  const totals = { ventas: stats.ventas, gastos: stats.gastos, balance: stats.balance, count: stats.nVentas + stats.nGastos, countVentas: stats.nVentas, countGastos: stats.nGastos };
+
+  // El tramo del mismo largo justo antes, para comparar. Solo si lo cargado llega hasta ahí:
+  // comparar contra un período traído a medias mostraría una suba que no existe.
+  const previo = useMemo(() => {
+    const r = rangoAnterior(rango);
+    if (!r || !r.desde) return null;
+    const tope = amplio ? TOPE_HISTORIAL : 500;
+    const masViejo = entries.length > 0 ? diaMvd(entries[entries.length - 1].createdAt) : '';
+    if (entries.length >= tope && masViejo >= r.desde) return null;
+    return { stats: estadisticasCaja(entries, r), texto: textoRango(r) };
+  }, [entries, rango, amplio]);
+
+  /** Excel o PDF de lo que se está mirando. Sin await antes de abrir el PDF: si no, el navegador bloquea la pestaña. */
+  const reportePeriodo = async (formato: 'excel' | 'pdf') => {
+    if (loading) { toast.info('Esperá a que termine de cargar.'); return; }
+    const delPeriodo = entries.filter(e => enRango(e.createdAt, rango));
+    if (delPeriodo.length === 0) { toast.info('No hay movimientos en estas fechas.'); return; }
+    if (formato === 'pdf') {
+      if (!abrirReporteCaja(entries, rango, previo?.stats ?? null)) toast.error('El navegador bloqueó la pestaña nueva. Permitila y probá de nuevo.');
+      return;
     }
-    return { ventas, gastos, balance: ventas - gastos, count, countVentas, countGastos };
-  }, [entries, period]);
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await exportCajaExcel(delPeriodo, null, rango);
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error('Error exportando el período:', err);
+      toast.error('No se pudo generar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Deudas abiertas (sobre todo lo cargado, sin filtro de período), agrupadas por deudor
   const porCobrar = useMemo(() => {
@@ -350,7 +386,8 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
 
   const ahoraMs = Date.now();
   const hayBusqueda = buscarMov.trim() !== '';
-  const textoPeriodo = period === 'hoy' ? 'hoy' : period === 'todo' ? 'en total' : `en ${period === '7d' ? '7' : '30'} días`;
+  const textoPeriodo = period === 'hoy' ? 'hoy' : period === 'todo' ? 'en total' : period === 'mes' ? 'este mes' : period === 'rango' ? 'en esas fechas' : `en ${period === '7d' ? '7' : '30'} días`;
+  const visibles = filtered.slice(0, verHasta);
 
   /** Insignia/texto de método de pago para la línea de meta (null en gastos). */
   const metodoPago = (entry: LedgerEntry) => {
@@ -384,7 +421,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
               Por pagar
             </Boton>
             <BotonIcono
-              etiqueta={exporting ? 'Generando el Excel…' : 'Descargar Excel'}
+              etiqueta={exporting ? 'Generando el Excel…' : 'Descargar Excel de todo el historial'}
               icono={exporting ? <RefreshCw size={18} className="animate-spin" /> : <FileDown size={18} />}
               onClick={handleExport}
               disabled={exporting || loading}
@@ -425,9 +462,41 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
         etiqueta="Período de los totales y la lista"
         opciones={PERIODS}
         valor={period}
-        alCambiar={setPeriod}
-        className="mb-4"
+        alCambiar={elegirPeriodo}
+        className="mb-3"
       />
+
+      {period === 'rango' && (
+        <div className="mb-3 flex flex-wrap items-end gap-3">
+          <Campo etiqueta="Desde" className="w-[calc(50%-0.375rem)] sm:w-44">
+            <Entrada type="date" value={desde} max={hasta || undefined} onChange={e => ponerFechas(e.target.value, hasta)} />
+          </Campo>
+          <Campo etiqueta="Hasta" className="w-[calc(50%-0.375rem)] sm:w-44">
+            <Entrada type="date" value={hasta} min={desde || undefined} onChange={e => ponerFechas(desde, e.target.value)} />
+          </Campo>
+          <div className="flex flex-wrap gap-2">
+            <Chip activo={false} onClick={() => { const m = mesAnterior(hoyMvd); ponerFechas(m.desde, m.hasta); }}>Mes pasado</Chip>
+            <Chip activo={false} onClick={() => ponerFechas(sumarDias(hoyMvd, -89), hoyMvd)}>Últimos 90 días</Chip>
+            <Chip activo={false} onClick={() => ponerFechas(`${hoyMvd.slice(0, 4)}-01-01`, hoyMvd)}>Este año</Chip>
+          </div>
+        </div>
+      )}
+
+      {/* Qué se está mirando + el reporte de eso mismo */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="text-sm text-gray-600">
+          Mostrando <b className="text-navy-700">{textoRango(rango)}</b>
+          {loading && !cargandoInicial && <RefreshCw size={13} className="ml-2 inline animate-spin text-gray-400" aria-label="Actualizando" />}
+        </p>
+        <div className="flex gap-2">
+          <Boton variante="secundario" icono={<FileDown size={16} />} onClick={() => void reportePeriodo('excel')} disabled={exporting || cargandoInicial}>
+            Excel
+          </Boton>
+          <Boton variante="secundario" icono={<FileText size={16} />} onClick={() => void reportePeriodo('pdf')} disabled={cargandoInicial}>
+            PDF
+          </Boton>
+        </div>
+      </div>
 
       {cargandoInicial || (loadFailed && loading) ? (
         <CargandoFilas filas={5} />
@@ -474,6 +543,19 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
             />
           </div>
 
+          <Segmentado
+            etiqueta="Qué ver del período"
+            opciones={[{ valor: 'movs' as const, texto: 'Movimientos' }, { valor: 'stats' as const, texto: 'Estadísticas' }]}
+            valor={vista}
+            alCambiar={setVista}
+            className="mb-6"
+          />
+
+          {vista === 'stats' && (
+            <CajaEstadisticas s={stats} anterior={previo?.stats ?? null} textoAnterior={previo?.texto ?? null} />
+          )}
+
+          {vista === 'movs' && (<>
           {/* Por pagar: lo que ya sabemos que hay que pagar y todavía no salió */}
           {porPagar.abiertos.length > 0 && (
             <div className="mb-6">
@@ -598,7 +680,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                   ? 'Probá con otra palabra o ampliá el período.'
                   : 'Registrá una con «Nueva venta» o desde el bot de Telegram.'}
                 accion={period !== 'todo' ? (
-                  <Boton variante="secundario" onClick={() => setPeriod(period === 'hoy' ? '7d' : 'todo')}>
+                  <Boton variante="secundario" onClick={() => elegirPeriodo(period === 'hoy' ? '7d' : 'todo')}>
                     {period === 'hoy' ? 'Ver los últimos 7 días' : 'Ver todo'}
                   </Boton>
                 ) : undefined}
@@ -611,7 +693,7 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
               acciones={loading ? <RefreshCw size={15} className="animate-spin text-gray-400" aria-label="Actualizando" /> : undefined}
             >
               <ul className="divide-y divide-gray-100">
-                {filtered.map(entry => {
+                {visibles.map(entry => {
                   const esVenta = entry.kind === 'venta';
                   return (
                     <li key={entry.id} className={cn('flex items-start gap-3 py-3 pl-4 pr-2', entry.reverted && 'opacity-50')}>
@@ -664,11 +746,19 @@ export function AdminCajaTab({ loadLedger, loadLedgerFull, revertEntry, loadSoci
                   );
                 })}
               </ul>
+              {filtered.length > visibles.length && (
+                <div className="border-t border-gray-100 p-3 text-center">
+                  <Boton variante="secundario" onClick={() => setVerHasta(verHasta + TANDA_LISTA)}>
+                    Ver más ({filtered.length - visibles.length} restantes)
+                  </Boton>
+                </div>
+              )}
             </Tarjeta>
           )}
-          {entries.length >= 500 && (
+          </>)}
+          {amplio && entries.length >= TOPE_HISTORIAL && (
             <p className="mt-3 text-xs text-gray-500">
-              Se muestran los últimos 500 movimientos: los totales de «Todo» pueden no incluir los más viejos.
+              Se traen los últimos {TOPE_HISTORIAL} movimientos: los períodos muy viejos pueden quedar incompletos.
             </p>
           )}
         </>

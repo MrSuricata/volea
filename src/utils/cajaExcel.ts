@@ -1,5 +1,6 @@
 import type { LedgerEntry, SocioMove, SocioName } from '../types';
 import { esCuotaFutura, NOMBRES_SOCIOS, ventasBrutasSocios, NOMBRES_TENEDOR } from './socios';
+import { estadisticasCaja, NOMBRE_METODO, textoRango, type RangoDias } from './cajaReporte';
 
 const TZ = 'America/Montevideo';
 const NAVY = 'FF1F3557';
@@ -67,7 +68,7 @@ function baseFont(ws: Sheet) {
  * Genera y descarga el reporte Excel de la Caja: movimientos del bot con quién
  * los registró, gastos y ventas por persona, y las cuentas entre socios.
  */
-export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[] | null): Promise<void> {
+export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[] | null, rango?: RangoDias): Promise<void> {
   const ExcelJS = await import('exceljs').then(m => (m as { default?: typeof import('exceljs') }).default ?? m);
   const wb = new ExcelJS.Workbook();
   wb.creator = 'VOLEA Admin';
@@ -78,7 +79,7 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
   {
     const ws = wb.addWorksheet('Resumen');
     ws.columns = [{ width: 30 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 40 }];
-    const title = ws.addRow([`CAJA VOLEA — reporte generado el ${fmtFechaHora(hoy.toISOString())}`]);
+    const title = ws.addRow([`CAJA VOLEA — ${rango ? `${textoRango(rango)} — ` : ''}reporte generado el ${fmtFechaHora(hoy.toISOString())}`]);
     title.getCell(1).font = { name: 'Arial', size: 14, bold: true, color: { argb: NAVY } };
     ws.addRow([]);
 
@@ -256,6 +257,57 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
     baseFont(ws);
   }
 
+  // ── Estadísticas del período (solo cuando el reporte es por fechas) ───────
+  if (rango) {
+    const st = estadisticasCaja(entries, rango);
+    const gris = (row: import('exceljs').Row) => row.eachCell(c => { c.font = { name: 'Arial', size: 10, bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } }; });
+    {
+      const ws = wb.addWorksheet('Por día');
+      const rotulo = st.granularidad === 'dia' ? 'Día' : st.granularidad === 'semana' ? 'Semana del' : 'Mes';
+      ws.columns = [{ header: rotulo, width: 14 }, { header: 'Ventas ($)', width: 14 }, { header: 'Gastos ($)', width: 14 }, { header: 'Balance ($)', width: 14 }];
+      for (const t of st.serie) {
+        const row = ws.addRow([t.etiqueta, t.ventas, t.gastos, t.ventas - t.gastos]);
+        for (let i = 2; i <= 4; i++) row.getCell(i).numFmt = MONEY;
+      }
+      const tot = ws.addRow(['TOTAL', st.ventas, st.gastos, st.balance]);
+      gris(tot);
+      for (let i = 2; i <= 4; i++) tot.getCell(i).numFmt = MONEY;
+      styleHeader(ws);
+      baseFont(ws);
+    }
+    {
+      const ws = wb.addWorksheet('Lo más vendido');
+      ws.columns = [{ header: 'Producto', width: 40 }, { header: 'Tipo', width: 12 }, { header: 'Unidades', width: 10 }, { header: 'Ventas', width: 9 }, { header: 'Monto ($)', width: 14 }];
+      for (const p of st.productos) ws.addRow([p.nombre, p.catalogo ? 'Catálogo' : 'Suelto', p.unidades, p.n, p.monto]).getCell(5).numFmt = MONEY;
+      const tot = ws.addRow(['TOTAL', '', '', st.nVentas, st.ventas]);
+      gris(tot);
+      tot.getCell(5).numFmt = MONEY;
+      styleHeader(ws);
+      baseFont(ws);
+    }
+    {
+      const ws = wb.addWorksheet('Resumen del período');
+      ws.columns = [{ width: 34 }, { width: 12 }, { width: 16 }];
+      const bloque = (titulo: string, filas: (string | number)[][]) => {
+        gris(ws.addRow([titulo, 'Cantidad', 'Monto ($)']));
+        for (const f of filas) ws.addRow(f).getCell(3).numFmt = MONEY;
+        ws.addRow([]);
+      };
+      bloque('Cómo pagaron', st.porMetodo.map(m => [NOMBRE_METODO[m.metodo], m.n, m.monto]));
+      bloque('Qué se vendió', [['Productos del catálogo', st.catalogo.n, st.catalogo.monto], ['Ítems sueltos', st.sueltos.n, st.sueltos.monto]]);
+      bloque('En qué se gastó', st.gastosPorConcepto.map(g => [g.nombre, g.n, g.monto]));
+      bloque('Gastos: quién puso la plata', st.gastosPorPagador.map(g => [g.quien ? NOMBRES_TENEDOR[g.quien] : 'Sin anotar', g.n, g.monto]));
+      bloque('Ventas por día de la semana', st.porDiaSemana.map(d => [d.nombre, d.n, d.ventas]));
+      bloque('Otros números', [
+        ['Ticket promedio', st.nVentas, st.ticketPromedio],
+        ['Ventas por día', st.dias, st.ventasPorDia],
+        ['Sin liquidar a socios (ventas − gastos)', st.sinLiquidar.n, st.sinLiquidar.ventas - st.sinLiquidar.gastos],
+        ['Anulados (no cuentan)', st.anulados.n, st.anulados.monto],
+      ]);
+      baseFont(ws);
+    }
+  }
+
   // ── Cuentas socios ───────────────────────────────────────────────────────
   if (socios && socios.length > 0) {
     const ws = wb.addWorksheet('Cuentas socios', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -289,7 +341,9 @@ export async function exportCajaExcel(entries: LedgerEntry[], socios: SocioMove[
   const mo = String(hoy.getMonth() + 1).padStart(2, '0');
   const d = String(hoy.getDate()).padStart(2, '0');
   a.href = url;
-  a.download = `caja-volea-${y}-${mo}-${d}.xlsx`;
+  a.download = rango && (rango.desde || rango.hasta)
+    ? `caja-volea-${rango.desde ?? 'inicio'}-a-${rango.hasta ?? `${y}-${mo}-${d}`}.xlsx`
+    : `caja-volea-${y}-${mo}-${d}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
